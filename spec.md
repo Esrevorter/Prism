@@ -3,8 +3,8 @@
 **Project:** Prism
 **Ticker:** PRSM
 **Tagline:** "Clarity on your terms"
-**Document Version:** 0.9 (Draft for review)
-**Status:** Pre-implementation. Sections marked ❓ depend on answers to the Clarifying Questions in §14.
+**Document Version:** 1.0 (Finalized — decision log in §14)
+**Status:** Implementation-ready. All blocking questions resolved by founder decisions D1–D5 (2026-10-08); remaining items tracked as research areas (§15C), not blockers.
 
 ---
 
@@ -23,7 +23,7 @@
 11. Edge Cases, Threat Model & Failure Modes
 12. Regulatory & Compliance Posture
 13. Development Roadmap & Milestones
-14. Open Questions / Clarifications Needed
+14. Decision Log (v1.0 resolutions)
 15. Appendices (Glossary, Reference Parameters)
 
 ---
@@ -101,12 +101,12 @@ Prism is a privacy-first, AI-native Layer-1 cryptocurrency that combines:
 | Parameter | Value | Notes |
 |---|---|---|
 | Ticker | PRSM | Display unit: PRSM; base unit: "shard" = 1e-8 PRSM (8 decimals) |
-| Max supply | 21,000,000 PRSM | Hard cap, Bitcoin-style scarcity |
-| Emission | Tail-emission model ❓ | Option A: halving every 2 years until ~block 2M, then constant tail (≈0.6%/yr) to incentivize post-cap security. Option B: pure capped with fee-only security after cap. **Needs decision (§14 Q1).** |
+| Max supply | 21,000,000 PRSM | Hard cap reached via emission curve; **tail emission thereafter (Decision D1)** |
+| Emission | Halving curve + permanent tail (**D1: Option A**) | Block reward halves every 2 years (~787,750 blocks at 120 s) until the 21M cap is approached, then a constant tail of ≈0.6% annual inflation continues indefinitely. Rationale: guarantees miner incentives after cap so long-run security never depends on fees alone (Monero precedent). The tail rate is consensus-fixed and non-discretionary. |
 | Block time | 120 seconds | Adaptive difficulty retargets over a 60-block window |
 | Block size | Dynamic, soft target 2–4 MB | Median-last-10 scaling; oversized blocks pay penalty fee |
 | Locking / spend maturity | 10 blocks (≈20 min) | Incoming funds require 10 confirmations before spending (RingCT decoy integrity) |
-| Pre-mine | None ❓ | Assumed none; team allocation via public vesting from future emission? **Needs decision.** |
+| Pre-mine | **None (D1)** | Zero premine. Team/foundation funding comes exclusively from a transparent dev-fund carve-out of *future emission* (a fixed small % of each block reward, released against milestone vesting on-chain — no genesis allocation to anyone). |
 
 ### 4.2 Consensus
 - **RandomX** proof-of-work (ASIC resistance, CPU-friendliness) with Prism-specific tweaks:
@@ -125,7 +125,7 @@ Prism is a privacy-first, AI-native Layer-1 cryptocurrency that combines:
 ## 5. Privacy Model & The Prism Protocol (Selective Disclosure)
 
 ### 5.1 Baseline Privacy (always on)
-- **Amounts:** Pedersen commitments `C = v·H + r·G` with 64-bit range proofs (bulletproofs+) — *note: exact proving system is an open research item (§14 Q2).*
+- **Amounts:** Pedersen commitments `C = v·H + r·G` with 64-bit range proofs (Bulletproofs+) — *note: the amount/range layer deliberately stays SNARK-free (Monero-style); SNARKs are used only for the Prism Protocol disclosure circuits (§5.3), per Decision D2.*
 - **Senders:** Ring signatures (CLSAG) over decoy sets of size ≥ 16 (target 32). Decoys sampled from a recency-weighted, popularity-aware distribution to blunt mass-decoy attacks.
 - **Receivers:** One-time stealth addresses derived via Diffie-Hellman from the recipient's public view key. Standard and sub-addresses supported.
 - **Network:** Dandelion++ hides originating IP from peers.
@@ -140,7 +140,7 @@ Prism is a privacy-first, AI-native Layer-1 cryptocurrency that combines:
 | Disclosure proof `π` | Prove a fact about funds | Generated on demand | Verified on-chain or off-chain (choice below) |
 
 ### 5.3 Disclosure Primitives (ZKP circuits)
-Each is a PLONK/Sonic circuit operating against the public commitment tree, using a **one-time nullifier-tagged disclosure**: generating a proof does not link to the original spend graph beyond the proven statement.
+Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over zk-STARKs because proof size dominates for mobile proving and verifier-side bandwidth; the trusted-setup concern is mitigated by (a) per-circuit multi-party ceremonies with published entropy transcripts, (b) PLONK's *universal* (circuit-agnostic) SRS so one ceremony covers all v1 circuits, and (c) fallback re-instantiation path if setup ever needs redoing. Circuits operate against the public commitment tree, using a **one-time nullifier-tagged disclosure**: generating a proof does not link to the original spend graph beyond the proven statement.
 
 1. **Source Provenance Proof** — "Output O was not received from any address on sanctioned-list L." Verifies membership/non-membership against a hash-chained, community-maintained denylist accumulator (denylist root published weekly on-chain as a 32-byte header field).
 2. **Balance Solvency Proof** — "My unspent commitments sum ≥ X over period [t1,t2]" without revealing which outputs or total balance.
@@ -148,10 +148,14 @@ Each is a PLONK/Sonic circuit operating against the public commitment tree, usin
 4. **Reserve/Attestation Proof** — "I hold collateral C" for DeFi or merchant escrow.
 5. **Clean-Exit Proof** — "This output will be spent only to addresses I control" (useful for exchange off-ramps).
 
-### 5.4 Revocability Semantics
+### 5.4 Revocability Semantics (**D3: expire-and-rotate is the binding semantics**)
 - Disclosures are **one-time artifacts**: a proof `π` is bound to `(statement, verifier-nonce, expiry-timestamp)`. Reuse requires regeneration.
-- A **Disclosure Registry** (per-user, device-synced, optional on-chain anchor Merkle root) logs every generated proof so the user can see what they've revealed and when.
-- **Revocation caveat (must state plainly in UX):** cryptographic proofs already verified by a third party cannot be un-sent. "Revocable" means (a) future verifiers reject expired proofs via timestamp binding, and (b) scoped view keys can be rotated such that new data is inaccessible. The spec commits to honest UX language: *"You can limit and expire disclosures; you cannot recall one already accepted."* ❓ *(§14 Q3)*
+- A **Disclosure Registry** (per-user, device-synced, optional on-chain anchor Merkle root — see §6 registry schema) logs every generated proof so the user can see what they've revealed and when.
+- **Adopted model:** "Revocable" means precisely two things, and the product only ever promises these:
+  1. **Expiry:** proofs carry a consensus-checked timestamp binding; verifiers reject expired proofs, so a disclosure cannot be reused after its window.
+  2. **Rotation:** scoped view keys rotate on schedule; a rotated key never reveals data created after rotation, bounding any leaked-key blast radius.
+- Forward-revocable time-lock encryption of auditor auxiliary data is **descoped from v1** and tracked as research area R6 (§15C).
+- **Honest UX language (hard requirement):** *"You can limit and expire disclosures; you cannot recall one already accepted."* Marketing and UI copy must never imply recall.
 
 ### 5.5 On-chain vs Off-chain Verification
 - Default: **off-chain verification** (verifier checks proof against public chain state locally). Keeps volume off L1.
@@ -333,8 +337,8 @@ Each is a PLONK/Sonic circuit operating against the public commitment tree, usin
 ### 7.1 First Run & Wallet Creation (Target: <5 min, zero seed required)
 1. Download wallet → biometric enrollment (device-local).
 2. Choose custody mode:
-   - **A. Solo MPC (default):** 2-of-3 shares across phone + desktop + Prism recovery server (server share is *blind* — knows nothing without user co-signature; acts only as one leg of quorum). ❓ *(§14 Q4: is a vendor-operated recovery leg acceptable?)*
-   - **B. Social MPC:** user invites 4 trusted contacts; 3-of-5 threshold. Contacts only ever hold opaque key shares — no visibility into funds.
+   - **A. Solo MPC (default):** 2-of-3 shares across **user-owned devices only** (phone + desktop + one additional user device or user-held hardware token). **Per Decision D4, Prism operates no recovery leg of any kind** — there is no vendor-held share, blind or otherwise. If the user loses both quorum devices with no third user device, Solo mode falls back to guiding the user into Social MPC setup for future protection; this limitation is disclosed at wallet creation in plain language.
+   - **B. Social MPC (recommended for single-device users):** user invites 4 trusted contacts; 3-of-5 threshold. Contacts only ever hold opaque key shares — no visibility into funds. All legs are user-chosen; recovery remains purely user-owned by construction.
    - **C. Legacy seed:** 25-word mnemonic (advanced; explicitly warned as non-recoverable).
 3. Share generation ceremony: each share transfer over EE2EE (QR or invite link); liveness check per signer; abort-safe resumable protocol.
 4. Tutorial funded by test drip faucet; first inbound transfer demo.
@@ -362,7 +366,7 @@ Each is a PLONK/Sonic circuit operating against the public commitment tree, usin
 
 ### 7.5 Coercion / Duress Flow
 - Duress PIN unlocks a **decoy wallet** (plausible low balance) instead of signaling failure.
-- Recovery timelocks double as anti-coercion: forced recovery still takes 72 h with visible alarm state. ❓ *(§14 Q5: how aggressive should alarms be given privacy-under-coercion concerns?)*
+- Recovery timelocks double as anti-coercion: forced recovery still takes 72 h with visible alarm state. Per §14 (non-blocking item Q5): v1 alarms stay **private** — in-app + the user's own devices only; notifying recovery contacts is opt-in per group, to avoid outing a coerced user. Aggressiveness validated in Phase-3 usability study.
 
 ### 7.6 Selective Disclosure (Tax Season)
 1. Wallet → "Privacy Tools → Prepare tax report."
@@ -377,7 +381,7 @@ Each is a PLONK/Sonic circuit operating against the public commitment tree, usin
 3. Monthly explainable report; one-tap revoke; all actions in hash-chained audit log.
 
 ### 7.8 Inheritance (Dead Man's Switch)
-- Beneficiary holds a share that activates only after N days (default 365) of zero user chain activity AND M-of-K attestator confirmation (attestators are contacts or lawyer/oracle service). Grace ping to user every 30 days before activation. ❓ *(§14 Q6: on-chain activity as liveness signal leaks usage patterns — acceptable? Alternative: signed heartbeat messages.)*
+- Beneficiary holds a share that activates only after N days (default 365) without liveness AND M-of-K attestator confirmation (attestators are contacts or lawyer/oracle service). Grace ping to user every 30 days before activation. Per §14 (Q6): the v1 liveness signal is **signed heartbeat messages** from the user's wallet (privacy-preserving; no on-chain activity inference); on-chain inactivity remains a fallback for users who never send heartbeats.
 
 ---
 
@@ -398,7 +402,7 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 
 ### 8.3 Federated Learning
 - Goal: improve fraud detection globally without user data leaving devices.
-- Mechanism: FedAvg + client-side DP (ε ≤ 1.0 per round, Gaussian mechanism), secure aggregation among ≥256 contributors per round; contributions routed through a mix network; per-round opt-in with visible reward (small FL mining-credit share? ❓ §14 Q7).
+- Mechanism: FedAvg + client-side DP (ε ≤ 1.0 per round, Gaussian mechanism), secure aggregation among ≥256 contributors per round; contributions routed through a mix network; per-round opt-in. Incentives per §14 (Q7): v1 FL participation is **altruistic + reputation-only** — no emission/credit rewards, to avoid Sybil and account-farming surfaces.
 - Governance: model cards published per release; poisoning defenses (norm clipping, median-based aggregation, contribution reputation decay).
 
 ### 8.4 Agent Runtime
@@ -445,7 +449,7 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 | E2 | 51% reorg | 10-block maturity + depth-based UI confidence; exchanges advised ≥30. Merchant channel closes protected by penalty tx. |
 | E3 | Stuck/lost channel counterparty | Watchtower submits latest commitment; unilateral close with delay; penalty path for cheating close. |
 | E4 | Ring decoy exhaustion (old outputs pruned) | Pruned nodes cannot serve decoys → wallets default to archival/full nodes; decoy sampling includes age-bucket floors. |
-| E5 | Denylist fork/dispute (who curates sanctions list?) | Community-signed weekly roots; multiple parallel lists supported (verifier chooses list ID); proofs reference specific root — no single censor point. ❓ §14 Q8 |
+| E5 | Denylist fork/dispute (who curates sanctions list?) | **Governance per D5:** the weekly accumulator root is signed by an elected **Prism Compliance Council** (7 seats, 18-month staggered terms, public signing policy; ≥5-of-7 signatures required per root). Multiple parallel third-party lists remain first-class (verifier chooses list ID); proofs reference a specific root — no single censor point, and council roots are one option among many. Council misbehavior is checkable: roots are published with signatures, and users/verifiers can pin any list. Resolved by D5 |
 | E6 | Broken/failing ZKP circuit discovered post-release | Circuit IDs versioned; verifiers reject deprecated IDs; anchored proofs carry circuit ID so audits can flag affected ones. |
 | E7 | Expired disclosure presented anyway | Verifier app rejects past-expiry proofs (nonce+expiry binding); accepted-but-expired proofs are verifier's liability — documented in verifier SDK. |
 | E8 | MPC share theft (single share) | Below-threshold shares useless; proactive refresh; quorum-change alerting. |
@@ -478,7 +482,7 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 - Prism Foundation position: privacy software, non-custodial; no company-held keys, no universal access.
 - Selective disclosure is the compliance bridge: users can satisfy tax/audit obligations *themselves*, without trusting intermediaries.
 - Denylist accumulator (§5.3) is community-curated and provably neutral in structure (multiple lists, no forced consumption).
-- Jurisdiction strategy: launch node/wallet code under OSS license (MIT/BSD-2 ❓); entity formation deferred pending counsel (research area R4).
+- Jurisdiction strategy: launch node/wallet code under an OSI permissive license (MIT preferred; BSD-2 alternative — final pick at legal review, non-blocking); entity formation deferred pending counsel (research area R4).
 - Age-of-majority and ToS gates on hosted services (recovery-server leg, watchtowers); core protocol permissionless.
 
 ---
@@ -507,7 +511,7 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 - [ ] Fee predictability hardening (priority cap enforcement, block-packing policy).
 
 ### Phase 4 — Ecosystem (Months 19–24)
-- [ ] Mainnet launch (emission parameters finalized per §14 decisions).
+- [ ] Mainnet launch (emission parameters per D1: halving curve → 21M cap, ≈0.6%/yr tail, zero premine, dev-fund carve-out audited pre-launch).
 - [ ] Developer SDK (Rust/C/TS bindings), verifier SDK.
 - [ ] Merchant toolset (channel receiving, invoicing via `prsmr:` URIs).
 - [ ] Privacy-preserving DeFi primitives (collateral solvency proofs in escrow contracts-lite).
@@ -518,20 +522,23 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 
 ---
 
-## 14. Open Questions / Clarifications Needed (blocking finalization)
+## 14. Decision Log (v1.0 resolutions)
 
-These questions must be answered to promote this draft to v1.0:
+All previously blocking questions were resolved by the founder on **2026-10-08**. Decisions D1–D5 below are binding for v1 implementation; where a decision leaves sub-questions open, they are reclassified as non-blocking research areas (§15C).
 
-1. **Emission & premine:** Fixed 21M cap with tail emission, or pure cap? Any team/community allocation, and from where (premine conflicts with "Bitcoin rigor" — recommend zero premine + transparent dev-fund from emission)?
-2. **Proving-system tradeoff:** zk-SNARK (PLONK, smaller proofs, trusted setup per circuit) vs zk-STARK (transparent setup, larger proofs) for mobile clients — which constraint dominates: proof size or trustlessness optics?
-3. **"Revocable disclosure" language:** Accept the honest semantics in §5.4 (expire + rotate, not recall), or require a stronger mechanism (e.g., time-lock encryption of auxiliary data shared with auditors, which *is* revocable going forward)?
-4. **Vendor recovery leg:** Is the optional Prism-operated blind MPC share (Solo mode) acceptable, or must default recovery be purely user-owned devices/contacts? This decides business model and trust story.
-5. **Duress severity:** How loud should recovery/coercion alarms be (push to all contacts? timed public announcement?) balanced against outing a coerced user?
-6. **Inheritance liveness signal:** On-chain inactivity (privacy leak) vs signed heartbeats (extra UX burden) as the dead-man-switch trigger?
-7. **FL incentives:** Reward federated-learning participants with emission share (creates Sybil/account farming surface) or keep it purely altruistic + reputation?
-8. **Denylist governance:** Who signs the weekly sanction accumulator roots — foundation multisig, elected council, or purely opt-in third-party lists with no official root?
-9. **Data-model specifics:** Are the schemas in §6 aligned with intended product surfaces (accounts vs sub-addresses, multi-currency intents, memo policy)? Which fields are must-have for MVP vs later?
-10. **User-flow scope:** Confirm §7 personas/flows match priorities — especially: is fiat-on-ramp integration (for "$50 to Alex" flows) in v1, or display-only pricing?
+| ID | Question | Decision | Where applied |
+|---|---|---|---|
+| **D1** | Emission & premine | **Halving curve to 21M cap + permanent ≈0.6%/yr tail emission.** Zero premine; team/foundation funded only via transparent dev-fund carve-out of future emission with on-chain milestone vesting. | §4.1 |
+| **D2** | SNARK vs STARK | **zk-SNARKs (PLONK/ultra-honk)** for disclosure circuits — proof size dominates for mobile. Trusted-setup risk mitigated via universal SRS ceremony, published transcripts, and re-instantiation path. Amount/range layer stays Bulletproofs+ (no setup). | §5.1, §5.3 |
+| **D3** | Revocable disclosure | **Expire-and-rotate is the binding semantics.** No recall promised anywhere; forward-revocable time-lock encryption descoped from v1 → research area R6. | §5.4 |
+| **D4** | Vendor recovery leg | **Recovery must be purely user-owned.** Prism operates no MPC share/recovery leg of any kind (Solo mode = user devices only; Social mode = user contacts). Trust story: zero vendor custody surface. Business model shifts to services (verifier SDK, merchant tooling, enterprise compliance), not key-holding. | §7.1 |
+| **D5** | Denylist governance | **Elected Prism Compliance Council** (7 seats, staggered 18-month terms, ≥5-of-7 signatures per weekly root) signs the *official* accumulator root; parallel third-party lists remain first-class and verifiable; users/verifiers may pin any list. | §11 E5 |
+
+### Remaining non-blocking items (folded into §15C research areas)
+- Duress alarm aggressiveness (Q5) → default: private in-app + user's own devices only; contact-notification is opt-in per recovery group. To be validated in the Phase-3 neuro-inclusive usability study.
+- Inheritance liveness signal (Q6) → v1 default switches to **signed heartbeat messages** (privacy-preserving); on-chain inactivity kept as fallback for users who ignore heartbeats. Pending R3 confirmation.
+- FL participant rewards (Q7) → v1 keeps FL **altruistic + reputation-only** (no emission share) to avoid Sybil farming; revisit post-launch.
+- Data-model MVP field cuts (Q9) and fiat-on-ramp scope (Q10) → product-scoping tasks at Phase-1 kickoff, not architectural blockers; §6 schemas stand as written.
 
 ---
 
@@ -557,8 +564,8 @@ These questions must be answered to promote this draft to v1.0:
 | Denylist root cadence | weekly |
 
 ### C. Research Areas (tracked)
-R1 Post-quantum migration path · R2 Mobile ZKP prover optimization (GPU/NPU delegation) · R3 Optimal recovery collusion resistance · R4 Multi-jurisdiction disclosure interoperability · R5 Cognitive-load telemetry methodology (consent-based, on-device metrics only).
+R1 Post-quantum migration path · R2 Mobile ZKP prover optimization (GPU/NPU delegation) · R3 Optimal recovery collusion resistance · R4 Multi-jurisdiction disclosure interoperability · R5 Cognitive-load telemetry methodology (consent-based, on-device metrics only) · R6 Forward-revocable disclosure via time-lock encryption of auditor auxiliary data (descoped from v1 per D3) · R7 Compliance Council election mechanics, slashing/removal rules, and denylist policy RFC.
 
 ---
 
-*This specification is a living document. Version 1.0 will be cut once §14 questions are resolved.*
+*This specification is a living document. v1.0 finalized 2026-10-08 with decisions D1–D5 (§14). Future changes follow the RFC/amendment process; the decision log is append-only.*
