@@ -4,6 +4,12 @@ Model: discrete geometric decay (Monero-style base reward), then a
 consensus-fixed tail of ≈0.6%/yr once the pre-tail supply approaches 21M.
 Zero premine; dev fund is a fixed carve-out of each block reward.
 
+RFC-0001 (RESOLVED 2026-10-08): halving interval = 315,360 blocks
+(2 years at the 120 s target cadence). The ~787,750-block figure in early
+spec drafts was Monero's number under its legacy 60 s block time and does
+not apply to Prism. spec.md §4.1 has been amended; code and spec are now
+exact on this constant.
+
 All values are exact integers (shards). No floats in consensus code.
 """
 from __future__ import annotations

@@ -21,14 +21,15 @@ Authoritative design document: [`../spec.md`](../spec.md) (v1.0).
 
 ```bash
 python3 -m chain.cli genesis --network refraction   # build genesis block
-python3 -m chain.cli emit --heights 0,100,787750    # inspect emission schedule
+python3 -m chain.cli emit --heights 0,100,315360    # inspect emission schedule
 python3 -m pytest                                   # unit tests
 ```
 
 The current `chain/` package implements, per spec v1.0:
 
 - Block header with the 32-byte `denylist_root` field (§6.1, Decision D5).
-- Emission curve: halving every ~787,750 blocks to a 21M cap, then a
+- Emission curve: halving every 315,360 blocks (2 years @ 120 s — RFC-0001
+  resolved) to a 21M cap, then a
   consensus-fixed tail of ≈0.6%/yr (Decision D1), zero premine, dev-fund
   carve-out as a fixed % of block reward.
 - Adaptive difficulty retarget (DCR-style, 60-block window, 120 s target).
