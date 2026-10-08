@@ -16,7 +16,17 @@ P = (1 << 255) - 19                      # field prime
 # hash_to_scalar reductions, and subgroup checks simultaneously. Pinned by
 # test_group_order_matches_rfc8032 in tests/test_crypto.py.
 L = (1 << 252) + 2774231777737235348520045438832269067752  # group order (cofactor 8)
-D = (-121665 * pow(121666, P - 2, P)) % P  # curve parameter a = -1, d as above
+# Curve parameter d for a = -1: d = -(121665/121666) mod p.
+D = (-121665 * pow(121666, P - 2, P)) % P                  # curve parameter (a = -1)
+
+# Canonical-value pinning (import-time regression guards). Values independently
+# verified against libsodium/pynacl ground truth during the [2]B-gate debug:
+#   d = 37095705934669...0283555  (Ed25519 curve parameter, RFC 8032 §4.1)
+#   l = 72370055773322...1322382  (group order, RFC 8032 §4.1)
+_D_CANONICAL = 37095705934669439343138083508754565189542113879843219016388785533085940283555
+_L_CANONICAL = 72370055773322622139731865630428944088091893758435788320921758847568941322382
+assert D == _D_CANONICAL, f"d mismatch: {D} != {_D_CANONICAL}"
+assert L == _L_CANONICAL, f"l mismatch: {L} != {_L_CANONICAL}"
 
 
 def modp(x: int) -> int:
