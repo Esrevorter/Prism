@@ -61,7 +61,15 @@ class Point:
         c = modp(2 * D * th1 * th2)
         dd = modp(2 * zh1 * zh2)
         e, f, g, h = b - a, dd - c, dd + c, b + a
-        return Point(modp(e * f), modp(g * h), modp(e * h), modp(f * g))
+        # Output order is (X3, Y3, Z3, T3) = (E*F, G*H, F*G, E*H).
+        # Regression note: this line previously read (E*F, G*H, E*H, F*G),
+        # placing T3 in the Z3 slot and vice versa. A single addition still
+        # dehomogenized to correct affine x,y (the swap cancels in X/Z and
+        # Y/Z), but the corrupted T poisoned every subsequent add in a
+        # double-and-add chain — [2]B mismatched libsodium's known-good
+        # encoding c9a3f86a...6022. Caught by the [2]B gate + differential
+        # test against naive affine arithmetic.
+        return Point(modp(e * f), modp(g * h), modp(f * g), modp(e * h))
 
     def double(self) -> "Point":
         """Doubling via the add formula (complete for a = -1); slower but
