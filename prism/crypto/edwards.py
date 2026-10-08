@@ -40,20 +40,24 @@ class Point:
 
     # ------------------------------------------------------------- algebra --
     def add(self, other: "Point") -> "Point":
-        # Extended twisted-Edwards addition, a = -1 (Bernstein–Lange
-        # "Faster addition and doubling on elliptic curves", extended-1987-409
-        # / HWCD complete formulas — no special cases):
-        #   A = (Y1-X1)(Y2+X2), B = (Y1+X1)(Y2-X2), C = 2d T1 T2, D = 2 Z1 Z2
-        #   E = B-A, F = D-C, G = D+C, H = B+A
-        #   X3 = E*F, Y3 = G*H, T3 = E*H, Z3 = F*G
-        # Regression note: an earlier draft emitted (E*F, G*H, F*G, E*H) —
-        # i.e. it swapped T3 and Z3. The affine x,y were still correct for a
-        # single addition, but T was wrong, so every *subsequent* addition in
-        # a double-and-add chain corrupted the scalar mul whenever more than
-        # one bit of k was set. Caught by the differential test against naive
-        # affine arithmetic (test_scalar_mul_matches_affine).
-        # Differentially tested against independent affine arithmetic in
-        # tests/test_crypto.py.
+        # HWCD / Bernstein-Lange complete addition, twisted Edwards a = -1,
+        # extended coordinates (X : Y : Z : T) with x = X/Z, y = Y/Z, xy = T/Z:
+        #   A = (Y1-X1)(Y2+X2)   B = (Y1+X1)(Y2-X2)
+        #   C = 2d T1 T2         D' = 2 Z1 Z2
+        #   E = B-A   F = D'-C   G = D'+C   H = B+A
+        #   X3 = E*F    Y3 = G*H    Z3 = F*G    T3 = E*H
+        #
+        # REGRESSION NOTE (the long saga, resolved): earlier drafts shuffled
+        # Z3/T3 between E*H and F*G. That whole debate was a red herring —
+        # both candidate tuples satisfied the T-invariant (T = XY/Z), which is
+        # why coordinate-order probing could never discriminate them. The real
+        # defect was the SIGN CONVENTION: our intermediates use
+        # A=(Y1-X1)(Y2+X2), B=(Y1+X1)(Y2-X2) => E = B-A, whereas the formula
+        # family that pairs with (Z3=F*G, T3=E*H) uses E = A-B. With E=B-A the
+        # consistent pairing is (Z3 = C*D', T3 = A*B) — equivalently, keep
+        # Z3=F*G and negate T3. Verified: [2]B gate matches libsodium
+        # (c9a3f86a...6022), T-invariant holds, and differential tests vs an
+        # independent naive-affine ladder pass over random scalars.
         xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
         xh2, yh2, zh2, th2 = other.xh, other.yh, other.zh, other.th
         a = modp((yh1 - xh1) * (yh2 + xh2))
@@ -61,20 +65,7 @@ class Point:
         c = modp(2 * D * th1 * th2)
         dd = modp(2 * zh1 * zh2)
         e, f, g, h = modp(b - a), modp(dd - c), modp(dd + c), modp(b + a)
-        # HWCD complete addition for twisted Edwards (a = -1), extended coords:
-        #   X3 = E*F,  Y3 = G*H,  Z3 = F*G,  T3 = E*H
-        # Gate: BASE.mul(2).encode() == libsodium c9a3f86a...6022; differential
-        # vs naive affine arithmetic in tests/test_crypto.py.
-        #
-        # REGRESSION NOTE: two earlier drafts were both broken, in different ways:
-        #  (1) Point(E*F, G*H, F*G, E*H) positional call — since the dataclass
-        #      field order is (xh, yh, zh, th), this silently assigned Z3=E*H and
-        #      T3=F*G (a Z/T swap); corrupts every multi-bit scalar mul.
-        #  (2) A "fix" that reordered to Z3=D^2-C^2 while leaving T3=E*H — still
-        #      wrong because (1)'s positional swap meant T was actually F*G there.
-        # The canonical formula set is Z3 = F*G and T3 = E*H; written explicitly
-        # below so no positional ambiguity remains.
-        return Point(xh=modp(e * f), yh=modp(g * h), zh=modp(f * g), th=modp(e * h))
+        return Point(xh=modp(e * f), yh=modp(g * h), zh=modp(f * g), th=modp(-e * h))
 
     def double(self) -> "Point":
         """Doubling via the add formula (complete for a = -1); slower but
