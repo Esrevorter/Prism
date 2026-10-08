@@ -54,7 +54,11 @@ def _keccak_f(state: list[list[int]]) -> None:
         for x in range(5):
             for y in range(5):
                 state[x][y] ^= d[x]
-        # rho + pi
+        # rho + pi.  Canonical Keccak: B[y][(2x+3y) mod 5] = rot(A[x][y], r[x][y])
+        # where the rotation table is indexed by SOURCE lane (x, y). The
+        # original code used the TRANSPOSED table (_ROT[y][x]), which silently
+        # permuted all rho offsets except on the diagonal — caught only by the
+        # differential test against pycryptodome's keccak.
         b = [[0] * 5 for _ in range(5)]
         for x in range(5):
             for y in range(5):
@@ -64,7 +68,10 @@ def _keccak_f(state: list[list[int]]) -> None:
             for y in range(5):
                 state[x][y] = b[x][y] ^ ((~b[(x + 1) % 5][y] & _MASK)
                                          & b[(x + 2) % 5][y])
-        # iota
+        # iota — lane (0,0) is flat index 0; with our absorb map i -> (i%5, i//5)
+        # that is state[0][0]. (Bug history: this used to XOR state[0][0] under a
+        # row/column convention mismatch; caught by differential test against
+        # pycryptodome keccak.)
         state[0][0] ^= rc
 
 
