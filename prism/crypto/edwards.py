@@ -77,6 +77,18 @@ class Point:
         return r
 
     # ------------------------------------------------------------ equality --
+    def is_on_curve(self) -> bool:
+        """Check the affine point satisfies -x^2 + y^2 = 1 + d x^2 y^2.
+
+        Projective form: (-xh^2 + yh^2) * zh^2 == zh^4 + d * xh^2 * yh^2.
+        Independent of the decode path — used by differential tests against
+        libsodium, which validates encodings itself.
+        """
+        x2, y2, z2 = modp(self.xh * self.xh), modp(self.yh * self.yh), modp(self.zh * self.zh)
+        lhs = modp((y2 - x2) * z2)
+        rhs = modp(z2 * z2 + D * x2 * y2)
+        return lhs == rhs
+
     def is_identity(self) -> bool:
         # X == 0 and Y == Z (projectively)
         return self.xh % P == 0 and (self.yh - self.zh) % P == 0
