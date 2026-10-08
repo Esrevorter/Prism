@@ -10,7 +10,12 @@ differentially tested (§13 Phase-1 acceptance criteria).
 from __future__ import annotations
 
 P = (1 << 255) - 19                      # field prime
-L = (1 << 252) + 277423177773723534852004543883226912831  # group order (cofactor 8)
+# Canonical Ed25519 group order ℓ = 2^252 + 2774231777737235348520045438832269067752.
+# Regression note: an earlier draft carried a mistyped constant ending in
+# ...8103544377797515327, which broke every scalar-mul identity (the [2]B gate),
+# hash_to_scalar reductions, and subgroup checks simultaneously. Pinned by
+# test_group_order_matches_rfc8032 in tests/test_crypto.py.
+L = (1 << 252) + 2774231777737235348520045438832269067752  # group order (cofactor 8)
 D = (-121665 * pow(121666, P - 2, P)) % P  # curve parameter a = -1, d as above
 
 
