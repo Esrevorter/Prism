@@ -189,14 +189,125 @@ def test_blinding_changes_commitment():
 
 def test_balance_check_vector():
     """sum(in) == sum(out) iff values AND blinds cancel (RingCT core check)."""
+    # spec §5.1: C = v*H + r*G, so sum(in) == sum(out) iff BOTH values and
+    # blinds cancel: 1000+2500 == 3000+500 and 11+22 == 33+0.
     ins = [(1000, 11), (2500, 22)]
-    outs = [(3000, 33), (500, 44)]
+    outs = [(3000, 33), (500, 0)]
     total = commit(ins[0][0], ins[0][1])
     for v, a in ins[1:]:
         total = total.add(commit(v, a))
     for v, a in outs:
         total = total.sub(commit(v, a))
     assert total.is_identity()
+
+
+# ---------------------------------------------------------------------------
+# Spend-to-self property test: RingCT balance invariant (spec §5.1)
+# ---------------------------------------------------------------------------
+
+def _commit_sum(pairs):
+    """Sum of commitments C(v, r) over (value, mask) pairs."""
+    total = commit(pairs[0][0], pairs[0][1])
+    for v, r in pairs[1:]:
+        total = total.add(commit(v, r))
+    return total
+
+
+def _balances(ins, outs):
+    """Return (values_cancel, blinds_cancel) for a candidate transaction."""
+    values_cancel = sum(v for v, _ in ins) == sum(v for v, _ in outs)
+    blinds_cancel = sum(r % L for _, r in ins) % L == sum(r % L for _, r in outs) % L
+    return values_cancel, blinds_cancel
+
+
+@pytest.mark.parametrize("seed", range(64))
+def test_spend_to_self_property(seed):
+    """Randomized spend-to-self round-trips lock in the RingCT invariant.
+
+    Positive cases: random *valid* transactions (values AND blinds both
+    cancel) must pass Σin − Σout == identity via Pedersen homomorphism.
+
+    Negative cases: if ONLY values cancel or ONLY blinds cancel, the
+    commitment sums must NOT be equal — binding/hiding respectively. This
+    is exactly the §5.1 requirement that BOTH components cancel for the
+    balance check to hold; either alone must fail.
+    """
+    rng = random.Random(seed)
+
+    # ---- positive: random valid spend-to-self tx -------------------------
+    n_in = rng.randint(1, 3)
+    in_vals = [rng.randrange(1, 1 << 40) for _ in range(n_in)]
+    in_masks = [rng.randrange(1, L) for _ in range(n_in)]
+    total_val = sum(in_vals)
+    total_mask = sum(in_masks) % L
+
+    n_out = rng.randint(1, 3)
+    out_vals = []
+    remaining = total_val
+    for i in range(n_out - 1):
+        v = rng.randrange(0, remaining + 1)
+        out_vals.append(v)
+        remaining -= v
+    out_vals.append(remaining)                      # values cancel by construction
+    out_masks = [rng.randrange(1, L) for _ in range(n_out - 1)]
+    out_masks.append((total_mask - sum(out_masks)) % L)  # blinds cancel by construction
+
+    ins = list(zip(in_vals, in_masks))
+    outs = list(zip(out_vals, out_masks))
+    vc, bc = _balances(ins, outs)
+    assert vc and bc                                 # sanity: constructed as valid
+    assert _commit_sum(ins).sub(_commit_sum(outs)).is_identity()
+
+    # Wire-level round trip: encoded sums compare equal after parse.
+    enc_in = encode(_commit_sum(ins))
+    enc_out = encode(_commit_sum(outs))
+    assert parse_commitment(enc_in) == parse_commitment(enc_out)
+
+    # ---- negative: only VALUES cancel (blinds perturbed) ------------------
+    bad_mask = rng.randrange(1, L)
+    while bad_mask == 0:
+        bad_mask = rng.randrange(1, L)
+    outs_blind_break = [(v, r) for (v, r) in outs[:-1]] + \
+                       [(outs[-1][0], (outs[-1][1] + bad_mask) % L)]
+    vc, bc = _balances(ins, outs_blind_break)
+    assert vc and not bc
+    assert not _commit_sum(ins).sub(_commit_sum(outs_blind_break)).is_identity()
+
+    # ---- negative: only BLINDS cancel (values perturbed) ------------------
+    delta = rng.randrange(1, 1 << 20)                # keep within uint64 range
+    outs_value_break = [(outs[0][0] + delta, outs[0][1])] + outs[1:]
+    vc, bc = _balances(ins, outs_value_break)
+    assert not vc and bc
+    assert not _commit_sum(ins).sub(_commit_sum(outs_value_break)).is_identity()
+
+    # ---- negative: NEITHER cancels ----------------------------------------
+    outs_both_break = [(outs[0][0] + delta, (outs[0][1] + bad_mask) % L)] + outs[1:]
+    vc, bc = _balances(ins, outs_both_break)
+    assert not vc and not bc
+    assert not _commit_sum(ins).sub(_commit_sum(outs_both_break)).is_identity()
+
+
+def test_spend_to_self_homomorphic_reblind_roundtrip():
+    """Re-blinding a commitment preserves value: C(v,r') == C(v,r) + (r'-r)·G.
+
+    Spend-to-self with a re-blind (common wallet pattern: refresh masks on
+    change outputs) must still balance when the scalar adjustment is added
+    to the pseudo-input side.
+    """
+    rng = random.Random(0xC0FFEE)
+    v = rng.randrange(1, 1 << 48)
+    r = rng.randrange(1, L)
+    r_new = rng.randrange(1, L)
+
+    c_old = commit(v, r)
+    c_new = commit(v, r_new)
+    # Re-blind factor known to the spender: c_new - c_old = (r_new - r) * G
+    # because the v*H terms cancel and only the mask term differs.
+    rebalance = G.mul((r_new - r) % L)
+    # Σin = {c_new}, Σout = {c_old + rebalance} -> must cancel.
+    lhs = c_new
+    rhs = c_old.add(rebalance)
+    assert lhs.sub(rhs).is_identity()
 
 
 def test_verify_opening_accepts_and_rejects():
