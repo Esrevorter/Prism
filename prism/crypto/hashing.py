@@ -30,13 +30,22 @@ _RC = [
     0x8000000000008002, 0x8000000000000080, 0x000000000000800A, 0x800000008000000A,
     0x8000000080008081, 0x8000000000008080, 0x0000000080000001, 0x8000000080008008,
 ]
-_ROT = [
-    [0, 36, 3, 41, 18],
-    [1, 44, 10, 45, 2],
-    [62, 6, 45, 16, 47],
-    [28, 55, 43, 23, 39],
-    [27, 20, 39, 7, 13],
-]
+# Rotation offsets r[x][y] per the Keccak [x][y] convention. NOTE: the widely
+# copy-pasted "display" table is the TRANSPOSE of this one; using it verbatim
+# permutes every off-diagonal rho offset (bug history: caught by differential
+# test against pycryptodome). We instead DERIVE the offsets from the canonical
+# lane walk — (x,y) -> (y, (2x+3y) mod 5), offset(t) = t(t+1)/2 mod 64 — which
+# cannot be transposed by construction.
+def _derive_rot() -> list[list[int]]:
+    rot = {(0, 0): 0}
+    x, y = 1, 0            # the walk starts at lane (1,0), NOT (0,0)
+    for t in range(24):    # t = 0..23; (1,0) itself gets offset 0 (=t0 term)
+        rot[(x, y)] = (t * (t + 1) // 2) % 64
+        x, y = y, (2 * x + 3 * y) % 5
+    assert len(rot) == 25 and (x, y) == (1, 0), "rho walk must cover all lanes"
+    return [[rot[(x, y)] for y in range(5)] for x in range(5)]
+
+_ROT = _derive_rot()
 _MASK = (1 << 64) - 1
 
 
