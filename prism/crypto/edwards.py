@@ -49,8 +49,15 @@ assert (-BASEPOINT[0]**2 + BASEPOINT[1]**2 - 1 - D * BASEPOINT[0]**2 * BASEPOINT
     "BASEPOINT must satisfy the twisted-Edwards curve law"
 # Canonical pin (parity-proof, unlike the x^2 curve-law check above):
 # encode(BASEPOINT) must equal the RFC 8032 / libsodium basepoint byte string.
+# REGRESSION NOTE: this literal was previously built as
+#   hex("5866...66"[:62] + "58")
+# which slices off the final "66" and appends "58", yielding an encoding that
+# ends in byte 0x58. Little-endian means the LAST byte carries bit 255 (the
+# x-parity flag) plus the top bits of y, so the canonical basepoint encoding
+# must end in 0x66 (y = 4/5 has its top bit clear; x is EVEN -> parity bit 0).
+# The sliced literal therefore rejected the CORRECT basepoint at import time.
 assert (modp(_By) | ((_Bx & 1) << 255)).to_bytes(32, "little") == \
-    bytes.fromhex("5866666666666666666666666666666666666666666666666666666666666666"[:62] + "58"), \
+    bytes.fromhex("5866666666666666666666666666666666666666666666666666666666666666"), \
     "BASEPOINT does not match the canonical Ed25519 encoding"
 
 
@@ -64,33 +71,31 @@ class Point:
 
     # ------------------------------------------------------------- algebra --
     def add(self, other: "Point") -> "Point":
-        # HWCD / Bernstein-Lange complete addition, twisted Edwards a = -1,
-        # extended coordinates (X : Y : Z : T) with x = X/Z, y = Y/Z, xy = T/Z:
-        #   A = (Y1-X1)(Y2+X2)   B = (Y1+X1)(Y2-X2)
-        #   C = 2d T1 T2         D' = 2 Z1 Z2
-        #   E = B-A   F = D'-C   G = D'+C   H = B+A
+        # add-2008-hwcd-4, twisted Edwards a = -1, extended coordinates
+        # (X : Y : Z : T) with x = X/Z, y = Y/Z, xy = T/Z:
+        #   A  = (Y1-X1)(Y2-X2)   B  = (Y1+X1)(Y2+X2)
+        #   C  = 2d T1 T2         D' = 2 Z1 Z2
+        #   E  = B-A  (= 2(x1y2+y1x2))      H = B+A  (= 2(y1y2+x1x2))
+        #   F  = D'-C (= 2(1-d x1x2y1y2))   G = D'+C (= 2(1+d x1x2y1y2))
         #   X3 = E*F    Y3 = G*H    Z3 = F*G    T3 = E*H
+        # giving x3 = X3/Z3 = E/G, y3 = Y3/Z3 = H/F, T3/Z3 = x3*y3 — exactly
+        # the a=-1 group law x3=(x1y2+y1x2)/(1+d...) , y3=(y1y2+x1x2)/(1-d...).
         #
-        # REGRESSION NOTE (the long saga, FINALLY RESOLVED): the previous fix
-        # set T3 = A*B. That is WRONG: with these intermediate definitions the
-        # curve law is x3 = E/F, y3 = G/H, hence T3 must satisfy
-        # T3/Z3 = x3*y3 = (E*G)/(F*H) ... which for extended coords works out
-        # to the textbook pairing X3=E*F, Y3=G*H, Z3=F*G, T3=E*H. The reason
-        # both candidate tuples "passed" the T-invariant in earlier probing
-        # was that they were compared after normalization; neither survives a
-        # DOUBLING check: with P1=P2=B, A==B so E=B-A==0 and X3=0 — i.e., the
-        # add formula degenerates when the SAME extended point is passed
-        # twice, because it requires xy=T/Z consistency at input AND produces
-        # garbage unless inputs are independent. The real historical defect
-        # was never the output tuple at all: it was (a) a corrupted BASEPOINT
-        # (fixed above: even-x recovery from the correct curve law) and
-        # (b) an inverted parity correction in decode() (fixed there). With
-        # those two root causes gone, the standard HWCD tuple below matches
-        # libsodium on [2]B/[3]B gates and differential affine ladders.
+        # REGRESSION NOTE (ROOT CAUSE #2, now fixed): the previous draft used
+        #   A = (Y1-X1)(Y2+X2), B = (Y1+X1)(Y2-X2)
+        # which expands to E = B-A = 2(x1y2 - y1x2) and H = B+A = 2(y1y2 - x1x2)
+        # — the numerators of the a=+1 (untwisted Edwards) law. On our a=-1
+        # curve those intermediates pair each numerator with the WRONG
+        # denominator (E/F = subtraction-side ratio), so every add() returned an
+        # on-curve but DIFFERENT point: identity checks (add(I,B)==B) and the
+        # [3]B gate failed while the T-invariant still "passed", which sent the
+        # debugging saga down dead ends for two rounds. The sign structure of
+        # the SECOND factors ((Y2-X2) vs (Y2+X2)) is what distinguishes the
+        # a=-1 instantiation of hwcd-4 from the generic-Edwards one.
         xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
         xh2, yh2, zh2, th2 = other.xh, other.yh, other.zh, other.th
-        a = modp((yh1 - xh1) * (yh2 + xh2))
-        b = modp((yh1 + xh1) * (yh2 - xh2))
+        a = modp((yh1 - xh1) * (yh2 - xh2))
+        b = modp((yh1 + xh1) * (yh2 + xh2))
         c = modp(2 * D * th1 * th2)
         dd = modp(2 * zh1 * zh2)
         e, f, g, h = modp(b - a), modp(dd - c), modp(dd + c), modp(b + a)
