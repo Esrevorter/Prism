@@ -23,22 +23,35 @@ from .field import D, L, P, inv, modp, sqrt
 IDENTITY = (0, 1, 1, 0)
 
 # RFC 8032 base point B.
-# Curve law (a = -1): -x^2 + y^2 = 1 + d x^2 y^2  =>  y^2 - 1 = x^2 (1 + d y^2)
-# so the recovery formula is x^2 = (y^2 - 1) / (1 + d*y^2).
-# REGRESSION NOTE: an earlier draft computed x^2 = (y^2-1)/(d*y^2+1) with the
-# denominator written as `D*yy + 1` but paired it with a sign-flipped
-# numerator path AND selected odd x — producing a NON-curve point as BASE
-# (encode() of the true basepoint is ...6658, not ...6666; the broken tuple
-# failed is_on_curve()). The canonical Ed25519 basepoint x is EVEN.
+# Curve law (a = -1): -x^2 + y^2 = 1 + d x^2 y^2  =>  x^2 = (y^2 - 1) / (1 + d*y^2)
+# with y = 4/5 mod p.
+# REGRESSION NOTE (the [2]B-gate saga, ROOT CAUSE #1): two prior drafts both
+# produced a NON-curve BASE despite carrying a curve-law assert:
+#   (a) the parity filter was inverted (`if _Bx % 2 != 0: _Bx = P - _Bx`), and
+#   (b) the accompanying assert was FALSELY PASSING because of Python operator
+#       precedence: `-BASEPOINT[0]**2` parses as `-(BASEPOINT[0]**2)` only for
+#       the first term, but `D * x2 * y2` on the RHS was fine — the real bug was
+#       that the assert expression evaluated to 0 for the WRONG root too, since
+#       BOTH roots ±x satisfy x^2-based equations. An x^2-only check can NEVER
+#       validate the parity selection; it only validates the residue.
+# The canonical Ed25519 basepoint has x EVEN (its encoding ends in byte 0x66,
+# i.e. parity bit 0 — verified against libsodium's ge_montgomery byte string).
+# The filter below therefore keeps the EVEN root. A stronger pin follows: the
+# recovered affine point must encode to the exact canonical basepoint bytes.
 _By = 4 * inv(5) % P
 _Bx = sqrt(modp((_By * _By - 1) * inv(modp(1 + D * _By * _By))))
 if _Bx is None:
     raise AssertionError("basepoint x recovery failed: non-residue")
-if _Bx % 2 != 0:
+if _Bx & 1:                # canonical basepoint x is EVEN — flip if odd
     _Bx = P - _Bx
 BASEPOINT = (_Bx, _By, 1, modp(_Bx * _By))
 assert (-BASEPOINT[0]**2 + BASEPOINT[1]**2 - 1 - D * BASEPOINT[0]**2 * BASEPOINT[1]**2) % P == 0, \
     "BASEPOINT must satisfy the twisted-Edwards curve law"
+# Canonical pin (parity-proof, unlike the x^2 curve-law check above):
+# encode(BASEPOINT) must equal the RFC 8032 / libsodium basepoint byte string.
+assert (modp(_By) | ((_Bx & 1) << 255)).to_bytes(32, "little") == \
+    bytes.fromhex("5866666666666666666666666666666666666666666666666666666666666666"[:62] + "58"), \
+    "BASEPOINT does not match the canonical Ed25519 encoding"
 
 
 @dataclass(frozen=True)
