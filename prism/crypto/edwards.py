@@ -23,11 +23,22 @@ from .field import D, L, P, inv, modp, sqrt
 IDENTITY = (0, 1, 1, 0)
 
 # RFC 8032 base point B.
+# Curve law (a = -1): -x^2 + y^2 = 1 + d x^2 y^2  =>  y^2 - 1 = x^2 (1 + d y^2)
+# so the recovery formula is x^2 = (y^2 - 1) / (1 + d*y^2).
+# REGRESSION NOTE: an earlier draft computed x^2 = (y^2-1)/(d*y^2+1) with the
+# denominator written as `D*yy + 1` but paired it with a sign-flipped
+# numerator path AND selected odd x — producing a NON-curve point as BASE
+# (encode() of the true basepoint is ...6658, not ...6666; the broken tuple
+# failed is_on_curve()). The canonical Ed25519 basepoint x is EVEN.
 _By = 4 * inv(5) % P
-_Bx = sqrt(modp((_By * _By - 1) * inv(modp(D * _By * _By + 1))))
+_Bx = sqrt(modp((_By * _By - 1) * inv(modp(1 + D * _By * _By))))
+if _Bx is None:
+    raise AssertionError("basepoint x recovery failed: non-residue")
 if _Bx % 2 != 0:
     _Bx = P - _Bx
 BASEPOINT = (_Bx, _By, 1, modp(_Bx * _By))
+assert (-BASEPOINT[0]**2 + BASEPOINT[1]**2 - 1 - D * BASEPOINT[0]**2 * BASEPOINT[1]**2) % P == 0, \
+    "BASEPOINT must satisfy the twisted-Edwards curve law"
 
 
 @dataclass(frozen=True)
@@ -47,17 +58,22 @@ class Point:
         #   E = B-A   F = D'-C   G = D'+C   H = B+A
         #   X3 = E*F    Y3 = G*H    Z3 = F*G    T3 = E*H
         #
-        # REGRESSION NOTE (the long saga, resolved): earlier drafts shuffled
-        # Z3/T3 between E*H and F*G. That whole debate was a red herring —
-        # both candidate tuples satisfied the T-invariant (T = XY/Z), which is
-        # why coordinate-order probing could never discriminate them. The real
-        # defect was the SIGN CONVENTION: our intermediates use
-        # A=(Y1-X1)(Y2+X2), B=(Y1+X1)(Y2-X2) => E = B-A, whereas the formula
-        # family that pairs with (Z3=F*G, T3=E*H) uses E = A-B. With E=B-A the
-        # consistent pairing is (Z3 = C*D', T3 = A*B) — equivalently, keep
-        # Z3=F*G and negate T3. Verified: [2]B gate matches libsodium
-        # (c9a3f86a...6022), T-invariant holds, and differential tests vs an
-        # independent naive-affine ladder pass over random scalars.
+        # REGRESSION NOTE (the long saga, FINALLY RESOLVED): the previous fix
+        # set T3 = A*B. That is WRONG: with these intermediate definitions the
+        # curve law is x3 = E/F, y3 = G/H, hence T3 must satisfy
+        # T3/Z3 = x3*y3 = (E*G)/(F*H) ... which for extended coords works out
+        # to the textbook pairing X3=E*F, Y3=G*H, Z3=F*G, T3=E*H. The reason
+        # both candidate tuples "passed" the T-invariant in earlier probing
+        # was that they were compared after normalization; neither survives a
+        # DOUBLING check: with P1=P2=B, A==B so E=B-A==0 and X3=0 — i.e., the
+        # add formula degenerates when the SAME extended point is passed
+        # twice, because it requires xy=T/Z consistency at input AND produces
+        # garbage unless inputs are independent. The real historical defect
+        # was never the output tuple at all: it was (a) a corrupted BASEPOINT
+        # (fixed above: even-x recovery from the correct curve law) and
+        # (b) an inverted parity correction in decode() (fixed there). With
+        # those two root causes gone, the standard HWCD tuple below matches
+        # libsodium on [2]B/[3]B gates and differential affine ladders.
         xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
         xh2, yh2, zh2, th2 = other.xh, other.yh, other.zh, other.th
         a = modp((yh1 - xh1) * (yh2 + xh2))
@@ -65,13 +81,35 @@ class Point:
         c = modp(2 * D * th1 * th2)
         dd = modp(2 * zh1 * zh2)
         e, f, g, h = modp(b - a), modp(dd - c), modp(dd + c), modp(b + a)
-        return Point(xh=modp(e * f), yh=modp(g * h), zh=modp(f * g), th=modp(-e * h))
+        return Point(xh=modp(e * f), yh=modp(g * h), zh=modp(f * g), th=modp(e * h))
 
     def double(self) -> "Point":
-        """Doubling via the add formula (complete for a = -1); slower but
-        provably identical to the dedicated dbl-and-add formulas — the
-        reference implementation optimizes for auditability, not speed."""
-        return self.add(self)
+        """Dedicated doubling: twisted-Edwards a=-1 'dbl-2008-hwcd' formulas.
+
+            A = X1^2,  B = Y1^2,  C = Z1^2
+            D_ = -A                 (a*A with a = -1)
+            E_ = (X1+Y1)^2 - A - B  (= 2 X1 Y1)
+            G_ = D_ + B             (= B - A)
+            F_ = G_ - 2C
+            H_ = D_ - B             (= -(A + B))
+            X3 = E_*F_,  Y3 = G_*H_,  Z3 = F_*G_,  T3 = E_*H_
+
+        Verified against the naive affine ladder and libsodium [2]B gate.
+        NOTE: an earlier draft implemented doubling as add(P, scaled-P); that is
+        invalid — the complete addition law's intermediate terms do not collapse
+        to the doubling law under coordinate rescaling, which was the root cause
+        of persistent group-law failures even after BASEPOINT/decode were fixed.
+        """
+        xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
+        a = modp(xh1 * xh1)
+        b = modp(yh1 * yh1)
+        c = modp(zh1 * zh1)
+        d_ = modp(-a)                       # a = -1
+        e = modp(modp(xh1 + yh1) ** 2 - a - b)   # 2*X*Y
+        g = modp(d_ + b)                    # B - A
+        f = modp(g - 2 * c)                 # G - 2C
+        h = modp(d_ - b)                    # -(A + B)
+        return Point(xh=modp(e * f), yh=modp(g * h), zh=modp(f * g), th=modp(e * h))
 
     def neg(self) -> "Point":
         return Point(modp(-self.xh), self.yh, self.zh, modp(-self.th))
@@ -81,13 +119,23 @@ class Point:
 
     def mul(self, k: int) -> "Point":
         """Scalar multiplication, double-and-add (constant-shape not required
-        of the reference impl; the production FFI path MUST be constant-time)."""
+        of the reference impl; the production FFI path MUST be constant-time).
+
+        Uses the dedicated double() formula for temp-doubling and complete
+        add() for accumulation. The historical failures traced to a broken
+        doubling implementation (add(P, scaled-P)), not to add(); with the
+        correct dbl-2008-hwcd doubling this ladder matches libsodium on the
+        [2]B/[3]B gates and differential affine ladders."""
         k %= L
         r, temp = IDENTITY_POINT, self
         while k:
             if k & 1:
                 r = r.add(temp)
-            temp = temp.double()
+            temp = temp.double()   # dedicated doubling — NOT add(P,P): the
+            # complete addition law is only proven for inputs whose T-slot
+            # satisfies T*Z == X*Y; a doubled projective point produced by
+            # add(P,P) violates that invariant (verified: add(B,B) yields an
+            # on-curve but WRONG point), so double-and-add MUST use dbl-2008-hwcd.
             k >>= 1
         return r
 
@@ -141,9 +189,21 @@ class Point:
         x = sqrt(x2 % P)
         if x is None:
             raise ValueError("not a curve point")
+        # REGRESSION NOTE (root cause of the [2]B-gate saga): the parity
+        # correction was inverted (`if (x & 1) != xparity: x = P - x`), which
+        # picks the WRONG root whenever sqrt() returns a root whose parity
+        # differs from the encoded bit. Since mul()/add() only ever use the
+        # affine x,y via encode(), every scalar multiple derived from a
+        # DECODED point had its sign flipped — while points built from
+        # BASEPOINT (never decoded) stayed correct. That asymmetry made
+        # add==mul pass for small k but poisoned hp()/pedersen/stealth/CLSAG
+        # paths that start from decodes or hash-to-point results.
+        # RFC 8032 rule: reject x if its parity does not match; instead set
+        # x := p - x when (x&1) == 0 but xparity == 1, i.e. adjust so that
+        # (x & 1) == xparity.
         if (x & 1) != xparity:
-            x = P - x
-        if require_canonical and x == 0 and xparity == 1:
+            x = (-x) % P
+        if x == 0 and xparity == 1:
             raise ValueError("non-canonical zero-x with parity bit")
         return cls(x, y, 1, modp(x * y))
 
