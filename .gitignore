@@ -1,1 +1,8 @@
+# Compiled files
 __pycache__/
+*.pyc
+
+# Environment & Logs
+.env
+.env.local
+*.log

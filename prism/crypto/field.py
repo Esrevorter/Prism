@@ -10,29 +10,68 @@ differentially tested (§13 Phase-1 acceptance criteria).
 from __future__ import annotations
 
 P = (1 << 255) - 19                      # field prime
-# Canonical Ed25519 group order ℓ = 2^252 + 2774231777737235348520045438832269067752.
-# Regression note: an earlier draft carried a mistyped constant ending in
-# ...8103544377797515327, which broke every scalar-mul identity (the [2]B gate),
-# hash_to_scalar reductions, and subgroup checks simultaneously. Pinned by
-# test_group_order_matches_rfc8032 in tests/test_crypto.py.
-# Canonical Ed25519 group order ℓ (RFC 8032 §4.1), written directly as its
-# decimal expansion to avoid transcription errors in the 2^252 + k form.
-# Regression note: two earlier drafts carried mistyped constants, which broke
-# every scalar-mul identity (the [2]B gate), hash_to_scalar reductions, and
-# subgroup checks simultaneously. Pinned by test_group_order_matches_rfc8032
-# in tests/test_crypto.py via the _L_CANONICAL import-time assert below.
-L = 72370055773322622139731865630428944088091893758435788320921758847568941322382  # group order (cofactor 8)
+# Canonical Ed25519 group order ℓ (RFC 8032 §4.1 / libsodium):
+#   ℓ = 2^252 + 27742317777372353535851937790883648493
+#     = 7237005577332262213973186563042994240857116359379907606001950938285454250989
+# NOTE (ROOT CAUSE #3, take two): the previous "two-term derivation" here used a
+# MISTYPED second term (...348520045438832269067752), producing a NON-prime
+# modulus ~9e31 off. Its decimal pin (_L_CANONICAL) and its LE byte pin were
+# BOTH transcribed from that same wrong derivation, so all three guards agreed
+# with each other and disagreed with reality — the classic self-referential-pin
+# failure. The value below is now derived from the RFC 8032 BIG-ENDIAN hex
+# literal (an independent representation), cross-verified against libsodium's
+# sc_reduce in tests/test_crypto.py, and guarded by import-time primality and
+# L < P checks which the old composite value could never survive.
+_L_RFC8032_BE_HEX = "1000000000000000000000000000000014DEF9DEA2F79CD65812631A5CF5D3ED"
+L = int(_L_RFC8032_BE_HEX, 16)           # group order (cofactor 8)
+assert L == (1 << 252) + 27742317777372353535851937790883648493
 # Curve parameter d for a = -1: d = -(121665/121666) mod p.
 D = (-121665 * pow(121666, P - 2, P)) % P                  # curve parameter (a = -1)
 
 # Canonical-value pinning (import-time regression guards). Values independently
 # verified against libsodium/pynacl ground truth during the [2]B-gate debug:
 #   d = 37095705934669...0283555  (Ed25519 curve parameter, RFC 8032 §4.1)
-#   l = 72370055773322...1322382  (group order, RFC 8032 §4.1)
+#   l = 72370055773322...250989   (group order, RFC 8032 §4.1)
 _D_CANONICAL = 37095705934669439343138083508754565189542113879843219016388785533085940283555
-_L_CANONICAL = 72370055773322622139731865630428944088091893758435788320921758847568941322382
+_L_CANONICAL = 7237005577332262213973186563042994240857116359379907606001950938285454250989
 assert D == _D_CANONICAL, f"d mismatch: {D} != {_D_CANONICAL}"
 assert L == _L_CANONICAL, f"l mismatch: {L} != {_L_CANONICAL}"
+# Second, independent guard: ℓ as its canonical little-endian byte string
+# (libsodium sc_reduce / RFC 8032 "l" encoding). The previous draft's LE pin was
+# itself transcribed from the wrong derivation, so all guards were mutually
+# consistent but wrong; this literal is now taken directly from RFC 8032 and
+# cross-checked against crypto_core_ed25519_scalar_reduce in tests/test_crypto.py.
+assert L.to_bytes(32, "little") == bytes.fromhex(
+    "edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010"
+), "l does not match the RFC 8032 little-endian group-order encoding"
+
+
+def _is_prime(n: int) -> bool:
+    """Deterministic-enough Miller-Rabin for import-time sanity checks."""
+    if n < 2 or n % 2 == 0:
+        return n == 2
+    d, s = n - 1, 0
+    while d % 2 == 0:
+        d //= 2
+        s += 1
+    for a in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
+        x = pow(a, d, n)
+        if x in (1, n - 1):
+            continue
+        for _ in range(s - 1):
+            x = x * x % n
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
+
+
+# Structural guard: the subgroup order must be prime and < p. The old composite
+# (mistyped) L would have failed this instantly — decimal pins copied from the
+# same wrong source cannot catch transcription errors, primality can.
+assert L < P, "group order l must be less than the field prime p"
+assert _is_prime(L), "group order l must be prime"
 
 
 def modp(x: int) -> int:
@@ -67,8 +106,15 @@ def sqrt(x: int) -> int | None:
 # ----------------------------------------------------------- scalars ------
 
 def scalar_reduce(b: bytes) -> int:
-    """Little-endian 32-byte string -> scalar mod L (RFC 8032 convention)."""
-    return int.from_bytes(b[:32], "little") % L
+    """Little-endian byte string of ANY length -> scalar mod L.
+
+    Regression note: an earlier draft truncated with b[:32], silently dropping
+    the upper half of keccak_512 digests. That made hash_to_scalar disagree
+    with its documented definition (full keccak_512 -> LE int -> mod L,
+    RFC 8032 style) and cascaded into every H_p / CLSAG test. Pinned by
+    test_hash_to_scalar_matches_definition in tests/test_crypto.py.
+    """
+    return int.from_bytes(b, "little") % L
 
 
 def scalar_encode(s: int) -> bytes:
