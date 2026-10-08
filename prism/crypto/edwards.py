@@ -62,13 +62,9 @@ class Point:
         dd = modp(2 * zh1 * zh2)
         e, f, g, h = b - a, dd - c, dd + c, b + a
         # Output order is (X3, Y3, Z3, T3) = (E*F, G*H, F*G, E*H).
-        # Regression note: this line previously read (E*F, G*H, E*H, F*G),
-        # placing T3 in the Z3 slot and vice versa. A single addition still
-        # dehomogenized to correct affine x,y (the swap cancels in X/Z and
-        # Y/Z), but the corrupted T poisoned every subsequent add in a
-        # double-and-add chain — [2]B mismatched libsodium's known-good
-        # encoding c9a3f86a...6022. Caught by the [2]B gate + differential
-        # test against naive affine arithmetic.
+        # Gate: BASE.mul(2).encode() must equal libsodium's known-good
+        # c9a3f86a...6022; also verified differentially against naive
+        # affine arithmetic in tests/test_crypto.py.
         return Point(modp(e * f), modp(g * h), modp(f * g), modp(e * h))
 
     def double(self) -> "Point":
