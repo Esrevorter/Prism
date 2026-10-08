@@ -2,7 +2,7 @@
 
 Usage:
   python3 -m chain.cli genesis   --network refraction
-  python3 -m chain.cli emit      --heights 0,100,787750
+  python3 -m chain.cli emit      --heights 0,100,315360
   python3 -m chain.cli mine      --blocks 5            (placeholder PoW)
   python3 -m chain.cli params
 """

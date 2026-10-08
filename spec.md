@@ -102,7 +102,7 @@ Prism is a privacy-first, AI-native Layer-1 cryptocurrency that combines:
 |---|---|---|
 | Ticker | PRSM | Display unit: PRSM; base unit: "shard" = 1e-8 PRSM (8 decimals) |
 | Max supply | 21,000,000 PRSM | Hard cap reached via emission curve; **tail emission thereafter (Decision D1)** |
-| Emission | Halving curve + permanent tail (**D1: Option A**) | Block reward halves every 2 years (~787,750 blocks at 120 s) until the 21M cap is approached, then a constant tail of ≈0.6% annual inflation continues indefinitely. Rationale: guarantees miner incentives after cap so long-run security never depends on fees alone (Monero precedent). The tail rate is consensus-fixed and non-discretionary. |
+| Emission | Halving curve + permanent tail (**D1: Option A**) | Block reward halves every 2 years (**315,360 blocks at 120 s** — RFC-0001 resolved 2026-10-08; an earlier draft cited Monero's 787,750-block figure, which assumes a 60 s cadence and does not apply to Prism) until the 21M cap is approached, then a constant tail of ≈0.6% annual inflation continues indefinitely. Rationale: guarantees miner incentives after cap so long-run security never depends on fees alone (Monero precedent). The tail rate is consensus-fixed and non-discretionary. |
 | Block time | 120 seconds | Adaptive difficulty retargets over a 60-block window |
 | Block size | Dynamic, soft target 2–4 MB | Median-last-10 scaling; oversized blocks pay penalty fee |
 | Locking / spend maturity | 10 blocks (≈20 min) | Incoming funds require 10 confirmations before spending (RingCT decoy integrity) |

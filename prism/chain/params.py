@@ -20,13 +20,11 @@ BLOCKS_PER_YEAR = (365 * 24 * 3600) // BLOCK_TIME_SECONDS   # 157,680
 HALVING_YEARS = 2                                   # §4.1 emission curve
 HALVING_INTERVAL_BLOCKS = HALVING_YEARS * BLOCKS_PER_YEAR   # 315,360
 
-# NOTE on spec reconciliation (RFC-0001): spec §4.1 says the reward halves
-# "every 2 years (~787,750 blocks at 120 s)". Those two figures are
-# inconsistent: 2 years at a genuine 120 s cadence is ~315,360 blocks
-# (787,750 is Monero's number under its legacy 60 s block time). We treat
-# "halving every 2 years @ 120 s target" as the binding invariant, so the
-# constant below is 315,360. Flagged for founder sign-off rather than
-# silently diverging from the spec text.
+# RFC-0001 RESOLVED (2026-10-08, founder sign-off): the binding invariant is
+# "halving every 2 years at a 120 s target cadence" = 315,360 blocks. The
+# 787,750 figure in earlier spec drafts was Monero's number under its legacy
+# 60 s block time and does not apply to Prism. spec.md §4.1 has been amended
+# accordingly; this constant is now spec-exact.
 
 TAIL_ANNUAL_RATE_BPS = 60                           # ≈0.6%/yr forever (D1)
 DEV_FUND_SHARE_BPS = 500                            # 5% of each block reward
