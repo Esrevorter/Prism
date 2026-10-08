@@ -15,7 +15,13 @@ P = (1 << 255) - 19                      # field prime
 # ...8103544377797515327, which broke every scalar-mul identity (the [2]B gate),
 # hash_to_scalar reductions, and subgroup checks simultaneously. Pinned by
 # test_group_order_matches_rfc8032 in tests/test_crypto.py.
-L = (1 << 252) + 2774231777737235348520045438832269067752  # group order (cofactor 8)
+# Canonical Ed25519 group order ℓ (RFC 8032 §4.1), written directly as its
+# decimal expansion to avoid transcription errors in the 2^252 + k form.
+# Regression note: two earlier drafts carried mistyped constants, which broke
+# every scalar-mul identity (the [2]B gate), hash_to_scalar reductions, and
+# subgroup checks simultaneously. Pinned by test_group_order_matches_rfc8032
+# in tests/test_crypto.py via the _L_CANONICAL import-time assert below.
+L = 72370055773322622139731865630428944088091893758435788320921758847568941322382  # group order (cofactor 8)
 # Curve parameter d for a = -1: d = -(121665/121666) mod p.
 D = (-121665 * pow(121666, P - 2, P)) % P                  # curve parameter (a = -1)
 

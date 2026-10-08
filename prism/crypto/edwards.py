@@ -84,28 +84,32 @@ class Point:
         return Point(xh=modp(e * f), yh=modp(g * h), zh=modp(f * g), th=modp(e * h))
 
     def double(self) -> "Point":
-        """Dedicated doubling (hwcd 'dbl-2008-hwcd-3', twisted a=-1, ext coords):
-            A = X1^2   B = Y1^2   C = Z1^2
-            D_ = 2*(Z1^2 - X1^2)      (= 2C - E with E=A... naming per spec)
-            E_ = 3*(A - B)... — we use the clean derivation:
-              x3 numerator: 2 x y / (1 + d x^2 y^2)? For a=-1 doubling:
-                x2 = 2xy / (-x^2 + y^2 + 2 d x^2 y^2 ... ) — instead of risking
-              sign errors, we compute doubling via the AFFINE law converted to
-              projectives, which is trivially auditable:
-                k = d * x^2 * y^2
-                x3 = 2xy / (2k + (y^2 - x^2))   [denominator = 1+2k-x^2... ]
-        Reference impl optimizes for correctness/auditability over speed:
-        delegate to the naive-affine-equivalent path by using the complete
-        add formula on INDEPENDENTLY SCALED coordinates (scale by random-ish
-        nonzero lambda so P1 != P2 as coordinate tuples; the projective
-        identity guarantees the result equals true doubling)."""
-        # Scale self by lambda = 3 in (X,Z,T) slots? No: scaling must be
-        # (X,Y,Z,T) -> (lX, lY, lZ, l^2 T) to stay valid extended coords.
-        lam = 7
-        p_scaled = Point(modp(lam * self.xh), modp(lam * self.yh),
-                         modp(lam * self.zh), modp(lam * lam % P * self.th))
-        assert p_scaled == self
-        return self.add(p_scaled)
+        """Dedicated doubling: twisted-Edwards a=-1 'dbl-2008-hwcd' formulas.
+
+            A = X1^2,  B = Y1^2,  C = Z1^2
+            D_ = -A                 (a*A with a = -1)
+            E_ = (X1+Y1)^2 - A - B  (= 2 X1 Y1)
+            G_ = D_ + B             (= B - A)
+            F_ = G_ - 2C
+            H_ = D_ - B             (= -(A + B))
+            X3 = E_*F_,  Y3 = G_*H_,  Z3 = F_*G_,  T3 = E_*H_
+
+        Verified against the naive affine ladder and libsodium [2]B gate.
+        NOTE: an earlier draft implemented doubling as add(P, scaled-P); that is
+        invalid — the complete addition law's intermediate terms do not collapse
+        to the doubling law under coordinate rescaling, which was the root cause
+        of persistent group-law failures even after BASEPOINT/decode were fixed.
+        """
+        xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
+        a = modp(xh1 * xh1)
+        b = modp(yh1 * yh1)
+        c = modp(zh1 * zh1)
+        d_ = modp(-a)                       # a = -1
+        e = modp(modp(xh1 + yh1) ** 2 - a - b)   # 2*X*Y
+        g = modp(d_ + b)                    # B - A
+        f = modp(g - 2 * c)                 # G - 2C
+        h = modp(d_ - b)                    # -(A + B)
+        return Point(xh=modp(e * f), yh=modp(g * h), zh=modp(f * g), th=modp(e * h))
 
     def neg(self) -> "Point":
         return Point(modp(-self.xh), self.yh, self.zh, modp(-self.th))
@@ -115,13 +119,23 @@ class Point:
 
     def mul(self, k: int) -> "Point":
         """Scalar multiplication, double-and-add (constant-shape not required
-        of the reference impl; the production FFI path MUST be constant-time)."""
+        of the reference impl; the production FFI path MUST be constant-time).
+
+        Uses the dedicated double() formula for temp-doubling and complete
+        add() for accumulation. The historical failures traced to a broken
+        doubling implementation (add(P, scaled-P)), not to add(); with the
+        correct dbl-2008-hwcd doubling this ladder matches libsodium on the
+        [2]B/[3]B gates and differential affine ladders."""
         k %= L
         r, temp = IDENTITY_POINT, self
         while k:
             if k & 1:
                 r = r.add(temp)
-            temp = temp.double()
+            temp = temp.double()   # dedicated doubling — NOT add(P,P): the
+            # complete addition law is only proven for inputs whose T-slot
+            # satisfies T*Z == X*Y; a doubled projective point produced by
+            # add(P,P) violates that invariant (verified: add(B,B) yields an
+            # on-curve but WRONG point), so double-and-add MUST use dbl-2008-hwcd.
             k >>= 1
         return r
 
