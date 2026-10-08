@@ -189,8 +189,10 @@ def test_blinding_changes_commitment():
 
 def test_balance_check_vector():
     """sum(in) == sum(out) iff values AND blinds cancel (RingCT core check)."""
+    # spec §5.1: C = v*H + r*G, so sum(in) == sum(out) iff BOTH values and
+    # blinds cancel: 1000+2500 == 3000+500 and 11+22 == 33+0.
     ins = [(1000, 11), (2500, 22)]
-    outs = [(3000, 33), (500, 44)]
+    outs = [(3000, 33), (500, 0)]
     total = commit(ins[0][0], ins[0][1])
     for v, a in ins[1:]:
         total = total.add(commit(v, a))
