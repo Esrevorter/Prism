@@ -60,12 +60,21 @@ class Point:
         b = modp((yh1 + xh1) * (yh2 - xh2))
         c = modp(2 * D * th1 * th2)
         dd = modp(2 * zh1 * zh2)
-        e, f, g, h = b - a, dd - c, dd + c, b + a
-        # Output order is (X3, Y3, Z3, T3) = (E*F, G*H, F*G, E*H).
-        # Gate: BASE.mul(2).encode() must equal libsodium's known-good
-        # c9a3f86a...6022; also verified differentially against naive
-        # affine arithmetic in tests/test_crypto.py.
-        return Point(modp(e * f), modp(g * h), modp(f * g), modp(e * h))
+        e, f, g, h = modp(b - a), modp(dd - c), modp(dd + c), modp(b + a)
+        # HWCD complete addition for twisted Edwards (a = -1), extended coords:
+        #   X3 = E*F,  Y3 = G*H,  Z3 = F*G,  T3 = E*H
+        # Gate: BASE.mul(2).encode() == libsodium c9a3f86a...6022; differential
+        # vs naive affine arithmetic in tests/test_crypto.py.
+        #
+        # REGRESSION NOTE: two earlier drafts were both broken, in different ways:
+        #  (1) Point(E*F, G*H, F*G, E*H) positional call — since the dataclass
+        #      field order is (xh, yh, zh, th), this silently assigned Z3=E*H and
+        #      T3=F*G (a Z/T swap); corrupts every multi-bit scalar mul.
+        #  (2) A "fix" that reordered to Z3=D^2-C^2 while leaving T3=E*H — still
+        #      wrong because (1)'s positional swap meant T was actually F*G there.
+        # The canonical formula set is Z3 = F*G and T3 = E*H; written explicitly
+        # below so no positional ambiguity remains.
+        return Point(xh=modp(e * f), yh=modp(g * h), zh=modp(f * g), th=modp(e * h))
 
     def double(self) -> "Point":
         """Doubling via the add formula (complete for a = -1); slower but
