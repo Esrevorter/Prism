@@ -1,0 +1,5 @@
+# Compiled/Binary files
+*.pyc
+
+# Dependency directories
+__pycache__/
