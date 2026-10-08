@@ -40,9 +40,20 @@ class Point:
 
     # ------------------------------------------------------------- algebra --
     def add(self, other: "Point") -> "Point":
-        # Extended twisted-Edwards addition, a = -1 (Hisil-Wong-Carter-Dawson,
-        # complete formulas — no special cases). Differentially tested against
-        # independent affine arithmetic in tests/test_crypto.py.
+        # Extended twisted-Edwards addition, a = -1 (Bernstein–Lange
+        # "Faster addition and doubling on elliptic curves", extended-1987-409
+        # / HWCD complete formulas — no special cases):
+        #   A = (Y1-X1)(Y2+X2), B = (Y1+X1)(Y2-X2), C = 2d T1 T2, D = 2 Z1 Z2
+        #   E = B-A, F = D-C, G = D+C, H = B+A
+        #   X3 = E*F, Y3 = G*H, T3 = E*H, Z3 = F*G
+        # Regression note: an earlier draft emitted (E*F, G*H, F*G, E*H) —
+        # i.e. it swapped T3 and Z3. The affine x,y were still correct for a
+        # single addition, but T was wrong, so every *subsequent* addition in
+        # a double-and-add chain corrupted the scalar mul whenever more than
+        # one bit of k was set. Caught by the differential test against naive
+        # affine arithmetic (test_scalar_mul_matches_affine).
+        # Differentially tested against independent affine arithmetic in
+        # tests/test_crypto.py.
         xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
         xh2, yh2, zh2, th2 = other.xh, other.yh, other.zh, other.th
         a = modp((yh1 - xh1) * (yh2 + xh2))
@@ -50,7 +61,7 @@ class Point:
         c = modp(2 * D * th1 * th2)
         dd = modp(2 * zh1 * zh2)
         e, f, g, h = b - a, dd - c, dd + c, b + a
-        return Point(modp(e * f), modp(g * h), modp(f * g), modp(e * h))
+        return Point(modp(e * f), modp(g * h), modp(e * h), modp(f * g))
 
     def double(self) -> "Point":
         """Doubling via the add formula (complete for a = -1); slower but
