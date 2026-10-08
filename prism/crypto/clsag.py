@@ -174,7 +174,15 @@ def sign(secret_x: int, signer_index: int, ring_enc: list[bytes],
 
     c_i = c_next                                     # closed loop back onto real leg
     ss[signer_index] = (alpha + c_i * secret_x) % L
-    c_0 = cs[0]                                      # wire opener: challenge of leg 0
+    # Wire opener: the challenge of leg 0. NOTE (ROOT CAUSE #4): the previous
+    # draft read cs[0] unconditionally, but the rotation loop never writes
+    # cs[signer_index] — that slot still holds its initial 0 when signer_index
+    # == 0, so every ring-0 signature serialized c0 = 0 and failed verify
+    # (verify starts its own rotation at sig.c0). The signer's true c_0 is
+    # either the stored cs[0] (if leg 0 was a decoy, i.e. signer_index != 0)
+    # or c_i itself (if the signer IS leg 0, since the loop closing back onto
+    # the real leg computed exactly c_0 = c_i).
+    c_0 = c_i if signer_index == 0 else cs[0]
 
     return ClsagSignature(c0=c_0, s=ss, image=encode(image_pt))
 
