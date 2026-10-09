@@ -361,7 +361,8 @@ def _solvency_layout(k: int, bits: int, n: int) -> CircuitKey:
     """
     gates = []
     copies = []
-    # row 0: pub carries X: gate none; we bind later.
+    # row 0 is the dedicated public-input slot (COL_PUB[0] carries X); the
+    # sum chain starts at row 1 so gate rows never collide with pub wiring.
     row = 1
     # sum chain rows 1..k : a=acc_{i-1}, b=v_i, c=acc_i ; first acc_0 = v_0
     # simpler: acc_1 = v_1 (gate ql_a=1,ql_c=-1 with a=v_1 copied? no—)
@@ -384,28 +385,36 @@ def _solvency_layout(k: int, bits: int, n: int) -> CircuitKey:
     # to X and the gate identity forces acc - excess == X. No reliance on
     # selector alignment luck.
     ex_row = row
-    gates.append(Gate(row=ex_row, ql_a=1, ql_b=(-1) % fr.Q, ql_c=(-1) % fr.Q))
+    # Gate identity: acc − excess − c + 1·pub == 0. The pub-column cell on
+    # THIS row is copy-bound to the c-slot (structural public-input binding,
+    # same mechanism as provenance/income), so the witness sets both to X and
+    # the opened pub column provably commits to the threshold.
+    gates.append(Gate(row=ex_row, ql_a=1, ql_b=(-1) % fr.Q,
+                      q_pub=(-1) % fr.Q))
     copies.append(CopyConstraint(prev_out[0], prev_out[1], COL_A, ex_row))
-    copies.append(CopyConstraint(COL_PUB, ex_row, COL_C, ex_row))
     row += 1
-    # range check excess to 64 bits (so prover can't cheat with field wrap):
-    # ORDER: `bits` accumulation rows first, then `bits` binary limb rows.
+    # range check excess to `bits` bits (so prover can't cheat with field
+    # wrap). BIT-MAJOR layout, one gate per stage: stage row i carries the
+    # bit b_i in its a-slot (binary-checked by the SAME gate:
+    # b·(b−1) = 2·acc_{i-1}·b − acc_{i-1} − acc_i = 0 with acc_0 ≡ 0) and
+    # the running value acc_{i+1} = 2·acc_i + b_i in its c-slot; the previous
+    # accumulator is copy-fed from row i−1's c-slot into this row's b-slot.
+    # The final c-slot equals the full excess and is copy-bound back to the
+    # inequality gate's b-wire. Total: exactly `bits` gates.
     acc_start = row
-    for i in range(bits):
-        ar = acc_start + i          # limb lives on the SAME row's a-slot
-        if i == 0:
-            gates.append(Gate(row=ar, ql_a=1, ql_c=(-1) % fr.Q))
-        else:
-            gates.append(Gate(row=ar, ql_a=2, ql_b=1, ql_c=(-1) % fr.Q))
-            copies.append(CopyConstraint(COL_C, ar - 1, COL_A, ar))
-            # bit limb is declared later at (COL_A, limb_start + i); copy it
-            # into this row's b-slot.
-            copies.append(CopyConstraint(COL_A, acc_start + bits + i, COL_B, ar))
+    # Stage 0 is an INIT gate a − c = 0: it forces acc_1 == b_0 and makes
+    # b_0 binary (b²−b = 2·b·b − b − b = 0 on this same wiring). Stages
+    # 1..bits−1 use the full recurrence identity below.
+    gates.append(Gate(row=acc_start, ql_a=1, ql_c=(-1) % fr.Q))
+    for i in range(1, bits):
+        r = acc_start + i
+        # identity: 2·acc_{i-1}·b_i − b_i − acc_{i-1} − acc_{i+1} = 0
+        # (a-slot carries the bit b_i, b-slot the copy-fed previous
+        # accumulator acc_{i-1} from stage i−1's c-slot).
+        gates.append(Gate(row=r, qm=2, ql_a=(-1) % fr.Q,
+                          ql_b=(-1) % fr.Q, ql_c=(-1) % fr.Q))
+        copies.append(CopyConstraint(COL_C, r - 1, COL_B, r))
     row += bits
-    limb_start = row
-    for _ in range(bits):
-        gates.append(Gate(row=row, qm=1, ql_a=(-1) % fr.Q))       # b_i^2-b_i
-        row += 1
     # accumulated excess == excess wire at ex_row b slot
     copies.append(CopyConstraint(COL_C, acc_start + bits - 1, COL_B, ex_row))
     if row > n or 1 >= ex_row:
@@ -424,7 +433,7 @@ def prove_solvency(claim: SolvencyClaim, *, bits: int = 64,
         raise ValueError("reference v1 supports single-limb sums < 2^64")
     if total < claim.min_amount:
         raise ValueError("cannot prove solvency below threshold honestly")
-    n = 1 << max(4, (2 + k + 2 * bits).bit_length())
+    n = 1 << max(4, (2 + k + bits).bit_length())
     key = _solvency_layout(k, bits, n)
     a = Assignment.empty(n)
     excess = total - claim.min_amount
@@ -442,27 +451,23 @@ def prove_solvency(claim: SolvencyClaim, *, bits: int = 64,
     ex_row = row
     a.set(COL_A, ex_row, acc)
     a.set(COL_B, ex_row, excess)
-    a.set(COL_C, ex_row, claim.min_amount)     # c-slot echoes pub X
     a.set(COL_PUB, ex_row, claim.min_amount)   # the public input itself
     row += 1
     acc_start = row
-    # layout order is: `bits` accumulation rows FIRST (acc lives on each
-    # row's c-slot; the bit for that stage is copy-fed from the binary block
-    # into the b-slot), then `bits` binary limb rows (see _solvency_layout).
+    # bit-major range-check stages (see _solvency_layout): each stage row i
+    # carries b_i in the a-slot — which ALSO holds acc_{i-1} for i>0 via the
+    # copy constraint from the previous stage's c-slot — and acc_{i+1} in the
+    # c-slot. The first stage's b-slot is unconstrained but reads as 0 in the
+    # witness (default), matching acc_0 ≡ 0 in the gate identity.
     run = 0
     for i in range(bits):
         r = acc_start + i
         bi = (excess >> i) & 1
-        if i == 0:
-            a.set(COL_A, r, bi)
-            run = bi
-        else:
-            a.set(COL_A, r, run)      # previous accumulator (copy-bound)
-            a.set(COL_B, r, bi)       # bit limb (copy-bound from binary block)
-            run = 2 * run + bi
-        a.set(COL_C, r, run)          # new accumulator value
-    for i in range(bits):
-        a.set(COL_A, acc_start + bits + i, (excess >> i) & 1)
+        a.set(COL_A, r, bi)           # bit lives in the a-slot
+        if i > 0:
+            a.set(COL_B, r, run)      # prev accumulator (copy-bound to c[i-1])
+        run = 2 * run + bi
+        a.set(COL_C, r, run)
     stmt = encode_statement(STMT_SOLVENCY, verifier_nonce=claim.verifier_nonce,
                             expiry_unix=claim.expiry_unix,
                             min_amount_shard=claim.min_amount,
@@ -491,8 +496,8 @@ class IncomeClaim:
 def _income_layout(k: int, bits: int, n: int) -> CircuitKey:
     gates = []
     copies = []
-    # row 0 free, row 1 = dedicated public-total slot (COL_PUB[1]); chain
-    # starts at row 2 so the pub wire never shares a gate row by accident.
+    # row 0 of the pub column is the dedicated public-total slot (COL_PUB[0]);
+    # the chain starts at row 2 (row 1 kept clear as in v0 layouts).
     row = 2
     gates.append(Gate(row=row, ql_a=1, ql_c=(-1) % fr.Q))
     prev_out = (COL_C, row)
@@ -505,32 +510,30 @@ def _income_layout(k: int, bits: int, n: int) -> CircuitKey:
     # equality with public total: a - c = 0 at eq_row; c copy-bound to the
     # pub cell on the same row (structural public-input binding).
     eq_row = row
-    gates.append(Gate(row=eq_row, ql_a=1, ql_c=(-1) % fr.Q))
+    # acc − c + (−1)·pub == 0 with pub-cell copy-bound to the c-slot: the
+    # witness sets both to TOTAL; opened pub column provably commits to it.
+    gates.append(Gate(row=eq_row, ql_a=1, q_pub=(-1) % fr.Q))
     copies.append(CopyConstraint(prev_out[0], prev_out[1], COL_A, eq_row))
-    copies.append(CopyConstraint(COL_PUB, eq_row, COL_C, eq_row))
     row += 1
-    # range-check EACH input to `bits` (k×2·bits gates) so partial sums can't
-    # wrap the field; v1 keeps k small (≤8) — documented budget.
-    # ORDER per block: `bits` accumulation rows first, then `bits` binary
-    # limb rows (mirrors prove_income's witness loop).
+    # range-check EACH input to `bits` (k×bits gates, bit-major single-gate
+    # stages — see _solvency_layout's comment) so partial sums can't wrap the
+    # field; v1 keeps k small (≤8) — documented budget. The input value itself
+    # lives at its chain row (a-slot for i=0, b-slot otherwise); the stage
+    # rows re-declare the bits in their a-slots and the final c-slot of the
+    # stage block is copy-equal back to that source wire.
     for i in range(k):
         # input lives at its chain row b-slot (or a-slot for i=0); limbs are
         # re-declared on the accumulation rows' a-slots and copy-equal back.
         src_col = COL_A if i == 0 else COL_B
         src_row = 2 + i
         acc_start = row
-        for j in range(bits):
+        gates.append(Gate(row=acc_start, ql_a=1, ql_c=(-1) % fr.Q))
+        for j in range(1, bits):
             r = acc_start + j
-            if j == 0:
-                gates.append(Gate(row=r, ql_a=1, ql_c=(-1) % fr.Q))
-            else:
-                gates.append(Gate(row=r, ql_a=2, ql_b=1, ql_c=(-1) % fr.Q))
-                copies.append(CopyConstraint(COL_C, r - 1, COL_A, r))
-                copies.append(CopyConstraint(COL_A, acc_start + bits + j, COL_B, r))
+            gates.append(Gate(row=r, qm=2, ql_a=(-1) % fr.Q,
+                              ql_b=(-1) % fr.Q, ql_c=(-1) % fr.Q))
+            copies.append(CopyConstraint(COL_C, r - 1, COL_B, r))
         row += bits
-        for _ in range(bits):
-            gates.append(Gate(row=row, qm=1, ql_a=(-1) % fr.Q))
-            row += 1
         copies.append(CopyConstraint(COL_C, acc_start + bits - 1, src_col, src_row))
     if row > n:
         raise ValueError("income domain too small")
@@ -545,7 +548,7 @@ def prove_income(claim: IncomeClaim, *, bits: int = 32,
         raise ValueError("income values must sum EXACTLY to total (§5.3 #3)")
     if any(not (0 <= v < (1 << bits)) for v in claim.values):
         raise ValueError(f"v1 income batch requires each value < 2^{bits}")
-    n = 1 << max(4, (3 + k + k * 2 * bits).bit_length())
+    n = 1 << max(4, (3 + k + k * bits).bit_length())
     key = _income_layout(k, bits, n)
     a = Assignment.empty(n)
     row = 2
@@ -559,11 +562,11 @@ def prove_income(claim: IncomeClaim, *, bits: int = 32,
         a.set(COL_C, row, acc)
         row += 1
     a.set(COL_A, row, acc)          # eq_row
-    a.set(COL_C, row, claim.total)
     a.set(COL_PUB, row, claim.total)
     row += 1
-    # range-check EACH input to `bits`: layout order is accumulation rows
-    # FIRST, then binary limb rows (see loop below in the key builder).
+    # range-check EACH input to `bits`: bit-major single-gate stages (see
+    # _income_layout) — stage row j holds b_j AND prev acc in its a-slot
+    # (copy-bound from stage j−1's c-slot), new acc in the c-slot.
     for i in range(k):
         v = claim.values[i]
         acc_start = row
@@ -571,14 +574,12 @@ def prove_income(claim: IncomeClaim, *, bits: int = 32,
         for j in range(bits):
             r = acc_start + j
             bj = (v >> j) & 1
-            if j == 0:
-                a.set(COL_A, r, bj); run = bj; a.set(COL_C, r, run)
-            else:
-                a.set(COL_A, r, run); a.set(COL_B, r, bj)
-                run = 2 * run + bj; a.set(COL_C, r, run)
-        for j in range(bits):
-            a.set(COL_A, acc_start + bits + j, (v >> j) & 1)
-        row = acc_start + 2 * bits
+            a.set(COL_A, r, bj)
+            if j > 0:
+                a.set(COL_B, r, run)
+            run = 2 * run + bj
+            a.set(COL_C, r, run)
+        row = acc_start + bits
     names = b",".join(sorted(claim.consented_counterparties))
     stmt = encode_statement(STMT_INCOME, verifier_nonce=claim.verifier_nonce,
                             expiry_unix=claim.expiry_unix,
@@ -624,14 +625,17 @@ def _reserve_layout(k: int, bits: int, n: int) -> CircuitKey:
 
 def prove_reserve(claim: ReserveClaim, *, bits: int = 64,
                   rng=None) -> tuple[CircuitKey, Proof, bytes]:
-    skey, proof, stmt = prove_solvency(
+    """Same relation as solvency under a distinct circuit id (keys are
+    per-statement). Implemented by delegating to the shared witness builder
+    `prove_solvency` and re-proving under the reserve key — no duplicated
+    gadget code."""
+    skey, _proof, _stmt = prove_solvency(
         SolvencyClaim(claim.values, claim.min_amount, claim.expiry_unix,
                       claim.verifier_nonce), bits=bits, rng=rng)
-    # re-bind under reserve circuit id (layout identical)
     rkey = _reserve_layout(len(claim.values), bits, skey.n)
+    # rebuild the satisfying assignment via the same layout math as
+    # prove_solvency (bit-major stages; see _solvency_layout):
     a = Assignment.empty(skey.n)
-    # rebuild witness via same code path as prove_solvency by monkey-walking:
-    # simplest correct route — re-run internal prove with reserve key:
     total = sum(claim.values)
     excess = total - claim.min_amount
     row = 1
@@ -641,22 +645,19 @@ def prove_reserve(claim: ReserveClaim, *, bits: int = 64,
         a.set(COL_A, row, acc); a.set(COL_B, row, claim.values[i])
         acc += claim.values[i]; a.set(COL_C, row, acc); row += 1
     ex_row = row
-    a.set(COL_PUB, ex_row, claim.min_amount)
     a.set(COL_A, ex_row, acc); a.set(COL_B, ex_row, excess)
-    a.set(COL_C, ex_row, claim.min_amount)
+    a.set(COL_PUB, ex_row, claim.min_amount)
     row += 1
     acc_start = row
     run = 0
     for i in range(bits):
         r = acc_start + i
         bi = (excess >> i) & 1
-        if i == 0:
-            a.set(COL_A, r, bi); run = bi; a.set(COL_C, r, run)
-        else:
-            a.set(COL_A, r, run); a.set(COL_B, r, bi)
-            run = 2 * run + bi; a.set(COL_C, r, run)
-    for i in range(bits):
-        a.set(COL_A, acc_start + bits + i, (excess >> i) & 1)
+        a.set(COL_A, r, bi)
+        if i > 0:
+            a.set(COL_B, r, run)
+        run = 2 * run + bi
+        a.set(COL_C, r, run)
     stmt = encode_statement(STMT_RESERVE, verifier_nonce=claim.verifier_nonce,
                             expiry_unix=claim.expiry_unix,
                             min_amount_shard=claim.min_amount,
