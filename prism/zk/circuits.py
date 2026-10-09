@@ -282,14 +282,13 @@ def _provenance_layout(n_tags: int, n: int) -> tuple[CircuitKey, dict]:
     """Shared between prover and tests: exact row map."""
     gates = []
     copies = []
-    # row 0: tag published via pub column binding: a - pub = 0 (q_pub=-1)
-    # Public tag binding WITHOUT q_pub: gate row 0 computes a - 0 - c = 0
-    # (c-slot echoes the tag wire), and a copy constraint ties the pub-column
-    # cell on the SAME row to the a-slot. The pub digest then commits to the
-    # tag, and plonk.verify enforces the copy — so the statement's public
-    # input is pinned by structure, not by selector alignment luck.
-    gates.append(Gate(row=0, ql_a=1, ql_c=(-1) % fr.Q))
-    copies.append(CopyConstraint(COL_A, 0, COL_PUB, 0))
+    # row 0: tag published via q_pub = -1: gate identity a - pub = 0 forces
+    # the opened pub cell to equal the tag wire. This matches the structural
+    # convention used by every other disclosure circuit (exactly one gate has
+    # q_pub != 0 with ql_a == +1 and ql_c == 0 — see _pub_amount_row), so
+    # verify_disclosure can derive the intended pin from the statement blob
+    # itself instead of requiring callers to pass explicit row pins.
+    gates.append(Gate(row=0, ql_a=1, q_pub=(-1) % fr.Q))
     for i in range(n_tags):
         d_row = 2 + 2 * i          # row 1 reserved for the pub-input slot
         inv_row = d_row + 1
@@ -311,8 +310,7 @@ def prove_provenance(claim: ProvenanceClaim, *, rng=None) -> tuple[CircuitKey, A
     key, lay = _provenance_layout(n_tags, n)
     a = Assignment.empty(n)
     a.set(COL_A, 0, claim.tag)
-    a.set(COL_C, 0, claim.tag)            # row-0 echo gate: a - c = 0
-    a.set(COL_PUB, 0, claim.tag)          # public input = claimed tag (copy-bound)
+    a.set(COL_PUB, 0, claim.tag)          # row-0 q_pub gate forces pub == a == tag
     for i, ti in enumerate(claim.denylist_tags):
         d_row = 2 + 2 * i
         inv_row = d_row + 1
@@ -335,6 +333,25 @@ def prove_provenance(claim: ProvenanceClaim, *, rng=None) -> tuple[CircuitKey, A
 
 def _hbytes(x: int) -> bytes:
     return keccak_256(b"TAG:" + fr.to_bytes(x))[:8]
+
+
+_TAG_RECOVERY_LIMIT = 1 << 20   # tags are small identity labels; bound the scan
+
+
+def _tag_from_digest(digest: bytes) -> int | None:
+    """Recover the tag field element from its 8-byte statement digest.
+
+    The provenance statement publishes a digest (not the raw tag) so the
+    blob stays compact; verify_disclosure still needs the *intended value*
+    to pin the opened pub cell. Tags are small (< 2^20 in every profiled
+    wallet), so a bounded brute-force over the low range is exact and cheap.
+    Returns None when no candidate matches — the caller then falls back to
+    nonzero-scan-only enforcement plus explicit caller pins.
+    """
+    for t in range(_TAG_RECOVERY_LIMIT):
+        if _hbytes(t) == digest:
+            return t
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -795,14 +812,23 @@ def verify_disclosure(key: CircuitKey, proof: Proof, *, stmt: bytes,
     cid = decoded["statement_type"]
     pin = decoded["public_inputs"]
     if cid == STMT_PROVENANCE:
-        # tag lives at pub[0] (copy-bound to the row-0 a-slot echo gate).
-        # NOTE: "pub[1] / pin['tag']" was a leftover of the OLD unsound
-        # selector-alignment layout; the shipped encoder never emitted a
-        # `tag` key (KeyError), so this dead branch is removed. The nonzero
-        # scan below already enforces pub[0] == opened tag via the copy
-        # constraint, and callers who want belt-and-braces can pass an
-        # explicit expected_public_rows={0: tag} pin.
-        pass
+        # tag lives at pub[0] via the row-0 q_pub gate (a - pub = 0), matching
+        # the structural convention _pub_amount_row detects for the amount
+        # circuits. The statement carries an 8-byte tag_digest =
+        # keccak("TAG:" || tag)[:8]. Two enforcement paths:
+        #  * If the caller pinned the amount row explicitly, that pin is the
+        #    verifier's intent — enforce it strictly (conflicts with the
+        #    opened column are rejected below; never silently override).
+        #  * Otherwise recover the intended tag by brute-forcing the digest
+        #    over the low range (tags are small) and pin from the statement
+        #    itself, so a re-binder who swaps the blob fails even though the
+        #    proof math checks. If recovery finds nothing in range, fall back
+        #    to nonzero-scan-only behaviour.
+        prow = _pub_amount_row(key)
+        if prow not in exp_rows:
+            want = _tag_from_digest(pin["tag_digest"])
+            if want is not None:
+                exp_rows[prow] = want
     elif cid in (STMT_SOLVENCY, STMT_RESERVE):
         exp_rows[_pub_amount_row(key)] = pin["min_amount_shard"]
     elif cid == STMT_INCOME:
