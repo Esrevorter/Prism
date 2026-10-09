@@ -1,1 +1,8 @@
-(empty)
+# Compiled files
+__pycache__/
+*.pyc
+
+# Environment
+.env
+.env.local
+.env.*
