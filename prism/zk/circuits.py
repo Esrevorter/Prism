@@ -61,7 +61,7 @@ from dataclasses import dataclass, field
 from ..crypto.hashing import keccak_256
 from . import field as fr
 from .plonk import (COL_A, COL_B, COL_C, COL_PUB, Assignment, CircuitKey,
-                    CopyConstraint, Gate, Proof, prove, verify)
+                    CopyConstraint, Gate, ProverError, Proof, prove, verify)
 
 # ---------------------------------------------------------------------------
 # Statement type registry (consensus-visible strings)
@@ -753,10 +753,13 @@ def prove_clean_exit(claim: CleanExitClaim, *, rng=None) -> tuple[CircuitKey, Pr
 def _pub_amount_row(key: CircuitKey) -> int:
     """Row of the pub-column cell that carries the circuit's public amount
     (threshold / total / exit_total+fee). Derived from the KEY, not the
-    witness: exactly one gate binds pub with q_pub=−1 and is not a
-    doubling-recurrence stage (those have ql_c=+1)."""
+    witness: exactly one gate binds pub with q_pub=−1 and ql_a=+1 AND has no
+    c-slot term (ql_c==0) — the inequality/equality amount gates. The
+    range-check init stage also carries q_pub=−1 but is shaped ql_a=−1,
+    ql_c=+1, so it is excluded by BOTH the ql_a and ql_c discriminators."""
     cand = [g.row for g in key.gates
-            if g.q_pub % fr.Q != 0 and g.ql_c % fr.Q != 1]
+            if g.q_pub % fr.Q != 0 and g.ql_a % fr.Q == 1
+            and g.ql_c % fr.Q == 0]
     if len(cand) != 1:
         raise ValueError(f"ambiguous public-amount rows: {cand}")
     return cand[0]
@@ -792,8 +795,14 @@ def verify_disclosure(key: CircuitKey, proof: Proof, *, stmt: bytes,
     cid = decoded["statement_type"]
     pin = decoded["public_inputs"]
     if cid == STMT_PROVENANCE:
-        # tag lives at pub[1]; pub[0] is the gadget's zero pin
-        exp_rows.setdefault(1, pin["tag"])
+        # tag lives at pub[0] (copy-bound to the row-0 a-slot echo gate).
+        # NOTE: "pub[1] / pin['tag']" was a leftover of the OLD unsound
+        # selector-alignment layout; the shipped encoder never emitted a
+        # `tag` key (KeyError), so this dead branch is removed. The nonzero
+        # scan below already enforces pub[0] == opened tag via the copy
+        # constraint, and callers who want belt-and-braces can pass an
+        # explicit expected_public_rows={0: tag} pin.
+        pass
     elif cid in (STMT_SOLVENCY, STMT_RESERVE):
         exp_rows[_pub_amount_row(key)] = pin["min_amount_shard"]
     elif cid == STMT_INCOME:
