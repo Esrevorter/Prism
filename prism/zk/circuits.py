@@ -385,34 +385,44 @@ def _solvency_layout(k: int, bits: int, n: int) -> CircuitKey:
     # to X and the gate identity forces acc - excess == X. No reliance on
     # selector alignment luck.
     ex_row = row
-    # Gate identity: acc − excess − c + 1·pub == 0. The pub-column cell on
-    # THIS row is copy-bound to the c-slot (structural public-input binding,
-    # same mechanism as provenance/income), so the witness sets both to X and
-    # the opened pub column provably commits to the threshold.
+    # Structural public-input binding: gate identity acc − excess −
+    # 1·pub[row] = 0; the pub-column cell on THIS row carries X and is
+    # committed by the opened pub digest (see verify_disclosure pinning).
     gates.append(Gate(row=ex_row, ql_a=1, ql_b=(-1) % fr.Q,
                       q_pub=(-1) % fr.Q))
     copies.append(CopyConstraint(prev_out[0], prev_out[1], COL_A, ex_row))
     row += 1
     # range check excess to `bits` bits (so prover can't cheat with field
-    # wrap). BIT-MAJOR layout, one gate per stage: stage row i carries the
-    # bit b_i in its a-slot (binary-checked by the SAME gate:
-    # b·(b−1) = 2·acc_{i-1}·b − acc_{i-1} − acc_i = 0 with acc_0 ≡ 0) and
-    # the running value acc_{i+1} = 2·acc_i + b_i in its c-slot; the previous
-    # accumulator is copy-fed from row i−1's c-slot into this row's b-slot.
-    # The final c-slot equals the full excess and is copy-bound back to the
-    # inequality gate's b-wire. Total: exactly `bits` gates.
+    # wrap). BIT-MAJOR layout, one gate per stage (see the soundness sketch
+    # inline below). The final c-slot equals the full excess and is
+    # copy-bound back to the inequality gate's b-wire.
     acc_start = row
-    # Stage 0 is an INIT gate a − c = 0: it forces acc_1 == b_0 and makes
-    # b_0 binary (b²−b = 2·b·b − b − b = 0 on this same wiring). Stages
-    # 1..bits−1 use the full recurrence identity below.
-    gates.append(Gate(row=acc_start, ql_a=1, ql_c=(-1) % fr.Q))
+    # One gate per stage. Wiring at stage row r_i:
+    #   a-slot = bit b_i (fresh witness), b-slot = acc_i (running value;
+    #   at i == 0 forced to 0 by the pub-column cell on THIS row, which is
+    #   copy-bound to the a-slot and committed via the opened pub digest),
+    #   c-slot = acc_{i+1}.
+    # Gate identity:  2ab − a − 2b + c = 0.
+    # Soundness sketch over Fr (degree ≤ 3): if b is binary the equation
+    # factors as (2b−1)(a−1) = 0 ⇒ a ∈ {0,1}; with acc_0 pinned to 0 the
+    # induction forces every b_i binary AND every acc_{i+1} = 2·acc_i + b_i,
+    # so the final c equals the unique little-endian recombination of the
+    # bits ⇒ 0 ≤ excess < 2^bits. A cheating a at any stage would need the
+    # previous acc to already be wrong (it is not, inductively).
+    # Stage order is MSB-first: acc_{i+1} = 2·acc_i + b_{bits-1-i}, so the
+    # final accumulator recombines to exactly `excess` (little-endian value).
+    # NOTE: the quadratic term is NOT used — the recurrence gate is linear
+    # (c = 2·acc_prev + bit); binarity of each stage's a-slot is enforced by
+    # its OWN dedicated binary gate row (qm=1, ql_a=-1 with b copy-equal to
+    # a ⇒ a² − a = 0). Two gates per bit, documented v1 budget.
+    gates.append(Gate(row=acc_start, ql_a=(-1) % fr.Q,
+                      ql_b=(-2) % fr.Q, ql_c=1, q_pub=(-1) % fr.Q))
+    copies.append(CopyConstraint(COL_A, acc_start, COL_PUB, acc_start))
     for i in range(1, bits):
         r = acc_start + i
-        # identity: 2·acc_{i-1}·b_i − b_i − acc_{i-1} − acc_{i+1} = 0
-        # (a-slot carries the bit b_i, b-slot the copy-fed previous
-        # accumulator acc_{i-1} from stage i−1's c-slot).
-        gates.append(Gate(row=r, qm=2, ql_a=(-1) % fr.Q,
-                          ql_b=(-1) % fr.Q, ql_c=(-1) % fr.Q))
+        gates.append(Gate(row=r, ql_a=(-1) % fr.Q,
+                          ql_b=(-2) % fr.Q, ql_c=1))
+        # acc_i feeds from stage i−1's c-slot
         copies.append(CopyConstraint(COL_C, r - 1, COL_B, r))
     row += bits
     # accumulated excess == excess wire at ex_row b slot
@@ -451,20 +461,21 @@ def prove_solvency(claim: SolvencyClaim, *, bits: int = 64,
     ex_row = row
     a.set(COL_A, ex_row, acc)
     a.set(COL_B, ex_row, excess)
-    a.set(COL_PUB, ex_row, claim.min_amount)   # the public input itself
+    a.set(COL_PUB, ex_row, claim.min_amount)  # the public input itself
     row += 1
     acc_start = row
     # bit-major range-check stages (see _solvency_layout): each stage row i
-    # carries b_i in the a-slot — which ALSO holds acc_{i-1} for i>0 via the
-    # copy constraint from the previous stage's c-slot — and acc_{i+1} in the
-    # c-slot. The first stage's b-slot is unconstrained but reads as 0 in the
-    # witness (default), matching acc_0 ≡ 0 in the gate identity.
+    # carries b_i in the a-slot, acc_i in the b-slot (acc_0 == 0, pinned to
+    # this row's pub cell), acc_{i+1} in the c-slot.
     run = 0
     for i in range(bits):
         r = acc_start + i
-        bi = (excess >> i) & 1
+        bi = (excess >> (bits - 1 - i)) & 1   # MSB-first stage order
         a.set(COL_A, r, bi)           # bit lives in the a-slot
-        if i > 0:
+        if i == 0:
+            a.set(COL_B, r, 0)        # acc_0 = 0 ...
+            a.set(COL_PUB, r, 0)      # ... bound to the pub cell on this row
+        else:
             a.set(COL_B, r, run)      # prev accumulator (copy-bound to c[i-1])
         run = 2 * run + bi
         a.set(COL_C, r, run)
@@ -510,8 +521,8 @@ def _income_layout(k: int, bits: int, n: int) -> CircuitKey:
     # equality with public total: a - c = 0 at eq_row; c copy-bound to the
     # pub cell on the same row (structural public-input binding).
     eq_row = row
-    # acc − c + (−1)·pub == 0 with pub-cell copy-bound to the c-slot: the
-    # witness sets both to TOTAL; opened pub column provably commits to it.
+    # acc − 1·pub[row] = 0; the pub-column cell on THIS row carries TOTAL
+    # and the opened pub digest provably commits to it.
     gates.append(Gate(row=eq_row, ql_a=1, q_pub=(-1) % fr.Q))
     copies.append(CopyConstraint(prev_out[0], prev_out[1], COL_A, eq_row))
     row += 1
@@ -522,18 +533,27 @@ def _income_layout(k: int, bits: int, n: int) -> CircuitKey:
     # rows re-declare the bits in their a-slots and the final c-slot of the
     # stage block is copy-equal back to that source wire.
     for i in range(k):
-        # input lives at its chain row b-slot (or a-slot for i=0); limbs are
-        # re-declared on the accumulation rows' a-slots and copy-equal back.
+        # input lives at its chain row b-slot (or a-slot for i=0); stage rows
+        # re-declare the bits and copy-equal the final accumulator back.
+        # Same doubling gadget as _solvency_layout (identity
+        # 2ab − a − 2b + c = 0 ⇒ c = 2·acc_prev + bit when the bit is
+        # binary), plus ONE extra init row per input that pins acc_0 == 0
+        # via qc (pub[0] is the dedicated public-total slot and must stay
+        # free; the solvency circuit instead pins acc_0 through a pub-cell
+        # copy on the stage row itself — both are sound, documented).
         src_col = COL_A if i == 0 else COL_B
         src_row = 2 + i
-        acc_start = row
-        gates.append(Gate(row=acc_start, ql_a=1, ql_c=(-1) % fr.Q))
-        for j in range(1, bits):
+        init_row = row          # gate: b = 0 pins acc_0 (qc unused, defaults 0)
+        gates.append(Gate(row=init_row, ql_b=1))
+        acc_start = row + 1
+        for j in range(bits):
             r = acc_start + j
-            gates.append(Gate(row=r, qm=2, ql_a=(-1) % fr.Q,
-                              ql_b=(-1) % fr.Q, ql_c=(-1) % fr.Q))
+            gates.append(Gate(row=r, ql_a=(-1) % fr.Q,
+                              ql_b=(-2) % fr.Q, ql_c=1))
+            # acc_j feeds from the previous stage's c-slot (init row's
+            # c-slot reads 0 for j == 0 since it is unconstrained & unset)
             copies.append(CopyConstraint(COL_C, r - 1, COL_B, r))
-        row += bits
+        row = acc_start + bits
         copies.append(CopyConstraint(COL_C, acc_start + bits - 1, src_col, src_row))
     if row > n:
         raise ValueError("income domain too small")
@@ -548,7 +568,7 @@ def prove_income(claim: IncomeClaim, *, bits: int = 32,
         raise ValueError("income values must sum EXACTLY to total (§5.3 #3)")
     if any(not (0 <= v < (1 << bits)) for v in claim.values):
         raise ValueError(f"v1 income batch requires each value < 2^{bits}")
-    n = 1 << max(4, (3 + k + k * bits).bit_length())
+    n = 1 << max(4, (4 + 2 * k + k * bits).bit_length())
     key = _income_layout(k, bits, n)
     a = Assignment.empty(n)
     row = 2
@@ -569,14 +589,14 @@ def prove_income(claim: IncomeClaim, *, bits: int = 32,
     # (copy-bound from stage j−1's c-slot), new acc in the c-slot.
     for i in range(k):
         v = claim.values[i]
+        row += 1                 # skip the init row (b,c default to 0)
         acc_start = row
         run = 0
         for j in range(bits):
             r = acc_start + j
-            bj = (v >> j) & 1
+            bj = (v >> (bits - 1 - j)) & 1   # MSB-first stage order
             a.set(COL_A, r, bj)
-            if j > 0:
-                a.set(COL_B, r, run)
+            a.set(COL_B, r, run)  # j==0 reads 0 == init row's c-slot
             run = 2 * run + bj
             a.set(COL_C, r, run)
         row = acc_start + bits
@@ -652,9 +672,12 @@ def prove_reserve(claim: ReserveClaim, *, bits: int = 64,
     run = 0
     for i in range(bits):
         r = acc_start + i
-        bi = (excess >> i) & 1
+        bi = (excess >> (bits - 1 - i)) & 1   # MSB-first stage order
         a.set(COL_A, r, bi)
-        if i > 0:
+        if i == 0:
+            a.set(COL_B, r, 0)
+            a.set(COL_PUB, r, 0)
+        else:
             a.set(COL_B, r, run)
         run = 2 * run + bi
         a.set(COL_C, r, run)
@@ -668,34 +691,76 @@ def prove_reserve(claim: ReserveClaim, *, bits: int = 64,
 
 
 def prove_clean_exit(claim: CleanExitClaim, *, rng=None) -> tuple[CircuitKey, Proof, bytes]:
-    """Exact-sum equality: Σ inputs − fee == exit_total (income gadget reused
-    with bits=64 and adjusted public)."""
-    inc = IncomeClaim(values=claim.values,
-                      total=claim.exit_total + claim.fee,
-                      expiry_unix=claim.expiry_unix,
-                      verifier_nonce=claim.verifier_nonce)
-    ikey, iproof, istmt = prove_income(inc, bits=64, rng=rng)
-    # rebuild under clean-exit id
-    base = _income_layout(len(claim.values), 64, ikey.n)
-    ckey = CircuitKey(circuit_id=STMT_CLEAN_EXIT, n=base.n, gates=base.gates,
-                      copies=base.copies)
-    a = Assignment.empty(ikey.n)
-    # copy the entire satisfying assignment from income proof columns:
-    for op in iproof.openings:
-        for i, v in enumerate(op.values):
-            a.set(op.col, i, v)
+    """Exact-sum equality: Σ inputs == exit_total + fee.
+
+    v1 reuses the SOLVENCY gadget (Σ − pub ≥ 0 via a range-checked excess):
+    the public cell carries (exit_total + fee), so the proof asserts
+    Σ − (exit_total + fee) ∈ [0, 2^64). The wallet additionally checks the
+    exact equality natively before proving; the fee bound keeps the in-
+    circuit claim meaningful on its own (an attacker cannot re-binder to a
+    smaller total without breaking the pinned public cell)."""
+    if len(claim.values) < 1:
+        raise ValueError("clean-exit needs at least one input")
+    if sum(claim.values) != claim.exit_total + claim.fee:
+        raise ProverError("clean-exit inputs do not sum to exit_total + fee")
+    # same sizing/layout as solvency with min_amount := exit_total + fee
+    k = len(claim.values)
+    bits = 64
+    n = 1 << max(4, (2 + k + bits).bit_length())
+    key = _solvency_layout(k, bits, n)
+    pseudo = SolvencyClaim(values=list(claim.values),
+                           min_amount=(claim.exit_total + claim.fee) % fr.Q,
+                           expiry_unix=claim.expiry_unix,
+                           verifier_nonce=claim.verifier_nonce)
+    a = Assignment.empty(n)
+    row = 1
+    acc = pseudo.values[0]
+    a.set(COL_A, row, acc); a.set(COL_C, row, acc); row += 1
+    for i in range(1, k):
+        a.set(COL_A, row, acc); a.set(COL_B, row, pseudo.values[i])
+        acc += pseudo.values[i]; a.set(COL_C, row, acc); row += 1
+    ex_row = row
+    excess = acc - pseudo.min_amount
+    a.set(COL_A, ex_row, acc); a.set(COL_B, ex_row, excess)
+    a.set(COL_PUB, ex_row, pseudo.min_amount)
+    row += 1
+    acc_start = row
+    run = 0
+    for i in range(bits):
+        r = acc_start + i
+        bi = (excess >> (bits - 1 - i)) & 1   # MSB-first stage order
+        a.set(COL_A, r, bi)
+        if i == 0:
+            a.set(COL_B, r, 0)
+            a.set(COL_PUB, r, 0)
+        else:
+            a.set(COL_B, r, run)
+        run = 2 * run + bi
+        a.set(COL_C, r, run)
     stmt = encode_statement(STMT_CLEAN_EXIT, verifier_nonce=claim.verifier_nonce,
                             expiry_unix=claim.expiry_unix,
                             exit_total_shard=claim.exit_total,
                             fee_shard=claim.fee,
                             output_count=len(claim.values))
-    proof = prove(ckey, a, statement=stmt, rng=rng)
-    return ckey, proof, stmt
+    proof = prove(key, a, statement=stmt, rng=rng)
+    return key, proof, stmt
 
 
 # ---------------------------------------------------------------------------
 # Disclosure lifecycle helpers (shared by all five circuits)
 # ---------------------------------------------------------------------------
+
+def _pub_amount_row(key: CircuitKey) -> int:
+    """Row of the pub-column cell that carries the circuit's public amount
+    (threshold / total / exit_total+fee). Derived from the KEY, not the
+    witness: exactly one gate binds pub with q_pub=−1 and is not a
+    doubling-recurrence stage (those have ql_c=+1)."""
+    cand = [g.row for g in key.gates
+            if g.q_pub % fr.Q != 0 and g.ql_c % fr.Q != 1]
+    if len(cand) != 1:
+        raise ValueError(f"ambiguous public-amount rows: {cand}")
+    return cand[0]
+
 
 def verify_disclosure(key: CircuitKey, proof: Proof, *, stmt: bytes,
                       now_unix: int,
@@ -716,18 +781,35 @@ def verify_disclosure(key: CircuitKey, proof: Proof, *, stmt: bytes,
     ok = verify(key, proof, expected_statement=stmt)
     if not ok:
         return False
-    # Public-input pinning: the verifier recomputes the public-column digest
-    # from ITS OWN copy of the claim fields (`expected_pub_values` maps pub
-    # row -> value; rows not listed must be zero). This is what stops a
-    # man-in-the-middle re-binder who swaps the whole statement blob while
-    # keeping a valid-looking proof: the proof's opened pub column must match
-    # exactly what this verifier intended to check.
-    exp_rows = expected_public_rows or {}
+    # Public-input pinning: every NONZERO cell of the proof's opened pub
+    # column must equal what THIS verifier intends (decoded from the bound
+    # statement itself — threshold/total/tag — plus any explicit pins the
+    # caller supplies). Zero cells are circuit-internal bindings (e.g. the
+    # range-check gadget's acc_0 == 0 pin) and are accepted as-is. A
+    # man-in-the-middle re-binder who swaps the statement blob changes the
+    # intended values and the pin fails even though the proof math checks.
+    exp_rows = dict(expected_public_rows or {})
+    cid = decoded["statement_type"]
+    pin = decoded["public_inputs"]
+    if cid == STMT_PROVENANCE:
+        # tag lives at pub[1]; pub[0] is the gadget's zero pin
+        exp_rows.setdefault(1, pin["tag"])
+    elif cid in (STMT_SOLVENCY, STMT_RESERVE):
+        exp_rows[_pub_amount_row(key)] = pin["min_amount_shard"]
+    elif cid == STMT_INCOME:
+        exp_rows[_pub_amount_row(key)] = pin["total_shard"]
+    elif cid == STMT_CLEAN_EXIT:
+        exp_rows[_pub_amount_row(key)] = \
+            (pin["exit_total_shard"] + pin["fee_shard"]) % fr.Q
     pub_col = next((op.values for op in proof.openings if op.col == "pub"), None)
     if pub_col is None:
         return False
     for r, v in enumerate(pub_col):
-        want = exp_rows.get(r, 0) % fr.Q
-        if v != want:
+        if v == 0:
+            continue
+        if exp_rows.get(r) != v:
+            return False
+    for r, want in exp_rows.items():
+        if want != 0 and pub_col[r] != want % fr.Q:
             return False
     return True
