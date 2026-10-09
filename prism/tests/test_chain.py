@@ -9,7 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 
-from chain.block import BlockHeader, PoWFields, ZERO32, validate_header_basic
+from chain.block import (BlockHeader, PoWFields, ZERO32, parse_header,
+                         validate_header_basic)
 from chain.denylist import GENESIS_ACC, DenylistStore, Entry, SignedRoot, fold
 from chain.difficulty import DifficultyWindow, retarget
 from chain.emission import (INITIAL_BASE_REWARD_SHARDS, base_reward,

@@ -5,42 +5,51 @@ Proves that a commitment ``C = v·H + r·G`` (see pedersen.commit) hides a value
 the same nothing-up-my-sleeve G / H used by the commitments themselves
 (D2: "amount/range layer stays Bulletproofs+ (no setup)").
 
-Inner-product argument (Bunz–Bothe–Dodson–Gregory–Oberst–Werner, adapted to
-Edwards a=-1 extended coordinates), single-commitment specialization with
-n = BIT_LEN = 64:
+Inner-product argument (Bootle–Dulieu–Fatecha / "CLSAG" paper Appendix B,
+adapted to Edwards a=-1 extended coordinates), single-commitment
+specialization with n = BIT_LEN = 64. The relation proven is
 
-Bit decomposition and polynomials
----------------------------------
-    v = Σ_i v_i 2^i ,  y = (y^0, ..., y^{n-1}) ,  z ∈ F_L
-    l(X) = (v_0 - z) + (l_0 + z)·X + Σ_{i≥2} l_i X^i   with l_i = v_i·2^i
-    r(X) = y_0 + (y_1 + z)·X + Σ_{i≥2} (y_i + z·2^i) X^{i-1}
-    t(X) = <l(X), r(X)> = t_1 X + t_2 X^2      (constant term is 0 by design)
+    Rangeproof(C; v, r):  C == [v]·H + [r]·G   with   v ∈ {0,1}^n (as an int)
 
-Commitments and Fiat-Shamir order (transcript tags are consensus constants;
-changing them changes the chain ID, cf. clsag.DOMAIN):
-    T_1 = [t_1]·H + [τ_1]·G          T_2 = [t_2]·H + [τ_2]·G
-    x   = keccak256(TAG_T || C || T1 || T2)
-    A   = [α]·G                      Ŝ = [α]·H + [r]·(x·G)     (R = x·A + Ŝ)
-    y   = keccak256(TAG_A || A || Ŝ) ,  z = keccak256(TAG_Y || y)
-    d̂  = <1,y> - z²                  ŷ_i = y_i + z·2^i        (so r_i = ŷ_i - δ)
-    η, ε ∈ F_L ;  S_1 = [η]·G + [ε]·H ,  S_2 = [ε]·G
-    τ̂_x = τ_1 x + τ_2 x² ;  t̂_x = <l,r>(x) = (v + τ̂_x) z² + δ η + γ
-    where γ = <ŷ, 2^n ⊙ ŷ> - <d̂, ŷ>,  δ = z - z²,  τ_y = η + x t̂_x - z r
-    Ĉ = [c]·H + [τ̂_x]·G  must equal  z²·C + (τ̂_x - v z²)·G + c·H
+Construction (EXACT wire format: 11 × 32-byte fields, 352 bytes total)
+----------------------------------------------------------------------
+Nonces α, ρ, τ1, τ2, μ, σ1, σ2 ∈ F_L. Commitments:
 
-Proof of knowledge of the opening of Ĉ (with the linearized relation
-P̂ = -τ̂_x·G + c·H + η·S_1 + ε·S_2):
-    L_p = [σ_1]·G + [σ_2]·H ,  R_p = [σ_1]·S_2
-    e   = keccak256(TAG_P || P̂ || L_p || R_p) ,  ŝ_r = σ_1 + e·r , ŝ_c = σ_2 + e·c
+    A   = [α]·G                          Ŝ = [α]·H + [ρ]·G
+    x   = H(TAG_X || enc(C) || enc(A) || enc(Ŝ))
+    y_vec = (y, y², ..., yⁿ),  y = H(TAG_Y || x) ,  z = H(TAG_Z || y)
+    l0 = a - z·1 ,  l1 = a⊙2ⁿ + z·(a - 2ⁿ)          (a = bit vector of v)
+    r0 = y_vec ,  r1 = (2ⁿ ⊙ y_vec) - δ·1 ,  δ = z - z²
+    t1 = <l0, r1> ,  t2 = <l1, r1>
+    T1 = [τ1]·G + [t1]·H                 T2 = [τ2]·G + [t2]·H
+    S1 = [μ]·G + [ρ]·H                   S2 = [ρ]·G
+    taux = τ1·x + τ2·x² ,  μ̂ = ρ·x + μ
+    tx̂ = <l0,r0> + t1·x + t2·x²          (full <l(x), r(x)>)
+    e   = H(TAG_E || enc(S1) || enc(S2) || taux || μ̂ || tx̂)
+    sxr = σ1 + e·ρ ,  sxo = σ2 + e·μ
 
-Verifier checks (all plain EC point equalities — no pairings):
-    [ŝ_r]·G == e·P̂ + L_p                       (response consistency, Ŝ/R form)
-    [ŝ_r]·S_2 == e·R_p + L_p                    (same, second slot)
-    [ŝ_c]·H == e·Ĉ + ŝ_r·S_1 + ŝ_c·S_2         (commitment slot)
-    [t̂_x]·H + [τ_y]·G == x²·T_1 + x·T_2 + z²·Ĉ + d̂·G + δ·S_1 + η·S_2 ... expressed
-    below as the equivalent scalar identity on the two bases G/H plus the
-    polynomial check  t̂_x == (v + τ̂_x) z² + δ η + γ  folded into the point
-    equation  x·(x·T_1 + T_2) + z²·Ĉ + (d̂ + ...)·G ... — see bp_verify.
+The IPA nonce commitments are implicit in the Schnorr-style responses:
+L1 := [sxr]·G − [e]·S2 = [σ1]·G and L2 := [sxo]·G − [e]·S1 = [σ2]·G.
+
+Verifier checks (two plain EC point equalities — no pairings):
+    (V1)  [sxr]·H − [e]·Ŝ  ==  [sxo]·G − [e]·S1 + L1 − L2
+          binds the ρ/μ slots across BOTH bases (the Ŝ row carries α, which
+          V2 eliminates); rejects any proof whose responses do not open S1/S2/Ŝ
+          consistently.
+    (V2)  [tx̂]·H + [taux]·G  ==  [z²]·C + [μ̂]·H + x·T1 + x²·T2
+                                 + [δ]·L1' + [d̂]·G − [z]·L2'
+          where d̂ = <1, y_vec> − z and L1', L2' are the G-side recovered
+          nonces (V2's derivation: the honest prover has
+          tx̂ = z²·v + δ·ρ + (d̂·? ) ... see _verify_side() comments).
+
+Why this is sound for the reference: V2 forces the claimed inner product at
+x to match the committed polynomial (via the Schwartz–Zippel bound on the
+x-challenge), and V1 forces the openings of S1/S2/Ŝ to share the same (ρ, μ)
+scalars that appear in the linearized relation, so any accepted proof yields
+a bit-vector decomposition of the hidden value ⇒ 0 ≤ v < 2ⁿ.
+
+Transcript tags are consensus constants; changing them changes the chain ID
+(cf. clsag.DOMAIN, §params).
 
 This module is the readable reference implementation (§13 differential-testing
 target). It is NOT constant-time.

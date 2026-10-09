@@ -1,5 +1,7 @@
-# Compiled files
+# Compiled and build artifacts
+__pycache__/
 *.pyc
 
-# Dependency directories
-__pycache__/
+# Environment
+.env
+.env.local
