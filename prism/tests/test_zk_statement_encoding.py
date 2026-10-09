@@ -269,7 +269,9 @@ class TestStatementBindingEndToEnd:
         kw = {"verifier_nonce": dec["verifier_nonce"], "expiry_unix": dec["expiry_unix"]}
         reenc = C.encode_statement(dec["statement_type"], **kw, **pi)
         assert reenc == stmt
-        key, proof = outs[0], outs[1]
+        # outs[-1] is the statement blob; key is outs[0], proof is outs[-2]
+        # (prove_provenance additionally returns the witness Assignment).
+        key, proof = outs[0], outs[-2]
         assert verify(key, proof, expected_statement=reenc)
 
 

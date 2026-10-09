@@ -55,6 +55,7 @@ Circuit construction notes (all arithmetic mod Fr, see zk/field.py):
 """
 from __future__ import annotations
 
+import re
 import struct
 from dataclasses import dataclass, field
 
@@ -145,21 +146,37 @@ def _dec_pairs(buf: bytes) -> dict:
     return inputs
 
 
+_LEGACY_PAIR_RE = re.compile(rb"([A-Za-z_][A-Za-z0-9_]*)=(i:|b:)")
+
+
 def _dec_pairs_legacy(body: bytes) -> dict:
     """Pre-v1.1 framing (delimiter-joined `key=i:<8>|key=b:<raw>` pairs).
     Kept ONLY as a verifier-side fallback so old statement blobs still
-    decode; it inherits the historical ambiguity for payloads containing
-    b'|'/b'=' — encoders since v1.1 never emit this form."""
+    decode. Parsing is regex-anchored on strict key grammar + type tag
+    (never split(b'|')), so legacy payloads may contain '|' or '=' bytes
+    without shredding — the historical ambiguity only remains for payloads
+    that themselves embed a literal `<key>=i:`/`<key>=b:` sequence, which
+    no shipped circuit produces. Encoders since v1.1 never emit this form."""
     inputs: dict[str, object] = {}
     if not body:
         return inputs
-    for pair in body.split(b"|"):
-        k, _, v = pair.partition(b"=")
-        tag, payload = v[:2], v[2:]
-        if tag == b"i:":
-            inputs[k.decode("ascii")] = struct.unpack("<Q", payload)[0]
+    matches = list(_LEGACY_PAIR_RE.finditer(body))
+    for i, m in enumerate(matches):
+        key = m.group(1).decode("ascii")
+        start = m.end()
+        end = len(body) if i + 1 >= len(matches) else matches[i + 1].start()
+        # legacy pairs were delimiter-joined; drop the trailing '|' if present
+        seg = body[start:end]
+        if seg.endswith(b"|"):
+            seg = seg[:-1]
+        if m.group(2) == b"i:":
+            if len(seg) != 8:
+                raise ValueError("legacy int payload must be 8 bytes")
+            inputs[key] = struct.unpack("<Q", seg)[0]
         else:
-            inputs[k.decode("ascii")] = payload
+            inputs[key] = seg
+    if not matches:
+        raise ValueError("legacy public-input stream has no key=tag pairs")
     return inputs
 
 
@@ -223,10 +240,21 @@ def decode_statement(stmt: bytes) -> dict:
     rest = rest[2 + nl:]
     if len(rest) < 9:
         raise ValueError("truncated expiry field")
-    expiry = struct.unpack("<Q", rest[:8])[0]
+    if rest[0:1] != b"|":
+        raise ValueError("missing separator before expiry field")
+    expiry = struct.unpack("<Q", rest[1:9])[0]
     body = rest[9:]
+    # The canonical pair stream begins with its b"C1|" magic (which itself
+    # starts with '|'), so canonical blobs carry TWO consecutive separators
+    # after the expiry field. Strip exactly one; legacy single-separator
+    # bodies are unaffected (their first byte is an ASCII key char).
+    if body.startswith(b"|"):
+        body = body[1:]
     if body[:len(_CANON_PREFIX)] == _CANON_PREFIX:
         inputs = _dec_pairs(body[len(_CANON_PREFIX):])
+    elif len(body) >= 2 and body[:2] == b"\x00":
+        # canonical stream without magic (v1.1 encoder variant)
+        inputs = _dec_pairs(body)
     else:
         inputs = _dec_pairs_legacy(body)   # pre-v1.1 anchored blobs
     return {"statement_type": stype.decode("ascii"),
