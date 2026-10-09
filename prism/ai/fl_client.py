@@ -237,7 +237,9 @@ class FLClient:
 
     # -- local training ---------------------------------------------------
 
-    def local_update(self, samples: Sequence[TrainingSample]) -> Vec:
+    def local_update(self, samples: Sequence[TrainingSample], *,
+                     base_weights: Optional[Vec] = None,
+                     base_bias: Optional[float] = None) -> Vec:
         """One-shot supervised step on the client's own labeled history.
 
         Semantics (production swaps SGD mini-batches behind this interface):
@@ -251,13 +253,27 @@ class FLClient:
         model chase its own class mix into saturation — the bias would drift
         toward whichever label dominates even after every sample is already
         classified correctly, leaking label-fraction information into the
-        shared update. A single mean-gradient step keeps the update honest:
-        symmetric classes → bias term cancels at 0; skewed classes → the bias
-        moves toward the majority-label prior. Returns the DELTA vector
-        (weights then bias) before any privacy operations.
+        shared update. A single mean-gradient step keeps the update honest.
+        Returns the DELTA vector (weights then bias) before any privacy
+        operations.
+
+        Bias-prior sign convention: fraud labels are the rare positive class
+        in real traffic, so a client whose batch skews fraud-heavy must move
+        the global prior UPWARD (Δb > 0). We therefore descend the negated
+        loss gradient — Δ = +lr·mean((y − p)·[x…, 1]) — which reduces to the
+        exact label-mean shift at a neutral linearization point:
+        Δb = lr·(ȳ − p̄). Balanced batches cancel; skew raises the prior.
+
+        ``base_weights`` / ``base_bias`` optionally pin the linearization
+        point (defaults: the client's current model). FedAvg rounds evaluate
+        the gradient at the SHARED global model, not each device's private
+        local state — that keeps the submitted delta an unbiased signal about
+        the batch instead of leaking how far a device's personal model has
+        drifted from the global one.
         """
         dim = len(self.weights) + 1
-        w, b = list(self.weights), self.bias
+        w = list(self.weights if base_weights is None else base_weights)
+        b = self.bias if base_bias is None else float(base_bias)
         n = max(1, len(samples))
 
         gw = [0.0] * (dim - 1)
@@ -266,7 +282,7 @@ class FLClient:
             z = b + sum(wi * xi for wi, xi in zip(w, s.features))
             z = max(-50.0, min(50.0, z))
             p = 1.0 / (1.0 + math.exp(-z))
-            err = p - s.label
+            err = s.label - p                    # ascend toward the label mean
             for i, x in enumerate(s.features):
                 gw[i] += err * x
             gb += err
@@ -278,7 +294,7 @@ class FLClient:
         if math.sqrt(sum(g * g for g in grad)) < self.convergence_tol:
             return [0.0] * dim
 
-        return clip_l2([-self.lr * g for g in grad], self.clip_norm)
+        return clip_l2([self.lr * g for g in grad], self.clip_norm)
 
     # -- privacy pipeline --------------------------------------------------
 
