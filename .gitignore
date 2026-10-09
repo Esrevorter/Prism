@@ -1,8 +1,2 @@
-(empty)
-# build artifacts
-/dist/
-/build/
-/prism-*/
-*.zip
-
-*.egg-info/
+__pycache__/
+*.pyc
