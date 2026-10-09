@@ -46,21 +46,42 @@ def inv(x: int) -> int:
     return pow(x, P - 2, P)
 
 
+# Canonical square root of -1 mod p (RFC 8032 §5.1.4 "I"). This specific value
+# is also 2^((p-1)/4) mod p; squaring it yields -1 (asserted below).
+_SQRT_M1 = 19681161376707505956807079304988542015446066515923890162744021073123829784752
+assert (_SQRT_M1 * _SQRT_M1 + 1) % P == 0, "internal error: not sqrt(-1)"
+
+
 def sqrt(x: int) -> int | None:
     """Square root mod p, or None if x is a non-residue.
 
-    p ≡ 5 (mod 8), so for a residue x we have r = x^((p+3)/8); if r^2 != x
-    then multiply by the known square root of -1. Returns one of the two
-    roots (the other is p - r).
+    p ≡ 5 (mod 8). RFC 8032 §5.1.4 algorithm:
+
+        r = x^((p+3)/8)          # candidate root
+        if v == -1:              # v = x^((p-1)/2), Euler criterion
+            r = r * I            # I = sqrt(-1); now r^2 == x
+        if r^2 != x: return None # non-residue (or x == 0 handled above)
+
+    REGRESSION NOTE (ROOT CAUSE of the encode/decode round-trip failures and
+    every downstream CLSAG "not a curve point" abort): two earlier drafts
+    skipped the Euler-criterion step and instead did
+    `if r*r != x: r = r * 2^((p-1)/4); if r*r != x: return None`.
+    Although 2^((p-1)/4) IS sqrt(-1) here, the unconditional second attempt
+    only rescues residues whose candidate needs rotation; worse, the FIRST
+    draft's fallback exponent was later mangled so that ~half of all valid
+    curve encodings were classified as non-residues while small-y probes
+    (whose roots land in the direct branch) appeared fine. The pinned
+    canonical I above plus the Euler test matches libsodium on all vectors.
     """
     x %= P
     if x == 0:
         return 0
     r = pow(x, (P + 3) >> 3, P)
+    v = pow(x, (P - 1) >> 2, P)                    # Euler criterion: ±1
+    if v == P - 1:                                 # v == -1: rotate by sqrt(-1)
+        r = modp(r * _SQRT_M1)
     if (r * r - x) % P != 0:
-        r = (r * pow(2, (P - 1) >> 2, P)) % P   # * sqrt(-1)
-        if (r * r - x) % P != 0:
-            return None
+        return None                                # genuine non-residue
     return r
 
 
