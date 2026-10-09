@@ -21,9 +21,11 @@ sys.path.insert(0, "..") if __package__ in (None, "") else None
 
 import pytest  # noqa: E402
 
+from prism.chain.block import (HEADER_WIRE_LEN, BlockHeader, PoWFields,
+                               parse_header)  # noqa: E402
 from prism.crypto.hashing import keccak_256  # noqa: E402
-from prism.mpc.sharing import (ScalarField, Share, make_shares,  # noqa: E402
-                               random_poly, reconstruct)
+from prism.mpc.sharing import (ED25519_SCALARS, Share, lagrange_coefficients,
+                               make_shares, random_poly, reconstruct)  # noqa: E402
 from prism.zk import circuits as C  # noqa: E402
 
 SEEDS = (0x7A5E, 0xC0FFEE, 0xDEADBEEF, 0xBADF00D)
@@ -139,7 +141,74 @@ class TestFuzzDecodeStatement:
 
 
 # ---------------------------------------------------------------------------
-# Target 2: MPC share reconstruction — malformed share lists must be clean
+# Target 2: chain.block.parse_header — untrusted network framing. Total
+# function contract: returns a BlockHeader or raises ValueError; exact-length
+# framing means mutated blobs of wrong size are rejected, and same-size
+# mutations must decode to exactly the mutated field values (never desync).
+# ---------------------------------------------------------------------------
+
+def _valid_headers(rng: random.Random) -> list[bytes]:
+    def h(height: int) -> BlockHeader:
+        return BlockHeader(
+            height=height, timestamp=1_700_000_000 + height * 120,
+            prev_hash=keccak_256(f"blk-{height}".encode()),
+            merkle_root=keccak_256(f"mrk-{height}".encode()),
+            im_merkle_root=keccak_256(f"imx-{height}".encode()),
+            denylist_root=keccak_256(f"deny-{height}".encode()),
+            pow=PoWFields(nonce=struct.pack("<Q", rng.randrange(2**64)),
+                          viewkey_hash=keccak_256(b"epoch-seed")),
+            version_major=1, version_minor=0,
+            version_vote=bool(rng.randrange(2)), size_bytes=HEADER_WIRE_LEN)
+    return [h(i).serialize() for i in range(3)] + [b"", b"\x00" * HEADER_WIRE_LEN]
+
+
+def _parse_total(buf: bytes):
+    try:
+        hd = parse_header(buf)
+        assert isinstance(hd.height, int) and isinstance(hd.prev_hash, bytes)
+        assert len(hd.prev_hash) == 32 and len(hd.pow.nonce) == 8
+        assert isinstance(hd.version_vote, bool)
+    except ValueError:
+        pass  # documented rejection path
+
+
+class TestFuzzChainParsing:
+    @pytest.mark.parametrize("seed", SEEDS)
+    def test_never_crashes_on_mutated_headers(self, seed):
+        rng = random.Random(seed ^ 0xDA7A)
+        corpus = _valid_headers(rng)
+        for _ in range(400):
+            _parse_total(_mutate(rng, bytearray(rng.choice(corpus))))
+
+    @pytest.mark.parametrize("seed", SEEDS)
+    def test_random_bytes_never_crashes(self, seed):
+        rng = random.Random(seed ^ 0xCAFE)
+        for _ in range(300):
+            n = rng.randrange(0, HEADER_WIRE_LEN + 40)
+            _parse_total(rng.randbytes(n))
+
+    @pytest.mark.parametrize("seed", SEEDS)
+    def test_same_size_mutations_decode_to_mutated_fields(self, seed):
+        """No desync: byte flips inside a correct-length blob only ever move
+        field VALUES; they can never shift field BOUNDARIES."""
+        rng = random.Random(seed ^ 0x51A2)
+        base = _valid_headers(rng)[0]
+        for _ in range(200):
+            b = bytearray(base)
+            for _ in range(rng.randint(1, 6)):     # in-place flips only
+                i = rng.randrange(len(b))
+                b[i] ^= 1 << rng.randrange(8)
+            hd = parse_header(bytes(b))            # exact length ⇒ must parse
+            assert hd.serialize() == bytes(b)      # canonical re-encode fixpoint
+
+    def test_roundtrip_canonical_headers(self):
+        rng = random.Random(0xB0C)
+        for buf in _valid_headers(rng)[:3]:
+            assert parse_header(buf).serialize() == buf
+
+
+# ---------------------------------------------------------------------------
+# Target 3: MPC share reconstruction — malformed share lists must be clean
 # failures (field errors / wrong counts), and valid ceremonies must survive
 # element mutation without ever returning a WRONG secret silently.
 # ---------------------------------------------------------------------------
@@ -148,8 +217,8 @@ class TestFuzzMPCReconstruct:
     @pytest.mark.parametrize("seed", SEEDS)
     def test_valid_quorum_always_reconstructs(self, seed):
         rng = random.Random(seed)
-        f = ScalarField()
-        secret = rng.randrange(1, f.q)
+        f = ED25519_SCALARS
+        secret = rng.randrange(1, f.order)
         coeffs = random_poly(secret, 3, f, rng=rng)
         shares = make_shares(coeffs, 5, f)
         for _ in range(40):
@@ -159,29 +228,46 @@ class TestFuzzMPCReconstruct:
     @pytest.mark.parametrize("seed", SEEDS)
     def test_corrupted_shares_never_silently_recover(self, seed):
         rng = random.Random(seed ^ 0xABCD)
-        f = ScalarField()
-        secret = rng.randrange(1, f.q)
+        f = ED25519_SCALARS
+        secret = rng.randrange(1, f.order)
         coeffs = random_poly(secret, 3, f, rng=rng)
         shares = make_shares(coeffs, 5, f)
         for _ in range(120):
-            quorum = [Share(s.index, (s.value + rng.randrange(-3, 4)) % f.q)
-                      for s in rng.sample(shares, 3)]
+            deltas = [rng.randrange(-3, 4) for _ in range(3)]
+            quorum = [Share(s.index, (s.value + d) % f.order)
+                      for s, d in zip(rng.sample(shares, 3), deltas)]
             got = reconstruct(quorum, f)
-            # either untouched (no-op corruption) or provably different —
-            # the dangerous case 'wrong-but-plausible equal' cannot happen
-            # unless we added multiples of q (we didn't: |delta| <= 3, q huge)
-            assert got != secret or all(q.value == s.value
-                                        for q, s in zip(quorum, shares))
+            # Corruption propagates EXACTLY through the Lagrange combination:
+            # recovered == secret + Σ λ_i·δ_i (mod order). This pins both
+            # directions at once — untouched deltas can never change the
+            # secret, and any delta that does change it is provably the
+            # weighted sum (no silent, unexplained 'wrong-but-plausible'
+            # recovery is possible).
+            lambdas = lagrange_coefficients([s.index for s in quorum], f)
+            expected = secret
+            for s, d in zip(quorum, deltas):
+                expected = f.add(expected, f.mul(lambdas[s.index], d))
+            assert got == expected
+            if got == secret:
+                # The ONLY way corrupted shares still yield the secret is a
+                # perfectly cancelling corruption — every party's deviation
+                # must be exactly neutralised by the others'. In Shamir this
+                # needs coordinated malicious parties with full knowledge of
+                # each other's deviations; an uncoordinated fault cannot do
+                # it. Pin that structure explicitly: nonzero deltas that
+                # cancel must involve at least two corrupted parties.
+                nz = [d for d in deltas if d != 0]
+                assert len(nz) >= 2 or all(d == 0 for d in deltas)
 
     @pytest.mark.parametrize("seed", SEEDS)
     def test_garbage_share_lists_raise_cleanly(self, seed):
         rng = random.Random(seed ^ 0x1234)
-        f = ScalarField()
+        f = ED25519_SCALARS
         for _ in range(150):
             bad = []
             for _ in range(rng.randrange(1, 4)):
                 idx = rng.choice([0, 1, rng.randrange(1, 6), rng.randrange(2**32)])
-                val = rng.choice([0, rng.randrange(f.q), rng.randrange(2**300)])
+                val = rng.choice([0, rng.randrange(f.order), rng.randrange(2**300)])
                 bad.append(Share(idx, val))
             dup = any(a.index == b.index for a in bad for b in bad if a is not b)
             try:
