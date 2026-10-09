@@ -366,13 +366,35 @@ class AgentRuntime:
 
     def __init__(self, engine: Optional[PolicyEngine] = None,
                  signer: Optional[SignerStub] = None,
-                 log: Optional[AgentActionLog] = None):
+                 log: Optional[AgentActionLog] = None,
+                 gate=None):
         self.engine = engine or PolicyEngine()
         self.log = log or AgentActionLog()
         self.signer = signer or SignerStub(self.engine)
+        # Optional prism.ai.simulator.SigningGate carrying a FraudDetector —
+        # when wired, propose()/tick() score the REAL transaction features
+        # (destination/memo/utterance/balance/drain-share) instead of
+        # trusting caller-supplied advisory numbers (§7.3 step 4 + §8.4).
+        self.gate = gate
         self.grants: dict[str, Grant] = {}
         self.pending: dict[str, PendingAction] = {}
         self.spent_by_grant: dict[str, int] = {}
+
+    def _live_risk(self, intent: Intent, *, now_unix: int,
+                   contact_verified: Optional[bool],
+                   fallback_score: float,
+                   balance_shard: Optional[int] = None) -> float:
+        """Advisory risk score for an agent action: from the wired gate's
+        detector when present, else the caller-supplied fallback."""
+        if self.gate is None:
+            return fallback_score
+        from prism.ai import simulator as SIM   # local import: no cycle
+        snap = SIM.ChainSnapshot(
+            [SIM.SnapshotOutput("agent:balance", 0, balance_shard)]
+            if balance_shard and balance_shard > 0 else [])
+        rev = self.gate.review(intent, snap, now_unix=now_unix,
+                               contact_verified=contact_verified)
+        return rev.risk.score
 
     # -- grants -------------------------------------------------------------
 
@@ -402,7 +424,8 @@ class AgentRuntime:
 
     def propose(self, intent: Intent, grant_id: str, *, now_unix: int,
                 risk_score: float = 0.0,
-                contact_verified: bool = False) -> PendingAction:
+                contact_verified: bool = False,
+                balance_shard: Optional[int] = None) -> PendingAction:
         grant = self.grants.get(grant_id)
         if grant is None:
             raise PolicyViolation(f"unknown grant {grant_id!r}")
@@ -418,14 +441,21 @@ class AgentRuntime:
             self.log.transition(rec.action_id, "blocked_by_policy",
                                 "; ".join(violations), now_unix=now_unix)
             raise PolicyViolation("; ".join(violations))
-        if risk_score >= RISK_CLEAN_MAX:
+        # Advisory risk: computed from real tx features when a SigningGate
+        # is wired; otherwise the caller-supplied score stands (§8: model
+        # output is advisory — it can block auto-execution but never signs).
+        live_risk = self._live_risk(intent, now_unix=now_unix,
+                                    contact_verified=contact_verified,
+                                    fallback_score=risk_score,
+                                    balance_shard=balance_shard)
+        if live_risk >= RISK_CLEAN_MAX:
             self.log.transition(rec.action_id, "blocked_by_risk_model",
-                                f"risk score {risk_score:.2f} ≥ clean bound",
+                                f"risk score {live_risk:.2f} ≥ clean bound",
                                 now_unix=now_unix)
-            pa = PendingAction(rec, intent, 0, risk_score)
+            pa = PendingAction(rec, intent, 0, live_risk)
             return pa
         deadline = now_unix + int(grant.veto_window_hours * 3600)
-        pa = PendingAction(rec, intent, deadline, risk_score)
+        pa = PendingAction(rec, intent, deadline, live_risk)
         # §8.4 instant path: verified whitelisted recipient + under comfort cap
         if self.engine.instant_path_allowed(intent, grant,
                                             contact_verified=contact_verified):

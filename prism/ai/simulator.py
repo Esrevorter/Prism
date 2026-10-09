@@ -226,6 +226,7 @@ class Review:
     proceed: bool                     # UI may show confirm button iff True
     interruption: bool                # calm card + sleep-on-it offered (§7.3 step 4)
     reasons: list[str] = field(default_factory=list)
+    policy_refusals: list[str] = field(default_factory=list)  # agent grants only (§8.4)
 
 
 class SigningGate:
@@ -240,14 +241,21 @@ class SigningGate:
       * This class holds no key material and emits no signature request.
     """
 
-    def __init__(self, detector: Optional[FraudDetector] = None):
+    def __init__(self, detector: Optional[FraudDetector] = None,
+                 engine=None):
         self.detector = detector or FraudDetector()
+        # Optional prism.wallet.agent_auth.PolicyEngine — when present, agent
+        # proposals are policy-checked HERE, at the same place the human
+        # confirmation gate lives (§8.4 belt-and-braces; the signer re-checks
+        # again at signing time regardless).
+        self.engine = engine
 
     def review(self, intent: Intent, snapshot: ChainSnapshot, *, now_unix: int,
                oracle: Optional[StubOracle] = None,
                recipient_name: str = "the recipient",
                contact_verified: Optional[bool] = None,
-               acknowledged_risk: bool = False) -> Review:
+               acknowledged_risk: bool = False,
+               grant=None, spent_this_month_shard: int = 0) -> Review:
         sim = simulate_intent(intent, snapshot, now_unix=now_unix,
                               oracle=oracle, recipient_name=recipient_name)
         feats = TxFeatures(
@@ -264,7 +272,23 @@ class SigningGate:
         risk = self.detector.score(feats)
         reasons = list(sim.errors) + ([f"risk={risk.band}: {r}" for r in risk.reasons]
                                       if risk.band != "clean" else [])
+        # Agent path (§8.4): when this intent rides a scoped grant, the SAME
+        # gate that shows humans their preview also runs the policy engine —
+        # so a UI bug can never render a confirm button on a violating agent
+        # action. Refusals name every violated constraint at once.
+        policy_refusals: list[str] = []
+        if grant is not None:
+            if self.engine is None:
+                policy_refusals.append(
+                    "grant presented but gate has no PolicyEngine wired")
+            else:
+                policy_refusals = self.engine.check_proposal(
+                    intent, grant, now_unix=now_unix,
+                    spent_this_month_shard=spent_this_month_shard,
+                    contact_verified=contact_verified)
         interruption = risk.band == "interrupt"
-        proceed = sim.ok and (not interruption or acknowledged_risk)
+        proceed = (sim.ok and not policy_refusals
+                   and (not interruption or acknowledged_risk))
         return Review(sim=sim, risk=risk, proceed=proceed,
-                      interruption=interruption, reasons=reasons)
+                      interruption=interruption, reasons=reasons,
+                      policy_refusals=policy_refusals)

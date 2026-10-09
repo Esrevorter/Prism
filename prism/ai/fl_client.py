@@ -456,3 +456,45 @@ class AggregatorServer:
             core = col[k:len(col) - k] or col
             out.append(sum(core) / len(core))
         return out
+
+
+# ---------------------------------------------------------------------------
+# End-to-end round driver (prototype glue; production runs these steps on
+# server infra between mixnet batches — interfaces are identical)
+# ---------------------------------------------------------------------------
+
+
+class FLRound:
+    """One full FedAvg round over an AggregatorServer: collect accepted
+    noisy deltas → securely recombine secagg shards → robust-average iff
+    quorum → apply to the live FraudDetector model (§8.3 closed loop).
+
+    ``finalize`` returns the adopted delta, or None when quorum is unmet —
+    a discarded round changes NO model and spends no reputation.
+    """
+
+    def __init__(self, server: "AggregatorServer"):
+        self.server = server
+        self.collected: dict[str, list[Vec]] = {}   # cid -> secagg parts
+
+    def submit(self, contributor_id: str, parts: Sequence[Vec]) -> bool:
+        """Ingress one contribution (list of secagg shard-vectors). The
+        norm screen + reputation decay run on the RECOMBINED delta so a
+        splitter cannot smuggle an oversized update past the clip bound."""
+        if any(len(p) != self.server.dim for p in parts) or len(parts) < 2:
+            raise ValueError("malformed secagg submission")
+        delta = SecureAggregator.combine(parts)
+        if not self.server.accept(contributor_id, delta):
+            return False
+        self.collected.setdefault(contributor_id, []).extend(parts)
+        return True
+
+    def finalize(self, detector=None):
+        deltas = {cid: SecureAggregator.combine(parts)
+                  for cid, parts in self.collected.items()}
+        avg = self.server.aggregate(deltas)
+        if avg is None:
+            return None
+        if detector is not None:
+            detector.apply_global_delta(avg)
+        return avg
