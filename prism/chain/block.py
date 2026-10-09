@@ -42,6 +42,25 @@ class BlockHeader:
     version_vote: bool          # uint8 (0/1) — fork signaling (§4.2)
     size_bytes: int             # uint32 actual serialized block size
 
+    def __post_init__(self):
+        # Canonical-domain gate (fuzz fixpoint, §13 'chain parsing'): the wire
+        # field is a single byte that must be exactly 0 or 1. Python's bool()
+        # coercion would happily map e.g. vote byte 2 → True, so re-serializing
+        # yields a DIFFERENT blob and breaks the parse→serialize round-trip
+        # invariant. Non-canonical votes therefore never enter the domain:
+        #   * via parse_header — the raw byte is checked first and rejected as
+        #     a ValueError (untrusted network input MUST NOT coerce silently);
+        #   * via direct construction — normalized here so every constructed
+        #     header satisfies serialize(parse(x)) == x for exact-length input.
+        if isinstance(self.version_vote, bool):
+            return
+        if self.version_vote in (0, 1):
+            object.__setattr__(self, "version_vote", bool(self.version_vote))
+            return
+        raise ValueError(
+            f"version_vote must be 0/1 (uint8 canonical domain), "
+            f"got {self.version_vote!r}")
+
     def serialize(self) -> bytes:
         for name, v in (("prev_hash", self.prev_hash),
                         ("merkle_root", self.merkle_root),
@@ -90,13 +109,22 @@ def parse_header(buf: bytes) -> BlockHeader:
     version_major, version_minor, vote = struct.unpack_from("<HHB", buf, off)
     off += 5
     size_bytes = struct.unpack_from("<I", buf, off)[0]
+    # Canonicalization gate (§13 fuzz fixpoint): the wire byte must be exactly
+    # 0 or 1. Silently bool()-coercing a stray value (e.g. 2) would make
+    # serialize(parse(buf)) != buf — a hidden malleability channel. We instead
+    # accept only canonical votes and fold every other byte into the documented
+    # rejection path (ValueError), so parse→serialize is a strict fixpoint on
+    # its whole domain while same-size mutations never desync field boundaries.
+    if vote not in (0, 1):
+        raise ValueError(
+            f"non-canonical version_vote byte: {vote} (must be 0/1)")
     return BlockHeader(height=height, timestamp=timestamp,
                        prev_hash=prev_hash, merkle_root=merkle_root,
                        im_merkle_root=im_merkle_root,
                        denylist_root=denylist_root, pow=powf,
                        version_major=version_major,
                        version_minor=version_minor,
-                       version_vote=bool(vote), size_bytes=size_bytes)
+                       version_vote=vote, size_bytes=size_bytes)
 
 
 def validate_header_basic(h: BlockHeader, parent: BlockHeader,

@@ -123,6 +123,32 @@ def test_header_serialization_stable_and_hash_domain_separated():
     assert h.hash() != hashlib.sha3_256(h.serialize()).digest()
 
 
+def test_version_vote_canonical_domain_gate():
+    """§13 fuzz fixpoint regression: version_vote is uint8 with legal {0,1}.
+
+    * direct construction normalizes 0/1 ints to bool (fixpoint preserved);
+    * any other value — int or truthy object — is rejected at construction;
+    * parse_header rejects non-canonical vote bytes via ValueError instead of
+      bool()-coercing them (silent coercion would break serialize(parse(b))==b).
+    """
+    assert _hdr(version_vote=0).version_vote is False
+    assert _hdr(version_vote=1).version_vote is True
+    for bad in (2, 33, 255, -1):
+        with pytest.raises(ValueError):
+            _hdr(version_vote=bad)
+    # wire-level: flip the vote byte to a non-canonical value → clean reject
+    buf = bytearray(_hdr(version_vote=False).serialize())
+    vote_off = 16 + 4 * 32 + 8 + 32 + 4          # after <HH of the version pair
+    assert buf[vote_off] == 0
+    buf[vote_off] = 33
+    with pytest.raises(ValueError):
+        parse_header(bytes(buf))
+    # canonical 1 still round-trips exactly
+    buf[vote_off] = 1
+    hd = parse_header(bytes(buf))
+    assert hd.version_vote is True and hd.serialize() == bytes(buf)
+
+
 def test_denylist_root_is_consensus_field():
     """D5: header must carry a 32-byte root; wrong length rejected."""
     with pytest.raises(ValueError):
