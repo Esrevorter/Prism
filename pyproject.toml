@@ -1,0 +1,30 @@
+# Prism (PRSM) — reference implementation packaging metadata.
+# Pure-Python Phase-1 codebase; the `prism` console entry point wraps
+# `chain.cli` (see prism/entry.py). Build backend: setuptools.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prism-prsm"
+version = "0.1.0"            # single source of truth; keep in sync with chain.__version__ tag suffix
+description = "Prism — a privacy-first, AI-native cryptocurrency (reference implementation)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Project Prism contributors" }]
+keywords = ["cryptocurrency", "ringct", "bulletproofs", "mpc", "selective-disclosure"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security :: Cryptography",
+]
+dependencies = []            # stdlib-only core; no third-party runtime deps
+
+[project.scripts]
+prism = "chain.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["prism"]
+exclude = ["tests*", "testnet*", "entry*", "__pycache__*"]
