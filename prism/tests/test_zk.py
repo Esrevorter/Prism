@@ -96,9 +96,11 @@ def test_gate_counts_are_frozen_shapes():
     n_tags = 3
     key, _lay = C._provenance_layout(n_tags, 16)
     assert len(key.gates) == 1 + 2 * n_tags
-    # structural pub binding: q_pub appears ONLY where the layout intends it
-    assert sum(g.q_pub % fr.Q != 0 for g in key.gates) == 0  # provenance binds via copy, not q_pub
-    assert any(cp.col1 == COL_A and cp.col2 == COL_PUB for cp in key.copies)
+    # structural pub binding: provenance binds the tag via a q_pub=-1 gate at
+    # row 0 (identity a - pub = 0), the SAME convention every amount circuit
+    # uses so _pub_amount_row can derive the pin row from the key alone.
+    assert sum(g.q_pub % fr.Q != 0 for g in key.gates) == 1
+    assert C._pub_amount_row(key) == 0
 
     k, bits = 2, 64
     skey = C._solvency_layout(k, bits, 256)
@@ -324,10 +326,13 @@ def test_caller_pins_are_enforced_both_directions():
                               denylist_tags=[1, 2, 3],
                               expiry_unix=_now() + 3600, verifier_nonce=NONCE)
     key, _a, proof, stmt = C.prove_provenance(claim)
-    # correct pin: the tag is copy-bound into pub[0] (row-0 echo gate).
+    # correct pin: the tag is q_pub-bound into pub[0] (row-0 gate a - pub = 0).
     assert C.verify_disclosure(key, proof, stmt=stmt, now_unix=_now(),
                                expected_public_rows={0: 7})
-    # wrong pin ⇒ reject
+    # wrong pin ⇒ reject. NOTE: with the statement-derived intent now active
+    # for provenance too (tag recovered from the blob's tag_digest), BOTH
+    # directions of rejection are covered: a wrong explicit pin conflicts
+    # with the derived intent, and a re-blobbed statement changes the intent.
     assert not C.verify_disclosure(key, proof, stmt=stmt, now_unix=_now(),
                                    expected_public_rows={0: 8})
 
