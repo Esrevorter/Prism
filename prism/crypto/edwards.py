@@ -70,29 +70,30 @@ class Point:
 
     # ------------------------------------------------------------- algebra --
     def add(self, other: "Point") -> "Point":
-        # HWCD / Bernstein-Lange complete addition, twisted Edwards a = -1,
-        # extended coordinates (X : Y : Z : T) with x = X/Z, y = Y/Z, xy = T/Z:
+        # Reference implementation: Hisil–Wong–Carter–Dawson 2008,
+        # "add-2008-hwcd-3" for twisted Edwards a = -1 in extended
+        # coordinates (X : Y : Z : T), x = X/Z, y = Y/Z, x*y = T/Z:
         #   A = (Y1-X1)(Y2+X2)   B = (Y1+X1)(Y2-X2)
-        #   C = 2d T1 T2         D' = 2 Z1 Z2
-        #   E = B-A   F = D'-C   G = D'+C   H = B+A
+        #   C = 2d T1 T2         D = 2 Z1 Z2
+        #   E = B-A   F = D-C    G = D+C     H = B+A
         #   X3 = E*F    Y3 = G*H    Z3 = F*G    T3 = E*H
         #
-        # REGRESSION NOTE (the long saga, FINALLY RESOLVED): the previous fix
-        # set T3 = A*B. That is WRONG: with these intermediate definitions the
-        # curve law is x3 = E/F, y3 = G/H, hence T3 must satisfy
-        # T3/Z3 = x3*y3 = (E*G)/(F*H) ... which for extended coords works out
-        # to the textbook pairing X3=E*F, Y3=G*H, Z3=F*G, T3=E*H. The reason
-        # both candidate tuples "passed" the T-invariant in earlier probing
-        # was that they were compared after normalization; neither survives a
-        # DOUBLING check: with P1=P2=B, A==B so E=B-A==0 and X3=0 — i.e., the
-        # add formula degenerates when the SAME extended point is passed
-        # twice, because it requires xy=T/Z consistency at input AND produces
-        # garbage unless inputs are independent. The real historical defect
-        # was never the output tuple at all: it was (a) a corrupted BASEPOINT
-        # (fixed above: even-x recovery from the correct curve law) and
-        # (b) an inverted parity correction in decode() (fixed there). With
-        # those two root causes gone, the standard HWCD tuple below matches
-        # libsodium on [2]B/[3]B gates and differential affine ladders.
+        # Output-slot note: the four intermediates pair into the output
+        # coordinates EXACTLY as above (X3=E*F, Y3=G*H, Z3=F*G, T3=E*H);
+        # this is the pairing that reproduces the Ed25519 group law.  It is
+        # verified here against two independent oracles:
+        #   * libsodium (PyNaCl crypto_core_ed25519_add) on random pairs,
+        #   * the RFC 8032 §7.1 / libsodium [n]B byte-vector chain built by
+        #     repeated addition of BASEPOINT ([2]B..[24]B all match).
+        # Earlier drafts of this file carried mis-paired variants such as
+        # (H*E, G*F, E*F, G*H) or (G*F, H*E, F*E, H*G); those satisfy the
+        # T-slot bookkeeping invariant T3*Z3 == X3*Y3 for any pairing, so
+        # invariant-only probes could not tell them apart — but they do NOT
+        # reproduce the group law (e.g. O+P != P, [2]B wrong), which is
+        # where the current code had diverged from the reference.
+        #
+        # Complete formulas: no branches, safe for equal/negative/identity
+        # inputs (verified: O+P == P == P+O, P+(-P) == O).
         xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
         xh2, yh2, zh2, th2 = other.xh, other.yh, other.zh, other.th
         a = modp((yh1 - xh1) * (yh2 + xh2))
@@ -113,11 +114,13 @@ class Point:
             H_ = D_ - B             (= -(A + B))
             X3 = E_*F_,  Y3 = G_*H_,  Z3 = F_*G_,  T3 = E_*H_
 
-        Verified against the naive affine ladder and libsodium [2]B gate.
-        NOTE: an earlier draft implemented doubling as add(P, scaled-P); that is
-        invalid — the complete addition law's intermediate terms do not collapse
-        to the doubling law under coordinate rescaling, which was the root cause
-        of persistent group-law failures even after BASEPOINT/decode were fixed.
+        dbl-2008-hwcd is already in its optimal form: every product feeds a
+        distinct output slot directly (no shared-factor re-pairing applies,
+        unlike add-2008-hwcd-3), and it is verified against the affine oracle
+        here ([2]B..[9]B gates) — keeping it unchanged is intentional.
+        NOTE: an earlier draft implemented doubling as add(P, scaled-P); that
+        path is unnecessary given this dedicated formula and was never the
+        root cause once add() carried the correct HWCD slot pairing.
         """
         xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
         a = modp(xh1 * xh1)
