@@ -190,7 +190,15 @@ class TestFuzzChainParsing:
     @pytest.mark.parametrize("seed", SEEDS)
     def test_same_size_mutations_decode_to_mutated_fields(self, seed):
         """No desync: byte flips inside a correct-length blob only ever move
-        field VALUES; they can never shift field BOUNDARIES."""
+        field VALUES; they can never shift field BOUNDARIES.
+
+        Canonical-domain note: the version_vote wire byte is uint8 with legal
+        values {0, 1}. A same-size flip CAN land a non-canonical value there
+        (e.g. 0 -> 33); parse_header then rejects it via the documented
+        ValueError path instead of bool()-coercing it — silent coercion would
+        break the serialize(parse(buf)) == buf fixpoint (malleability). Every
+        ACCEPTED exact-length blob must still hit the re-encode fixpoint.
+        """
         rng = random.Random(seed ^ 0x51A2)
         base = _valid_headers(rng)[0]
         for _ in range(200):
@@ -198,7 +206,13 @@ class TestFuzzChainParsing:
             for _ in range(rng.randint(1, 6)):     # in-place flips only
                 i = rng.randrange(len(b))
                 b[i] ^= 1 << rng.randrange(8)
-            hd = parse_header(bytes(b))            # exact length ⇒ must parse
+            try:
+                hd = parse_header(bytes(b))
+            except ValueError as exc:
+                # ONLY legitimate rejection: non-canonical version_vote byte.
+                assert "version_vote" in str(exc), \
+                    f"unexpected rejection on exact-length blob: {exc}"
+                continue
             assert hd.serialize() == bytes(b)      # canonical re-encode fixpoint
 
     def test_roundtrip_canonical_headers(self):
