@@ -290,8 +290,19 @@ class FraudDetector:
 
     def score(self, f: TxFeatures) -> RiskReport:
         vec = f.vector(self.overlay)
+        return self.score_vector(vec, f)
+
+    def score_vector(self, vec: Sequence[float],
+                     f: Optional[TxFeatures] = None) -> RiskReport:
+        """Score a raw feature vector (the exact layout FL clients train on,
+        §8.3). This is the shared entry point for the FedAvg loop: after the
+        aggregator finalizes a round, ``apply_global_delta`` rebuilds the
+        model here and the SAME pipeline (rules floor + sequence bonus) keeps
+        serving risk reports — no user data involved either way."""
+        if len(vec) != len(FEATURE_NAMES):
+            raise ValueError(f"expected {len(FEATURE_NAMES)} features")
         ml = self.model.score(vec)
-        rule_hits = self.overlay.evaluate(f)
+        rule_hits = self.overlay.evaluate(f) if f is not None else []
         # Belt-and-braces: rules act as a floor, ML as the fine-grained
         # ranking. A confirmed scam-phrase hit can never be out-voted down.
         floor = 0.0
@@ -310,6 +321,26 @@ class FraudDetector:
                           model_version=self.model.bundle.name + "_" + self.model.bundle.version,
                           rule_pack_digest=self.overlay.pack.digest,
                           sleep_on_it_seconds=10 if band_for(score) == "interrupt" else 0)
+
+    # -- FedAvg adoption hook (§8.3) ----------------------------------------
+
+    def apply_global_delta(self, delta: Sequence[float]) -> "FraudDetector":
+        """Adopt an aggregated weight delta (weights ++ bias, last slot) into
+        the live model and return a detector carrying the NEW signed bundle.
+
+        Production path: the server publishes ModelBundle artifacts that are
+        code-signed; wallets verify the signature before swapping bundles.
+        Here the re-quantized bundle is constructed directly — same interface,
+        quantization grid identical to the shipped default so deltas survive
+        the int8 round trip at clip-scale resolution.
+        """
+        if len(delta) != len(FEATURE_NAMES) + 1:
+            raise ValueError("delta must be weights ++ bias")
+        cur_w, cur_b = self.model.bundle.dequantize()   # live (dequantized) model
+        new_w = [w + d for w, d in zip(cur_w, delta[:-1])]
+        bundle = ModelBundle.quantize(weights=new_w, bias=cur_b + delta[-1])
+        self.model = GBDTLite(bundle)
+        return self
 
     # -- learning hooks (used by FL client; local-only in prototype) -------
 

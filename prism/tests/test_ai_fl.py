@@ -195,9 +195,12 @@ class TestFedAvgAndServer:
         srv = FL.AggregatorServer(dim=2)
         assert srv.accept("evil", [50.0, -50.0]) is False
         assert srv.reputations["evil"].score == 0.5
-        for _ in range(3):                       # repeated attempts decay…
+        for _ in range(2):                       # repeated attempts decay…
             assert srv.accept("evil", [500.0, -500.0]) is False
-        assert srv.reputations["evil"].score == 0.0   # …to silence
+        # still audible at 0.125 (the documented floor): one more strike
+        assert srv.reputations["evil"].score == 0.125
+        assert srv.accept("evil", [500.0, -500.0]) is False
+        assert srv.reputations["evil"].score == 0.0   # …floor breach → silence
         # silenced contributors are excluded from aggregation entirely
         deltas = {"evil": [0.1, 0.1], **{f"c{i}": [0.1, 0.1]
                                          for i in range(FL.MIN_CONTRIBUTORS)}}
@@ -218,9 +221,13 @@ class TestFedAvgAndServer:
         assert out is not None and out[0] < 0.05  # outlier trimmed away
 
     def test_local_training_actually_lears_signal(self):
-        # benign-start model trained one step on separable data should push
-        # the first_seen weight positive (fraud label correlates w/ feature 0);
-        # with a balanced class mix the bias gradient cancels at p=0.5.
+        # FedAvg rounds evaluate the gradient at the SHARED global model
+        # (base_weights/base_bias), so the delta is an unbiased signal about
+        # the batch — not a leak of how far a device's private local model
+        # drifted. A benign-start model trained one step on separable data
+        # should push the first_seen weight positive (fraud label correlates
+        # w/ feature 0); with a balanced class mix the bias gradient cancels
+        # at p=0.5.
         c = FL.FLClient([0.0] * 8, 0.0, lr=1.0)
         delta = c.local_update(toy_samples())
         assert delta[0] > 0                       # increase first_seen weight
@@ -228,4 +235,19 @@ class TestFedAvgAndServer:
         fraud_heavy = toy_samples() + [sample([1, 0, 1, 0, 0.9, 0, 0, 0], 1.0)]
         c2 = FL.FLClient([0.0] * 8, 0.0, lr=1.0)
         d2 = c2.local_update(fraud_heavy)
-        assert d2[-1] < 0                         # skew raises fraud prior
+        assert d2[-1] > 0                         # skew raises fraud prior
+        # Gradient pinned at the ORIGIN (w=0, b=0 ⇒ p=0.5 for every row) is
+        # exactly the mean residual (y − 0.5): with 11 fraud / 10 benign rows
+        # the mean label ȳ = 11/21 beats p̄ = 0.5, so Δb = lr·(ȳ − p̄) lands
+        # just under half the average fraud-feature density — a strong,
+        # directionally honest prior shift.
+        d3 = c2.local_update(fraud_heavy, base_weights=[0.0] * 8, base_bias=0.0)
+        avg_fraud_density = sum(s.features[0] for s in fraud_heavy) / len(fraud_heavy)
+        assert 0 < d3[-1] < 0.5 * avg_fraud_density
+        assert d3[0] > 0                          # and it still learns the signal
+        # …while a client whose private model already fits its own batch
+        # perfectly submits ~zero: nothing left to learn, nothing leaked.
+        fitted_w = [-1.0 if i not in (0, 2, 4) else 6.0 for i in range(8)]
+        c4 = FL.FLClient(fitted_w, -6.0, lr=1.0)
+        d4 = c4.local_update(toy_samples())       # linearize at private model
+        assert abs(d4[-1]) < 3e-3                 # saturated local fit → silent
