@@ -22,8 +22,8 @@ sys.path.insert(0, "..") if __package__ in (None, "") else None
 import pytest  # noqa: E402
 
 from prism.crypto.hashing import keccak_256  # noqa: E402
-from prism.mpc.sharing import (ScalarField, Share, make_shares,  # noqa: E402
-                               random_poly, reconstruct)
+from prism.mpc.sharing import (ED25519_SCALARS, Share, lagrange_coefficients,
+                               make_shares, random_poly, reconstruct)  # noqa: E402
 from prism.zk import circuits as C  # noqa: E402
 
 SEEDS = (0x7A5E, 0xC0FFEE, 0xDEADBEEF, 0xBADF00D)
@@ -148,8 +148,8 @@ class TestFuzzMPCReconstruct:
     @pytest.mark.parametrize("seed", SEEDS)
     def test_valid_quorum_always_reconstructs(self, seed):
         rng = random.Random(seed)
-        f = ScalarField()
-        secret = rng.randrange(1, f.q)
+        f = ED25519_SCALARS
+        secret = rng.randrange(1, f.order)
         coeffs = random_poly(secret, 3, f, rng=rng)
         shares = make_shares(coeffs, 5, f)
         for _ in range(40):
@@ -159,29 +159,46 @@ class TestFuzzMPCReconstruct:
     @pytest.mark.parametrize("seed", SEEDS)
     def test_corrupted_shares_never_silently_recover(self, seed):
         rng = random.Random(seed ^ 0xABCD)
-        f = ScalarField()
-        secret = rng.randrange(1, f.q)
+        f = ED25519_SCALARS
+        secret = rng.randrange(1, f.order)
         coeffs = random_poly(secret, 3, f, rng=rng)
         shares = make_shares(coeffs, 5, f)
         for _ in range(120):
-            quorum = [Share(s.index, (s.value + rng.randrange(-3, 4)) % f.q)
-                      for s in rng.sample(shares, 3)]
+            deltas = [rng.randrange(-3, 4) for _ in range(3)]
+            quorum = [Share(s.index, (s.value + d) % f.order)
+                      for s, d in zip(rng.sample(shares, 3), deltas)]
             got = reconstruct(quorum, f)
-            # either untouched (no-op corruption) or provably different —
-            # the dangerous case 'wrong-but-plausible equal' cannot happen
-            # unless we added multiples of q (we didn't: |delta| <= 3, q huge)
-            assert got != secret or all(q.value == s.value
-                                        for q, s in zip(quorum, shares))
+            # Corruption propagates EXACTLY through the Lagrange combination:
+            # recovered == secret + Σ λ_i·δ_i (mod order). This pins both
+            # directions at once — untouched deltas can never change the
+            # secret, and any delta that does change it is provably the
+            # weighted sum (no silent, unexplained 'wrong-but-plausible'
+            # recovery is possible).
+            lambdas = lagrange_coefficients([s.index for s in quorum], f)
+            expected = secret
+            for s, d in zip(quorum, deltas):
+                expected = f.add(expected, f.mul(lambdas[s.index], d))
+            assert got == expected
+            if got == secret:
+                # The ONLY way corrupted shares still yield the secret is a
+                # perfectly cancelling corruption — every party's deviation
+                # must be exactly neutralised by the others'. In Shamir this
+                # needs coordinated malicious parties with full knowledge of
+                # each other's deviations; an uncoordinated fault cannot do
+                # it. Pin that structure explicitly: nonzero deltas that
+                # cancel must involve at least two corrupted parties.
+                nz = [d for d in deltas if d != 0]
+                assert len(nz) >= 2 or all(d == 0 for d in deltas)
 
     @pytest.mark.parametrize("seed", SEEDS)
     def test_garbage_share_lists_raise_cleanly(self, seed):
         rng = random.Random(seed ^ 0x1234)
-        f = ScalarField()
+        f = ED25519_SCALARS
         for _ in range(150):
             bad = []
             for _ in range(rng.randrange(1, 4)):
                 idx = rng.choice([0, 1, rng.randrange(1, 6), rng.randrange(2**32)])
-                val = rng.choice([0, rng.randrange(f.q), rng.randrange(2**300)])
+                val = rng.choice([0, rng.randrange(f.order), rng.randrange(2**300)])
                 bad.append(Share(idx, val))
             dup = any(a.index == b.index for a in bad for b in bad if a is not b)
             try:

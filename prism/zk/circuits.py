@@ -212,6 +212,13 @@ def decode_statement(stmt: bytes) -> dict:
     """Inverse used by verifier apps to render 'what exactly is being proven'
     (spec §7.6 step 3 side-by-side diagram needs this).
 
+    Fuzz-harness fix (test_fuzz_parsing.py finding): bytearray / memoryview
+    inputs used to leak mutable `bytearray` slices into the returned dict
+    (nonce and bytes public inputs), so callers that hash or store the
+    decoded fields could be silently mutated by the buffer they passed in.
+    decode_statement now normalises its input once (`bytes(stmt)`) and every
+    returned byte string is an immutable `bytes`.
+
     Acceptance-audit fixes (pure-coding track):
       * The u16 nonce length prefix is now honoured on the read side too —
         the original code assumed a fixed 16-byte nonce and silently
@@ -225,6 +232,7 @@ def decode_statement(stmt: bytes) -> dict:
         they can never collide with it. Old anchored blobs keep decoding
         (and re-encoding canonically) via _dec_pairs_legacy.
     """
+    stmt = bytes(stmt)  # normalise bytearray/memoryview → immutable bytes
     if not stmt.startswith(b"PRISM_STMT_V1|"):
         raise ValueError("bad statement framing")
     rest = stmt[len(b"PRISM_STMT_V1|"):]
