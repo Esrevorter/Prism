@@ -23,9 +23,16 @@ What is faithful to GG20 (Lindell, Gennaro 2020):
 
 MtA reference protocol: 1-out-of-2 oblivious transfer over RSA class groups
 is what GG20 uses; here we implement the *ideal functionality* interface
-(mta_alice / mta_bob taking plain inputs) so the algebraic identity
-α+β = x_i·k_j is testable end-to-end. Production swaps these two functions
-for OT-based ones without touching sign_share/aggregate signatures.
+(mta_pair taking plain inputs) so the algebraic identity α+β = x_i·k_j is
+testable end-to-end. Production swaps mta_pair for OT-based MtA + DDH
+consistency proofs without touching gg20_sign's bookkeeping.
+
+⚠️ HONESTY BOX — read before trusting anything here:
+  * Ideal-MtA means a wire-level eavesdropper would learn x_i·k_j outright.
+    Algebraically correct, cryptographically leaky BY CONSTRUCTION.
+  * No range proofs on shares/nonces, no adversarial abort handling, no
+    Paillier/VSSLE commitments. GG20's hostile-network machinery (§4-§6)
+    is stubbed. Do not connect this to real value. Phase-2 GA item.
 
 Reference implementation: readable, honest-but-curious, NOT constant time.
 """
@@ -42,46 +49,21 @@ _SC = ScalarField(N)
 
 
 # ---------------------------------------------------------------------------
-# Ideal-functionality MtA (see module docstring before shipping anything!)
+# Ideal-functionality MtA (see HONESTY BOX above before shipping anything!)
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class MtaAliceOut:
-    beta: int       # Bob receives this later; Alice keeps alpha privately
-    alpha: int
-
-
-def mta_alice(x_i: int, k_j: int) -> tuple[int, int]:
-    """Ideal MtA: returns (alpha_ij, beta_ij') split such that
-    alpha + beta = x_i * k_j (mod n). Reference version computes the product
-    directly and splits it randomly — mathematically indistinguishable at the
-    algebra level, zero privacy at the wire level. PRODUCTION: replace with
-    GG20 §4 OT-extension MtA."""
+def mta_pair(x_i: int, k_j: int) -> tuple[int, int]:
+    """Ideal MtA for ordered pair (initiator i holding x_i, peer j holding
+    k_j): returns (alpha_ij, beta_ij) with alpha + beta == x_i * k_j
+    (mod n). The initiator keeps alpha, sends beta. gg20_sign accumulates
+    each signer's delta as row-sum of own alphas plus received betas, so
+    Σ_i δ_i telescopes to Σ_{i,j} x_i·k_j = (Σ x_i)(Σ k_j) = k·x — the
+    invariant asserted numerically inside gg20_sign and pinned by
+    tests/test_mpc.py::TestGG20."""
     prod = (x_i * k_j) % N
     alpha = secrets.randbelow(N)
     beta = (prod - alpha) % N
     return alpha, beta
-
-
-def mta_bob_finish(alpha_ij: int, beta_ji: int) -> int:
-    """Bob's δ contribution from pair (i,j): mu_ij = alpha_ij - beta_ji? No—
-    convention: mu_ij := alpha_ij (Alice i's mask for x_i*k_j) minus
-    beta_ji... keep GG20's exact bookkeeping:
-      α_ij + β_ij = x_i·k_j   (pair i→j, Alice=i)
-      α_ji + β_ji = x_j·k_i   (pair j→i, Alice=j)
-      δ_i gets + β_ij ... standard: δ_i = Σ_{j≠i} (μ_{ij}) with
-      μ_{ij} = α_{ij} − β_{ji}? We use the widely-published form:
-      μ_{ij} = α_{ij} (kept by Alice i as her share of x_i·k_j? ...)
-    To avoid convention drift, this impl defines its OWN consistent invariant
-    and tests it numerically (see tests/test_mpc.py::test_gg20_delta_identity):
-      For ordered pair (i, j), i runs mta_alice(x_i, k_j) → (α, β); sends β to
-      j, keeps α. Then Σ_i Σ_j contributions reconstructs k·x iff every
-      participant's local δ_i = Σ_{j≠i} α^{(i,j)} + Σ_{j≠i} β^{(j,i)} and the
-      final z uses Σ_i (k_i·x_i + δ_i) — because Σ_i δ_i = Σ_pairs (α+β) =
-      Σ_pairs x_i·k_j = (Σ x_i)(Σ k_j) = z_partial_sum · ... exactly k·x when
-      x = Σ x_i (holds for t=n additive keygen; for t<n see note below).
-    """
-    raise RuntimeError("use gg20_sign() which implements the invariant above")
 
 
 # NOTE on t<n: with threshold t < n the products x_i·k_j only span the
@@ -173,30 +155,18 @@ def gg20_sign(keys: GG20KeySet, quorum: list[int], msg_hash: int,
     each line below is a separate network round with DDH-consistency proofs;
     the arithmetic is identical.
 
-    Steps (GG20 §5, main protocol):
-      1. Each i ∈ Q samples k_i; publishes K_i = [k_i]·G.
-      2. Pairwise MtA on (x_i = λ_i·σ_i, k_j) produces α/β masks; each i
-         forms δ_i and c_i = k_i·x_i + δ_i (c_i is i's share of k·x).
-      3. δ = Σ δ_i, c = Σ c_i. R = [Σ k_i]·G + ... wait — GG20 computes
-         R = [k]·G directly as Σ K_i since k = Σ k_i additively. The δ/c
-         machinery exists to compute the MULTIPLICATION k·x without revealing
-         either factor: s = (m + r·z)/k where z = Σ c_i ... careful:
-         standard GG20: z = Σ_i (k_i x_i) + δ = k·x  ✓ and
-         s = k^{-1}·(m + r·x). But signers never hold x! They hold
-         z = k·x, so they jointly compute s = k^{-1} m + k^{-1} r x —
-         GG20 does this via a second MtA (gamma/beta) OR equivalently here:
-         define kk = Σ k_i, then s = inv(kk)·(m + r·z_mod) where
-         z_mod = k·x ... but k·x ≠ kk·x unless... k IS kk. So s =
-         inv(kk)·(m + r·kk·x)?? no: r·x term needs k^{-1}·r·x = r·x/kk.
-         GG20's actual trick: Γ = [γ]·G published, MtA(γ,x)->δ', and
-         s' = ... This reference impl ships the SIMPLER additive-nonce form:
-         signers jointly reveal nothing but compute
-             s = (m + r·z) · inv(kk)   where z = kk·x  ⇒  s = inv(kk)·m + r·x
-         which is WRONG vs ECDSA unless z=k·x with the SAME k as R=[k]G.
-         Since R = Σ K_i = [kk]·G, k := kk, and z = kk·x requires computing
-         the product of the SUM — exactly what Σ_pairs x_i·k_j gives:
-             Σ_i c_i + Σ_{i<j}(...) = kk·x  ✓ (all cross terms included).
-         Hence s = inv(kk)·(m + r·z) verifies against pubkey X=[x]G. GOOD.
+    Steps (reference GG20 main protocol, honest-but-curious):
+      1. Each i in Q samples k_i; K_i = [k_i]·G (additive nonce: k = Σ k_i,
+         R = [k]·G = Σ K_i).
+      2. Pairwise ideal-MtA on (x_i = λ_i·σ_i, k_j) yields masks with
+         α+β = x_i·k_j; each i forms δ_i (own α's + received β's) and
+         c_i = k_i·x_i. Then z = Σ c_i + Σ δ_i = k·x exactly (asserted).
+      3. r = R.x mod n; s = k⁻¹·(m + r·z) = k⁻¹·(m + r·x) — standard
+         ECDSA output verifiable against X = [x]·G by ecdsa_verify().
+      4. Low-s normalization (BIP 62) with recovery-parity flip.
+
+    ⚠️ Production replaces step 2's ideal MtA with OT-based MtA + DDH
+    consistency proofs (GG20 §4); see module HONESTY BOX notes.
     """
     Q = sorted(set(quorum))
     if len(Q) < keys.t:
@@ -218,14 +188,15 @@ def gg20_sign(keys: GG20KeySet, quorum: list[int], msg_hash: int,
         for j in Q:
             if i == j:
                 continue
-            alpha, beta = mta_alice(x_adj[i], k[j])
+            alpha, beta = mta_pair(x_adj[i], k[j])
             # i keeps alpha (contributes to δ_i), sends beta to j (δ_j)
             delta[i] = (delta[i] + alpha) % N
             delta[j] = (delta[j] + beta) % N
 
     kk = sum(k.values()) % N
     z = (sum(ci.values()) + sum(delta.values())) % N
-    assert z == (kk * sum(x_adj.values())) % N, "MtA invariant broken"
+    x_joint = sum(x_adj.values()) % N
+    assert z == (kk * x_joint) % N, "MtA invariant broken"
     # Σ x_adj = x (Lagrange reconstruction at 0)
     R = IDENTITY
     for i in Q:
@@ -262,5 +233,5 @@ def ecdsa_verify(sig: GG20Signature, msg_hash: int, public_key: ECPoint) -> bool
 
 __all__ = [
     "GG20KeySet", "GG20Signature",
-    "gg20_keygen", "gg20_sign", "ecdsa_verify",
+    "mta_pair", "gg20_keygen", "gg20_sign", "ecdsa_verify",
 ]

@@ -46,7 +46,8 @@ from dataclasses import dataclass
 
 from ..crypto.edwards import BASE, IDENTITY_POINT, Point
 from ..crypto.field import L, scalar_reduce
-from .sharing import (ED25519_SCALARS, Share, lagrange_coefficients,
+from .sharing import (ED25519_SCALARS, Share, combine_commitments,
+                      lagrange_coefficients,
                       make_shares, poly_commitments, random_poly, verify_share)
 
 _F = ED25519_SCALARS
@@ -71,6 +72,14 @@ class CeremonyResult:
     public_key: Point                    # joint X
     commitments: dict[int, list[Point]]  # dealer -> A_{i,*} (audit artifacts)
     joint_poly_at: dict[int, int]        # index -> F(i) (== σ_i.value)
+
+    def joint_commitments(self) -> list[Point]:
+        """Coefficient-wise sum of all dealers' Feldman vectors — the public
+        artifact every share (initial or resharded) must verify against.
+        Pass THIS into recovery.create_recovery_state(), not one dealer's
+        vector."""
+        return combine_commitments([self.commitments[i]
+                                    for i in sorted(self.commitments)])
 
 
 def run_keygen(secret_blinds: dict[int, int], n: int, t: int,
