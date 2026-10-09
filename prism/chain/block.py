@@ -63,6 +63,42 @@ class BlockHeader:
         return hashlib.sha3_256(b"PRISM-BLOCK-V1" + self.serialize()).digest()
 
 
+# Fixed wire length: <QQ (16) + 4*32 hashes + pow (8+32) + <HHB (5) + <I (4)
+HEADER_WIRE_LEN = 16 + 4 * 32 + 8 + 32 + 5 + 4
+
+
+def parse_header(buf: bytes) -> BlockHeader:
+    """Strict inverse of BlockHeader.serialize() — the untrusted-network
+    decode path for the §13 fuzz gate ('chain parsing').
+
+    Total-function contract: returns a BlockHeader or raises ValueError; no
+    silent truncation, no trailing-byte acceptance, exact-length framing.
+    """
+    buf = bytes(buf)  # normalise bytearray/memoryview → immutable bytes
+    if len(buf) != HEADER_WIRE_LEN:
+        raise ValueError(
+            f"header must be exactly {HEADER_WIRE_LEN} bytes, got {len(buf)}")
+    height, timestamp = struct.unpack_from("<QQ", buf, 0)
+    off = 16
+    prev_hash = buf[off:off + 32]
+    merkle_root = buf[off + 32:off + 64]
+    im_merkle_root = buf[off + 64:off + 96]
+    denylist_root = buf[off + 96:off + 128]
+    off += 128
+    powf = PoWFields(nonce=buf[off:off + 8], viewkey_hash=buf[off + 8:off + 40])
+    off += 40
+    version_major, version_minor, vote = struct.unpack_from("<HHB", buf, off)
+    off += 5
+    size_bytes = struct.unpack_from("<I", buf, off)[0]
+    return BlockHeader(height=height, timestamp=timestamp,
+                       prev_hash=prev_hash, merkle_root=merkle_root,
+                       im_merkle_root=im_merkle_root,
+                       denylist_root=denylist_root, pow=powf,
+                       version_major=version_major,
+                       version_minor=version_minor,
+                       version_vote=bool(vote), size_bytes=size_bytes)
+
+
 def validate_header_basic(h: BlockHeader, parent: BlockHeader,
                           tolerance_blocks: int = 2,
                           target_seconds: int = 120) -> None:
