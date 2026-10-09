@@ -221,7 +221,8 @@ class FLClient:
 
     def __init__(self, weights: Vec, bias: float, *, lr: float = 0.5,
                  clip_norm: float = 1.0, epsilon: float = EPSILON_CAP_PER_ROUND,
-                 delta: float = DELTA_PER_ROUND, model_name: str = "fraud_det_v1"):
+                 delta: float = DELTA_PER_ROUND, model_name: str = "fraud_det_v1",
+                 convergence_tol: float = 1e-6):
         if epsilon > EPSILON_CAP_PER_ROUND:
             raise ValueError(f"spec cap: epsilon <= {EPSILON_CAP_PER_ROUND}")
         self.weights = list(weights)
@@ -231,25 +232,53 @@ class FLClient:
         self.epsilon = epsilon
         self.delta = delta
         self.model_name = model_name
+        self.convergence_tol = convergence_tol
         self.dim = len(self.weights) + 1     # weights ++ bias (last slot)
 
     # -- local training ---------------------------------------------------
 
     def local_update(self, samples: Sequence[TrainingSample]) -> Vec:
-        """One step of logistic-regression SGD on local data; returns the
-        DELTA vector (weights then bias) before any privacy operations."""
-        grad_w = [0.0] * len(self.weights)
-        grad_b = 0.0
+        """One-shot supervised step on the client's own labeled history.
+
+        Semantics (production swaps SGD mini-batches behind this interface):
+        compute the full-batch mean logistic-regression gradient over the
+        client's data, take a single ``lr``-scaled step, and clip the result
+        to ``clip_norm`` — so the returned delta ALWAYS satisfies
+        ‖delta‖ ≤ clip_norm, matching the server's norm screen (§8.3
+        poisoning bound: one client's influence per round is bounded).
+
+        Why exactly one step: iterating to convergence would let the local
+        model chase its own class mix into saturation — the bias would drift
+        toward whichever label dominates even after every sample is already
+        classified correctly, leaking label-fraction information into the
+        shared update. A single mean-gradient step keeps the update honest:
+        symmetric classes → bias term cancels at 0; skewed classes → the bias
+        moves toward the majority-label prior. Returns the DELTA vector
+        (weights then bias) before any privacy operations.
+        """
+        dim = len(self.weights) + 1
+        w, b = list(self.weights), self.bias
+        n = max(1, len(samples))
+
+        gw = [0.0] * (dim - 1)
+        gb = 0.0
         for s in samples:
-            z = self.bias + sum(w * x for w, x in zip(self.weights, s.features))
+            z = b + sum(wi * xi for wi, xi in zip(w, s.features))
             z = max(-50.0, min(50.0, z))
             p = 1.0 / (1.0 + math.exp(-z))
             err = p - s.label
             for i, x in enumerate(s.features):
-                grad_w[i] += err * x
-            grad_b += err
-        n = max(1, len(samples))
-        return [-(self.lr * g / n) for g in grad_w] + [-(self.lr * grad_b / n)]
+                gw[i] += err * x
+            gb += err
+        grad = [g / n for g in gw] + [gb / n]
+
+        # Residual below tolerance ⇒ nothing meaningful left to learn from
+        # this local batch; submit a clean zero delta (still budget-spent if
+        # prepare_contribution wraps it — rounds are opt-in regardless).
+        if math.sqrt(sum(g * g for g in grad)) < self.convergence_tol:
+            return [0.0] * dim
+
+        return clip_l2([-self.lr * g for g in grad], self.clip_norm)
 
     # -- privacy pipeline --------------------------------------------------
 
@@ -361,14 +390,23 @@ class AggregatorServer:
     def _rep(self, cid: str) -> float:
         return self.reputations.setdefault(cid, ContributorReputation()).score
 
+    _DECAY_FLOOR = 0.125      # below this the contributor is silenced outright
+
     def accept(self, contributor_id: str, delta: Vec) -> bool:
-        """Screen one (already-noisy) update; drop+decay oversized norms."""
+        """Screen one (already-noisy) update; drop+decay oversized norms.
+
+        Decay is multiplicative (×0.5 per offense); once the score falls to
+        the floor it is zeroed — "silence": the contributor is excluded from
+        aggregation entirely and only a manual governance reset restores it.
+        """
         if len(delta) != self.dim:
             raise ValueError(f"expected dim {self.dim}")
         n = math.sqrt(sum(x * x for x in delta))
         if n > 1.0001 * self.clip_bound:
             r = self.reputations.setdefault(contributor_id, ContributorReputation())
             r.score = max(0.0, r.score * 0.5)      # reputation decay
+            if r.score < self._DECAY_FLOOR:
+                r.score = 0.0                      # silence
             return False
         self.reputations.setdefault(contributor_id, ContributorReputation())
         return True
