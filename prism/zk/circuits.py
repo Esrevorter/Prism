@@ -83,46 +83,152 @@ NULLIFIER_DOMAIN = b"PRISM_DISCLOSURE_NULLIFIER_V1:"
 # Canonical statement encoding (bound into FS + registry)
 # ---------------------------------------------------------------------------
 
-def encode_statement(statement_type: str, *, verifier_nonce: bytes,
-                     expiry_unix: int, **public_inputs) -> bytes:
-    """Canonical, order-independent encoding: sorted key=value pairs, each
-    length-prefixed. Verifiers re-encode identically from their own copy of
-    the claim fields."""
-    parts = []
+_CANON_PREFIX = b"C1|"     # canonical-ness marker for the pair stream
+
+
+def _enc_pairs(public_inputs: dict) -> bytes:
+    """Magic-prefixed sorted key=value stream, each segment self-describing:
+        b"C1|" <klen u16><key ascii><i!: 8-byte LE | b: <len u32><bytes>>...
+    Length prefixes make the stream parseable WITHOUT delimiter scanning,
+    so payloads may contain any byte at all ('|', '=', control bytes). The
+    leading magic is unambiguous against legacy framing: a legacy body's
+    first byte is always an ASCII key character, never b"C"."""
+    out = bytearray(_CANON_PREFIX)
     for k in sorted(public_inputs):
         v = public_inputs[k]
+        kb = k.encode("ascii")
+        if not kb.isascii():
+            raise TypeError(f"public input key {k!r} must be ascii")
+        out += len(kb).to_bytes(2, "big") + kb
         if isinstance(v, int):
-            vb = b"i:" + struct.pack("<Q", v)
+            out += b"i!" + struct.pack("<Q", v)   # '!' ⇒ canonical u64
         elif isinstance(v, bytes):
-            vb = b"b:" + v
+            out += b"b:" + len(v).to_bytes(4, "big") + v
         else:
             raise TypeError(f"public input {k} must be int or bytes")
-        parts.append(k.encode("ascii") + b"=" + vb)
-    body = b"|".join(parts)
+    return bytes(out)
+
+
+def _dec_pairs(buf: bytes) -> dict:
+    inputs: dict[str, object] = {}
+    pos = 0
+    n = len(buf)
+    while pos < n:
+        if pos + 2 > n:
+            raise ValueError("truncated key length prefix")
+        klen = int.from_bytes(buf[pos:pos + 2], "big")
+        pos += 2
+        if pos + klen > n:
+            raise ValueError("truncated key")
+        key = buf[pos:pos + klen].decode("ascii")
+        pos += klen
+        if pos + 2 > n:
+            raise ValueError("truncated value type tag")
+        tag = buf[pos:pos + 2]
+        pos += 2
+        if tag == b"i!":
+            if pos + 8 > n:
+                raise ValueError("truncated int payload")
+            inputs[key] = struct.unpack("<Q", buf[pos:pos + 8])[0]
+            pos += 8
+        elif tag == b"b:":
+            if pos + 4 > n:
+                raise ValueError("truncated bytes length prefix")
+            blen = int.from_bytes(buf[pos:pos + 4], "big")
+            pos += 4
+            if pos + blen > n:
+                raise ValueError("truncated bytes payload")
+            inputs[key] = buf[pos:pos + blen]
+            pos += blen
+        else:
+            raise ValueError("unknown public-input type tag")
+    return inputs
+
+
+def _dec_pairs_legacy(body: bytes) -> dict:
+    """Pre-v1.1 framing (delimiter-joined `key=i:<8>|key=b:<raw>` pairs).
+    Kept ONLY as a verifier-side fallback so old statement blobs still
+    decode; it inherits the historical ambiguity for payloads containing
+    b'|'/b'=' — encoders since v1.1 never emit this form."""
+    inputs: dict[str, object] = {}
+    if not body:
+        return inputs
+    for pair in body.split(b"|"):
+        k, _, v = pair.partition(b"=")
+        tag, payload = v[:2], v[2:]
+        if tag == b"i:":
+            inputs[k.decode("ascii")] = struct.unpack("<Q", payload)[0]
+        else:
+            inputs[k.decode("ascii")] = payload
+    return inputs
+
+
+def encode_statement(statement_type: str, *, verifier_nonce: bytes,
+                     expiry_unix: int, **public_inputs) -> bytes:
+    """Canonical, order-independent encoding: sorted key=value pairs, every
+    field length-prefixed. Verifiers re-encode identically from their own
+    copy of the claim fields.
+
+    Canonicality guarantees (pinned by tests/test_zk_statement_encoding.py):
+      * fixed version framing `PRISM_STMT_V1|<statement_type>|` — domain for
+        every downstream keccak binding (nullifier, Fiat-Shamir);
+      * public inputs walked in SORTED key order ⇒ call-site kwargs order is
+        irrelevant; identical logical statements ⇒ byte-identical blobs;
+      * values are type-tagged (`i!:`-style `i!` u64 little-endian / `b:`
+        length-prefixed raw bytes) so an int can never collide with a bytes
+        value and ANY payload (including '|' and '=' and arbitrary binary)
+        roundtrips exactly;
+      * verifier_nonce is u16-length-prefixed and decode_statement enforces
+        the v1 contract (exactly 16 bytes), so no nonce length can silently
+        desynchronise the expiry field;
+      * every field — statement_type, verifier_nonce, expiry_unix, and all
+        public inputs — participates in the final digest: nullifier() hashes
+        the WHOLE blob and prove() binds it via Fiat-Shamir, so any single
+        bit flip changes both ν and the challenge stream.
+    """
     return (b"PRISM_STMT_V1|" + statement_type.encode("ascii") + b"|"
             + len(verifier_nonce).to_bytes(2, "big") + verifier_nonce + b"|"
-            + struct.pack("<Q", expiry_unix) + b"|" + body)
+            + struct.pack("<Q", expiry_unix) + b"|" + _enc_pairs(public_inputs))
 
 
 def decode_statement(stmt: bytes) -> dict:
     """Inverse used by verifier apps to render 'what exactly is being proven'
-    (spec §7.6 step 3 side-by-side diagram needs this)."""
+    (spec §7.6 step 3 side-by-side diagram needs this).
+
+    Acceptance-audit fixes (pure-coding track):
+      * The u16 nonce length prefix is now honoured on the read side too —
+        the original code assumed a fixed 16-byte nonce and silently
+        corrupted expiry_unix (and injected a spurious empty-key public
+        input) for any other nonce length. Nonces != 16 bytes are rejected
+        outright instead of mis-parsed.
+      * Public-input streams are parsed by EXACT lengths (see _enc_pairs/
+        _dec_pairs): the original naive split(b'|') shredded any bytes
+        payload containing 0x7c/0x3d. Framing is detected UNAMBIGUOUSLY by
+        the b"C1|" magic — legacy bodies start with an ASCII key char, so
+        they can never collide with it. Old anchored blobs keep decoding
+        (and re-encoding canonically) via _dec_pairs_legacy.
+    """
     if not stmt.startswith(b"PRISM_STMT_V1|"):
         raise ValueError("bad statement framing")
     rest = stmt[len(b"PRISM_STMT_V1|"):]
     stype, rest = rest.split(b"|", 1)
+    if len(rest) < 2:
+        raise ValueError("truncated nonce length prefix")
     nl = int.from_bytes(rest[:2], "big")
+    if nl != 16:
+        raise ValueError(f"v1 nonces must be 16 bytes (wire says {nl})")
     nonce = rest[2:2 + nl]
+    if len(nonce) != nl:
+        raise ValueError("truncated verifier nonce")
     rest = rest[2 + nl:]
+    if len(rest) < 9:
+        raise ValueError("truncated expiry field")
     expiry = struct.unpack("<Q", rest[:8])[0]
     body = rest[9:]
-    inputs: dict[str, object] = {}
-    if body:
-        for pair in body.split(b"|"):
-            k, _, v = pair.partition(b"=")
-            tag, payload = v[:2], v[2:]
-            inputs[k.decode("ascii")] = (struct.unpack("<Q", payload)[0]
-                                         if tag == b"i:" else payload)
+    if body[:len(_CANON_PREFIX)] == _CANON_PREFIX:
+        inputs = _dec_pairs(body[len(_CANON_PREFIX):])
+    else:
+        inputs = _dec_pairs_legacy(body)   # pre-v1.1 anchored blobs
     return {"statement_type": stype.decode("ascii"),
             "verifier_nonce": nonce, "expiry_unix": expiry,
             "public_inputs": inputs}
