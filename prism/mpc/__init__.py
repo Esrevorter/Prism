@@ -14,12 +14,21 @@ Layered like the rest of the monorepo:
   recovery.py  Social-recovery state machine: 72-h timelock, stale-share
                cancellation veto (E9), 30-day post-recovery cooldown, and
                proactive resharing that provably preserves the public key.
+               Revocation semantics: a reshare rotates share VALUES only —
+               every live contact keeps its refreshed share and veto power;
+               ContactRecord.revoked is reserved for deliberate removal
+               (remove_contact()), which excludes the leg from the NEXT
+               reshare's recipient set.
 
 Trust model (Decision D4): every leg is user-owned — devices or user-
 chosen contacts. Prism operates no recovery leg of any kind.
 
 Status: reference implementation, honest-but-curious, NOT constant time.
-Test suite: prism/tests/test_mpc.py.
+The GG20 path additionally reconstructs the joint secret inside the v0
+coordinator to form s (see gg20.py HONESTY BOX); it is a correctness/
+interop reference for bridge signers, not a production signer. The FROST
+(Ed25519) path never reconstructs the secret and IS the shipped spend
+path. Test suite: prism/tests/test_mpc.py.
 """
 from . import frost, gg20, recovery, secp256k1, sharing
 from .frost import (CeremonyResult, NoncePair, PartialSignature,
@@ -57,3 +66,7 @@ __all__ = [
     "Phase", "RecoveryPolicy", "ContactRecord", "PendingRecovery",
     "RecoveryState", "create_recovery_state", "derive_stale_share",
 ]
+
+# NOTE: RecoveryState.remove_contact() and RecoveryState.is_stale_share()
+# are methods (not module-level exports); see recovery.py docstrings for
+# the reshare-vs-revocation semantics.

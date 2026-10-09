@@ -111,11 +111,12 @@ class TestFrost:
 
     @pytest.mark.parametrize("seed", [11, 12])
     def test_sign_and_verify_roundtrip(self, seed):
-        cer = frost.run_keygen(_blinds(5, seed), n=5, t=3)
+        # t=2 ceremony: the test exercises every >=2 quorum of a 5-leg set
+        cer = frost.run_keygen(_blinds(5, seed), n=5, t=2)
         msg = b"send 50 PRSM to alex"
         sig = frost.sign_threshold(cer, [1, 3, 5], msg, rng=_rng(seed))
         assert frost.verify_signature(sig, msg, cer.public_key)
-        # any other quorum of size >= 2 also verifies...
+        # any other quorum of size >= t=2 also verifies...
         sig2 = frost.sign_threshold(cer, [2, 4], msg, rng=_rng(seed + 1))
         assert frost.verify_signature(sig2, msg, cer.public_key)
         # ...and both are valid standalone EdDSA-style signatures
@@ -438,6 +439,61 @@ class TestScheduledRefresh:
                                    reconstruct([cer.shares[i]
                                                 for i in (1, 2, 3)], _F),
                                    {1: 5, 2: 5, 3: 5})
+
+
+class TestRevocationSemantics:
+    """Post-§7.3 design fix: reshares rotate share VALUES (stale shares die
+    Feldman verification); `revoked` is reserved for deliberate removal."""
+
+    def test_live_legs_keep_veto_power_after_recovery(self):
+        # regression: previously every contact was marked revoked after a
+        # reshare, permanently locking still-valid post-reshare legs out of
+        # any future recovery initiation.
+        cer, st = _setup(seed=69)
+        stale = recovery.derive_stale_share(cer.shares, [5])
+        st.initiate_recovery(T0, [2, 3, 4], stale)
+        for i in (2, 3, 4):
+            st.submit_collector_share(T0 + 60, i, cer.shares[i].value)
+        new_shares = st.finalize_recovery(T0 + 72 * 3600)
+        assert all(not rec.revoked for rec in st.contacts.values())
+        past = T0 + 72 * 3600 + 31 * recovery.DAYS
+        # leg 5 survived with a refreshed share -> valid veto/stale token
+        st.initiate_recovery(past, [1, 2, 3], {5: new_shares[5]})
+        assert st.phase is recovery.Phase.PENDING
+
+    def test_is_stale_share_tracks_rotation(self):
+        cer, st = _setup(seed=70)
+        sec = reconstruct([cer.shares[i] for i in (1, 2, 3)], _F)
+        blinds = {1: 3, 2: 5, 3: _F.sub(sec, 8)}
+        ns = st.scheduled_refresh(T0, sec, blinds)
+        for i in range(1, 6):
+            assert st.is_stale_share(i, cer.shares[i].value)   # pre-gen dead
+            assert not st.is_stale_share(i, ns[i])             # gen-1 live
+        assert st.is_stale_share(9, ns.get(9, 0))              # unknown idx
+
+    def test_remove_contact_excludes_from_next_reshare(self):
+        cer, st = _setup(seed=71)
+        st.remove_contact(5, now=T0)
+        assert st.contacts[5].revoked
+        with pytest.raises(ValueError, match="already revoked"):
+            st.remove_contact(5)
+        with pytest.raises(ValueError, match="unknown contact"):
+            st.remove_contact(9)
+        sec = reconstruct([cer.shares[i] for i in (1, 2, 3)], _F)
+        blinds = {1: 4, 2: 6, 3: _F.sub(sec, 10)}
+        ns = st.scheduled_refresh(T0 + 1, sec, blinds)
+        assert sorted(ns) == [1, 2, 3, 4]          # leg 5 dropped
+        assert st.is_stale_share(5, cer.shares[5].value)
+        with pytest.raises(ValueError, match="revoked"):
+            st.initiate_recovery(T0 + 2, [2, 3, 5],
+                                 {1: ns[1]})        # revoked collector
+
+    def test_cannot_revoke_mid_recovery(self):
+        cer, st = _setup(seed=72)
+        stale = recovery.derive_stale_share(cer.shares, [5])
+        st.initiate_recovery(T0, [2, 3, 4], stale)
+        with pytest.raises(RuntimeError, match="mid-recovery"):
+            st.remove_contact(1)
 
 
 class TestRecoveryPolicyValidation:

@@ -15,7 +15,9 @@ What is faithful to GG20 (Lindell, Gennaro 2020):
         product k·x = Σ_{i,j} μ_{ij}, with μ_{ji} sent to j and
         α_{ij}+β_{ij} = x_i·k_j, α_{ji}+β_{ji} = x_j·k_i,
         μ_{ij} = α_{ij} − β_{ji}.
-  * Aggregation: R = [Σ k_i]·G; r = R.x mod n; s = k^{-1}(m + r·z).
+  * Aggregation: R = [Σ k_i]·G; r = R.x mod n; s = k^{-1}(m + r·x),
+    where z = k·x is the blind MtA product (production computes s from
+    shares of z; this v0 coordinator reconstructs x to form s directly).
   * Anti-corruption: DDH-equality proof per partial sig (a signer can be
     excluded and still produce a publicly verifiable complaint — in v0 we
     ship the *check* given honest auxiliary openings, not the ZK proofs;
@@ -161,8 +163,11 @@ def gg20_sign(keys: GG20KeySet, quorum: list[int], msg_hash: int,
       2. Pairwise ideal-MtA on (x_i = λ_i·σ_i, k_j) yields masks with
          α+β = x_i·k_j; each i forms δ_i (own α's + received β's) and
          c_i = k_i·x_i. Then z = Σ c_i + Σ δ_i = k·x exactly (asserted).
-      3. r = R.x mod n; s = k⁻¹·(m + r·z) = k⁻¹·(m + r·x) — standard
-         ECDSA output verifiable against X = [x]·G by ecdsa_verify().
+      3. r = R.x mod n; s = k⁻¹·(m + r·x).  In production the parties
+         compute this *blindly* from shares of z = k·x (GG20 §4.3); this
+         v0 reference coordinator reconstructs x_joint in-process to form
+         s directly, so the output is a standard low-s ECDSA signature
+         verifiable against X = [x]·G by ecdsa_verify().
       4. Low-s normalization (BIP 62) with recovery-parity flip.
 
     ⚠️ Production replaces step 2's ideal MtA with OT-based MtA + DDH
@@ -206,7 +211,9 @@ def gg20_sign(keys: GG20KeySet, quorum: list[int], msg_hash: int,
     if r == 0:
         raise ArithmeticError("bad nonce (r=0); retry")
     m = msg_hash % N
-    s = (pow(kk, N - 2, N) * (m + r * z)) % N
+    # s = k⁻¹·(m + r·x).  NOTE: z = k·x, so using z here would be wrong;
+    # x_joint = Σ λ_i·σ_i is the Lagrange reconstruction of the secret.
+    s = (pow(kk, N - 2, N) * (m + r * x_joint)) % N
     if s == 0:
         raise ArithmeticError("bad nonce (s=0); retry")
     # low-s normalization (BIP 62)

@@ -118,7 +118,15 @@ class ContactRecord:
     index: int                      # polynomial evaluation point (1-based)
     label: str
     is_device_leg: bool = False     # user-owned hardware vs. human contact
-    revoked: bool = False           # removed by a completed reshare
+    revoked: bool = False           # DELIBERATELY REMOVED from the set
+                                    # (contact left / device retired). NOT
+                                    # used for routine reshares: a completed
+                                    # reshare rotates share VALUES via the
+                                    # generation stamp + new commitments, so
+                                    # stale shares die Feldman-verification
+                                    # against them (the real security
+                                    # boundary, §7.3/E9) while the leg keeps
+                                    # its refreshed share and veto power.
 
 
 @dataclass
@@ -144,6 +152,9 @@ class RecoveryState:
     last_recovery_unix: Optional[int] = None
     last_reshare_unix: Optional[int] = None
     generation: int = 0                      # bumped on every reshare
+    share_generation: int = -1               # gen the *current* shares were
+                                             # issued at (-1 = genesis
+                                             # ceremony shares, gen 0)
     events: list[tuple[int, str]] = dc_field(default_factory=list)
 
     # -- helpers ----------------------------------------------------------
@@ -332,15 +343,20 @@ class RecoveryState:
 
         new_shares = self._reshare_locked(secret, new_secret_blinds, rng=rng)
         # Commit mutations only after everything succeeded.
-        for rec in self.contacts.values():
-            rec.revoked = True              # every pre-recovery share dead
+        # NOTE: we do NOT mark contacts revoked — routine reshares rotate
+        # share VALUES; every live leg keeps its refreshed share (and veto
+        # power).  Pre-reshare shares are dead because they no longer pass
+        # Feldman verification against the rotated commitments (see
+        # is_stale_share); `revoked` is reserved for deliberate removal.
         self.phase = Phase.ACTIVE
         self.last_recovery_unix = now
         self.last_reshare_unix = now
         self.generation += 1
+        self.share_generation = self.generation
         self.pending = None
         self._log(now, f"recovery activated; reshare generation "
-                       f"{self.generation}; all prior shares revoked")
+                      f"{self.generation}; prior-generation shares now "
+                      f"fail Feldman verification")
         return new_shares
 
     def scheduled_refresh(self, now: int, secret: int,
@@ -382,12 +398,42 @@ class RecoveryState:
             raise ValueError("reshare quorum below threshold")
         new_shares = self._reshare_locked(secret, participant_blinds,
                                           rng=rng)
-        for rec in self.contacts.values():
-            rec.revoked = True
+        # Same policy as finalize_recovery: rotate values, keep legs live.
         self.last_reshare_unix = now
         self.generation += 1
+        self.share_generation = self.generation
         self._log(now, f"reshare generation {self.generation}")
         return new_shares
+
+    def remove_contact(self, index: int, *, now: Optional[int] = None
+                       ) -> None:
+        """Deliberately drop a contact/device from the set (revocation).
+        Takes effect for the NEXT reshare: _live_contact_indices() excludes
+        revoked records, so the rotated commitments will have no share at
+        this index and any value the removed leg still holds fails Feldman
+        verification.  Does not touch the cooldown clock."""
+        rec = self.contacts.get(index)
+        if rec is None:
+            raise ValueError(f"unknown contact {index}")
+        if rec.revoked:
+            raise ValueError(f"contact {index} already revoked")
+        if self.phase is Phase.PENDING:
+            raise RuntimeError("cannot revoke contacts mid-recovery; "
+                               "cancel or finalize first")
+        rec.revoked = True
+        if now is not None:
+            self._log(now, f"contact {index} revoked by owner")
+
+    def is_stale_share(self, index: int, value: int) -> bool:
+        """True iff (index, value) FAILS Feldman verification against the
+        CURRENT joint commitments — i.e. it is a pre-rotation share made
+        worthless by a completed reshare (the security property §7.3/E9
+        relies on).  Live shares return False.  Wallets use this to decide
+        cancel rights out-of-band: only non-stale (live) legs may veto."""
+        if index not in self.contacts or self.contacts[index].revoked:
+            return True
+        return not verify_share(Share(index, _F.reduce(value)),
+                                self.commitments, BASE, _F)
 
     # -- internals ------------------------------------------------------------
 
