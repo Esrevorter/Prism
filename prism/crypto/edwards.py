@@ -49,8 +49,14 @@ assert (-BASEPOINT[0]**2 + BASEPOINT[1]**2 - 1 - D * BASEPOINT[0]**2 * BASEPOINT
     "BASEPOINT must satisfy the twisted-Edwards curve law"
 # Canonical pin (parity-proof, unlike the x^2 curve-law check above):
 # encode(BASEPOINT) must equal the RFC 8032 / libsodium basepoint byte string.
+# NOTE: the pinned literal below is the TRUE little-endian encoding — the y
+# coordinate (4/5 mod p) occupies bytes 0..30 and the x-parity bit sits in the
+# TOP bit of the LAST byte, i.e. 0x58 = 0b0101_1000 with bits 0-2 = 0 (x even)
+# and bits 3-6 = 0b1011 forming the high nibble of y's leading byte. The prior
+# draft accidentally spelled the big-endian byte order ("66...6658") here while
+# serializing with to_bytes(32, "little"), so the assert could never pass.
 assert (modp(_By) | ((_Bx & 1) << 255)).to_bytes(32, "little") == \
-    bytes.fromhex("5866666666666666666666666666666666666666666666666666666666666666"[:62] + "58"), \
+    bytes.fromhex("5866666666666666666666666666666666666666666666666666666666666666"), \
     "BASEPOINT does not match the canonical Ed25519 encoding"
 
 
