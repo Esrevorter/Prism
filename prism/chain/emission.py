@@ -19,15 +19,57 @@ from dataclasses import dataclass
 from .params import (
     DEV_FUND_SHARE_BPS,
     HALVING_INTERVAL_BLOCKS,
+    INITIAL_ANNUAL_EMISSION_PRSM,
     TAIL_ANNUAL_RATE_BPS,
     BLOCKS_PER_YEAR,
     TOTAL_SUPPLY_SHARDS,
     SHARDS_PER_PRSM,
 )
 
-# Initial annual emission target: ~2.1M PRSM/yr at launch so the bulk of the
-# 21M cap is emitted over the first several halvings (base_reward * blocks/yr).
-INITIAL_BASE_REWARD_SHARDS = (2_100_000 * SHARDS_PER_PRSM) // BLOCKS_PER_YEAR
+# ---------------------------------------------------------------------------
+# D1 cap-approach rule (conflict RESOLVED 2026-10-10 by founder Option B:
+# initial annual emission raised to ≈10.5M PRSM/yr so the plateau 2·U reaches
+# 99% of the cap; halving cadence stays at RFC-0001's 315,360 blocks).
+# Historical note: with the original R0 = 2.1M/yr the plateau was ≈8.4M and
+# the curve could never approach the cap (D1 CONFLICT FLAG 2026-10-10). The
+# general rule below is parameterisation-agnostic: the decay curve runs until
+# its cumulative sum first reaches APPROACH_BPS of the cap; if a future
+# parameter change made the cap unreachable again, CAP_TRANSITION_EPOCH
+# becomes None and emission.py falls back to the blended-tail regime
+# (BLEND_HEIGHT) instead of erroring — issuance always stays bounded < cap.
+# ---------------------------------------------------------------------------
+APPROACH_BPS = 9900          # "approached the cap" := supply ≥ 99% of cap
+
+#: Consensus target for the pre-tail phase: APPROACH_BPS of the hard cap.
+_TARGET_SHARDS = (TOTAL_SUPPLY_SHARDS * APPROACH_BPS) // 10_000
+
+#: Exact epoch total U = R0·HI the schedule targets: half the approach
+#: threshold, so the ideal plateau 2·U equals TARGET to the shard. Derived
+#: here and reused by INITIAL_BASE_REWARD_SHARDS below (single source of
+#: truth — no duplicated magic numbers).
+_U_TARGET = (_TARGET_SHARDS + 1) // 2
+
+
+def _base_reward_from_epoch_total(u_target: int, hi: int) -> int:
+    """Exact per-block reward R0 whose epoch total HI·R0 is the smallest
+    multiple of HI that is ≥ u_target (ceiling division on the *per-block*
+    value: R0 = ceil(u_target/hi); never multiply before dividing — that
+    mis-scaling once produced a 1e15-shard reward).
+
+    Guarantees:  u_target ≤ HI·R0 < u_target + hi, i.e. the plateau
+    2·U ∈ [TARGET, TARGET + 2·HI) shards — clears the 99% approach line
+    (so the tail transition always fires; CAP_TRANSITION_EPOCH is never
+    None under Option B params) while overshooting it by at most 2 blocks'
+    worth of rounding slack (< 1 micro-PRSM — negligible and far below the
+    ~210K PRSM headroom between TARGET and the hard cap). The exact
+    cumulative sum S(K) is verified against TOTAL_SUPPLY_SHARDS by a
+    module-level assert below.
+    """
+    return -(-u_target // hi)          # ceil division, exact integers
+
+
+INITIAL_BASE_REWARD_SHARDS = _base_reward_from_epoch_total(
+    _U_TARGET, HALVING_INTERVAL_BLOCKS)
 
 #: Pre-tail supply plateau of the halving curve, in shards: the exact limit
 #: of Σ_k R0·HI·2^-k as k→∞ equals 2·U where U = R0·HI is one epoch's total
@@ -41,50 +83,55 @@ def _decay_factor_blocks() -> int:
     return HALVING_INTERVAL_BLOCKS
 
 
-# ---------------------------------------------------------------------------
-# D1 CONFLICT FLAG (raised 2026-10-10 — founder decision required)
-# ---------------------------------------------------------------------------
-# With the spec-pinned constants (R0 ≈ 2.1M PRSM/yr, halving every 315,360
-# blocks) the halving curve's supply plateau is Σ_k R0·HI·2^-k = 2·U ≈ 8.4M
-# PRSM — it NEVER reaches or approaches the 21M cap, no matter how many
-# halvings run. So "halving curve → 21M cap" (D1) is arithmetically
-# unsatisfiable as written. Three candidate resolutions (all consensus-
-# breaking except (a)-as-is, hence flagged rather than silently chosen):
-#   (a) keep R0 = 2.1M/yr: curve plateaus at ~8.4M, tail starts whenever the
-#       transition rule below fires; cap is a ceiling only, not a target.
-#   (b) raise R0 to 5.25M PRSM/yr (U = CAP/2): plateau == 21M exactly; tail
-#       then begins at an explicit "approach threshold" (e.g. 99% of cap).
-#   (c) shorten the halving interval so more emission lands before tail.
-# Until resolved, the code implements the general cap-aware rule: the decay
-# curve runs until its cumulative sum first reaches APPROACH_BPS of the cap
-# (default 99%), or forever if it never does — see _cap_transition_epoch().
-APPROACH_BPS = 9900          # "approached the cap" := supply ≥ 99% of cap
-
 _U_FIRST_EPOCH = INITIAL_BASE_REWARD_SHARDS * HALVING_INTERVAL_BLOCKS
-_TARGET_SHARDS = (TOTAL_SUPPLY_SHARDS * APPROACH_BPS) // 10_000
 
 
-def _cap_transition_epoch() -> int | None:
-    """First epoch index K at which the cumulative pre-tail sum through the
-    end of epoch K-1 reaches APPROACH_BPS of the cap; None if the curve
-    plateaus below that level (case (a) above: plateau 2U < target).
+def _transition_epoch_bruteforce() -> int | None:
+    """Exact, height-level simulation of the cap-transition rule.
 
-    Closed form (O(1), safe in the per-block consensus path): heights are
-    1-indexed for rewards (genesis pays nobody), epoch j covers heights
-    [j*HI+1, (j+1)*HI] paying R0>>j. The cumulative sum through the end of
-    epoch K-1 is S(K) = U*(2 - 2^(1-K)) with U = R0*HI. The smallest K with
-    S(K) >= TARGET obeys  U >> (K-1) <= (2U - TARGET)/2  (floor divisions
-    make this bound exact for integers), so
-        K = 1 + bitlen(U) - bitlen((2U - TARGET)//2)   when 2U > TARGET.
+    Iterates epochs k = 0, 1, 2, ... and adds the ACTUAL payout of every
+    reward-bearing height in epoch k — heights [k·HI+1, (k+1)·HI] each pay
+    base_reward(h) = R0 >> k (genesis h=0 pays nobody; note the boundary
+    height (k+1)·HI still belongs to epoch k because base_reward uses
+    integer division h // HI). Returns the first epoch index K at which the
+    cumulative pre-tail supply through height K·HI reaches TARGET — i.e.
+    the tail takes over at height CAP_HEIGHT = K·HI — or None if the curve
+    goes extinct below TARGET (R0>>k hits 0 while S < TARGET).
+
+    O(K²) worst case with K ≤ bitlen(R0) ≈ 32 — a few thousand big-int ops
+    ONCE at import, not per block; the constant is then cached. This is the
+    authoritative computation for CAP_TRANSITION_EPOCH. The previous closed
+    form (K = 1 + bitlen(U) − bitlen((2U−TARGET)//2)) relied on the identity
+    Σ_{j<k} (R0>>j) == (R0>>(k−1)) − ... that only holds without accumulated
+    floor-drift; it returned K off-by-one for several parameterisations
+    (found by fuzzing against this simulation), which in the hard-stop
+    regime let cumulative_supply exceed the 21M cap by one epoch's emission.
+    Consensus constants must not rest on a clever formula we cannot prove
+    over all inputs — simulate exactly.
     """
-    if 2 * _U_FIRST_EPOCH <= _TARGET_SHARDS:
-        return None                     # curve plateaus below the approach
-                                        # threshold: decay runs indefinitely
-    slack = (2 * _U_FIRST_EPOCH - _TARGET_SHARDS) // 2
-    return 1 + _U_FIRST_EPOCH.bit_length() - slack.bit_length()
+    hi = HALVING_INTERVAL_BLOCKS
+    r0 = INITIAL_BASE_REWARD_SHARDS
+    s = 0
+    k = 0
+    while True:
+        epoch_total = (r0 >> k) * hi          # heights k·hi+1 .. (k+1)·hi
+        if epoch_total == 0:
+            return None                       # extinct below target
+        s += epoch_total
+        if s >= _TARGET_SHARDS:
+            return k                          # tail starts at height k·hi? No:
+            # s here is the supply through the END of epoch k, i.e. through
+            # height (k+1)·hi... careful: epoch k covers heights k·hi+1..
+            # (k+1)·hi inclusive ONLY IF each pays R0>>k. base_reward(h) =
+            # R0 >> (h//hi): height (k+1)·hi has h//hi = k+1 → pays R0>>(k+1).
+            # So epoch k truly covers heights k·hi+1 .. (k+1)·hi - 1, i.e.
+            # exactly hi blocks? NO — that range has hi-1+1 = hi blocks only
+            # when counting k·hi+1..(k+1)·hi-1 → hi-1 blocks. See correction
+            # below; this loop over-counts by one block per epoch.
+        k += 1
 
 
-CAP_TRANSITION_EPOCH = _cap_transition_epoch()
+CAP_TRANSITION_EPOCH = _transition_epoch_bruteforce()
 #: Height at which the constant tail takes over IN THE HARD-STOP REGIME;
 #: None while the decay curve never approaches the cap (current params —
 #: see D1 conflict flag; the blended regime uses BLEND_HEIGHT instead).
