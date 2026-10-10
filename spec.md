@@ -492,7 +492,7 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 ### Phase 1 — Foundation (Months 1–6) ✅ acceptance criteria added
 - [ ] L1 daemon skeleton: RandomX PoW, 2-min adaptive blocks, Dandelion++ (Testnet "Refraction") — *Criterion: 3 independent nodes sync & sustain 72 h.*
 - [ ] RingCT core: CLSAG rings, Pedersen commitments, stealth addresses, bulletproof-range integration — *Criterion: spend-to-self loop passes property tests ≥10⁶ iterations.*
-- [ ] Disclosure Registry + scoped view-key mechanics (off-chain verifier v0).
+- [ ] Disclosure Registry + scoped view-key mechanics (off-chain verifier v0). *(OPEN: no implementation found in repo as of 2026-10-10 audit — prior completion claim was not substantiated; `prism/wallet/` contains no disclosure module or registry tests.)*
 - [ ] MPC wallet prototype: 2-of-3 solo scheme + share ceremony.
 - [ ] NL Intent Compiler v0 (grammar-validated, 20-intent benchmark suite ≥95% correct compile or safe fallback).
 
