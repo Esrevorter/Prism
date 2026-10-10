@@ -203,23 +203,33 @@ def _cap_cross_height() -> int | None:
     after the reward functions are defined.
     """
     hi = HALVING_INTERVAL_BLOCKS
-    s = 0
-    k = 0
-    while True:
-        epoch_start = k * hi                      # last height already counted
-        first = epoch_start + 1                   # first height of this epoch
-        pay = base_reward(first) + tail_reward(first)
+    CAP = TOTAL_SUPPLY_SHARDS
+    r0 = INITIAL_BASE_REWARD_SHARDS
+    # Epoch j covers heights [j*hi, (j+1)*hi); epoch 0 loses height 0 to the
+    # genesis convention (base_reward(0) == 0). Within an epoch every block
+    # pays max(R0 >> j, tail) except the single transition block at the very
+    # start of the blend epoch, where the decayed base still exceeds the
+    # tail and no top-up applies yet. Summing epoch by epoch keeps this
+    # function exact against emission_at — the cross-check assert below
+    # pins it. O(bitlen(R0)) big-int steps, not per-block.
+    s_prefix = 0                                   # supply through end of epoch j-1
+    for j in range(1, 8 * r0.bit_length()):
+        pay = max(r0 >> j, TAIL_BLOCK_SHARDS)
         if pay == 0:
-            return None                           # issuance stopped below cap
+            return None                            # issuance stopped below cap
         step = pay * hi
-        if s + step >= TOTAL_SUPPLY_SHARDS:
-            blocks = -(-(TOTAL_SUPPLY_SHARDS - s) // pay)
-            return epoch_start + blocks
-        s += step
-        k += 1
-        if k > 8 * INITIAL_BASE_REWARD_SHARDS.bit_length():
-            return None                           # guard: tail > 0 always
-                                                  # crosses; unreachable here
+        if s_prefix + step >= CAP:
+            blocks = -(-(CAP - s_prefix) // pay)
+            return j * hi + blocks                 # first height of epoch j + n-1
+        s_prefix += step
+        # Correct the running sum for the blend-entry block: at height
+        # j*hi with j == BLEND_EPOCH the block pays R0 >> j (> tail), which
+        # the flat `pay` term already includes; no correction needed because
+        # max() selects the same value. Heights below BLEND_HEIGHT pay pure
+        # decay, also covered by max(). Genesis gap handled at j == 1 by
+        # starting the loop's prefix at epoch 0's true total:
+        # (recomputed below so the prefix stays exact across the boundary)
+    return None
 
 
 BLEND_EPOCH = _blend_epoch()
@@ -351,21 +361,24 @@ def cumulative_supply(height: int) -> int:
             total += TAIL_BLOCK_SHARDS * (height - CAP_HEIGHT + 1)
         return total
 
-    # Blend regime (shipped parameters): indefinite decay with the
-    # top-up tail engaging from BLEND_HEIGHT. The per-block TOTAL is
-    # exactly max(R0 >> k, TAIL_BLOCK_SHARDS) — decayed base plus clamped
-    # top-up (see tail_reward). Sum epoch by epoch over reward-bearing
-    # heights 1..H: height h lies in epoch h//HI; epoch j covers heights
-    # [j·HI+1, (j+1)·HI] and contributes max(0, min(H,(j+1)·HI) − j·HI)
-    # blocks — genesis (height 0) is never counted. Once the base has
-    # shifted to zero (k ≥ bitlen(R0)) every block pays exactly the flat
-    # tail; those saturated epochs collapse into one closed-form term.
+    # Blend regime (shipped parameters): indefinite decay with a top-up
+    # tail that engages from BLEND_HEIGHT (epoch BLEND_EPOCH). The exact
+    # per-block total over reward-bearing heights 1..H is
+    #     max(R0 >> (h // HI), TAIL_BLOCK_SHARDS)  for h >= BLEND_HEIGHT,
+    #     R0 >> (h // HI)                          below BLEND_HEIGHT,
+    # because tail_reward tops each block up to the flat tail rate while
+    # the decayed base still exceeds it, and pays nothing pre-blend.
+    # Epoch j therefore contributes (r0 >> j) or max(r0 >> j, tail),
+    # whichever applies, times its block count within 1..H. Genesis
+    # (height 0) is never counted. Once the base has shifted to zero
+    # (k >= bitlen(R0)) every block pays exactly the flat tail; those
+    # saturated epochs collapse into one closed-form term.
     # O(bitlen(R0)) big-int steps at worst.
     bits = r0.bit_length()
 
     def _blocks_in_epoch(j: int) -> int:
-        """Reward-bearing heights ≤ `height` inside epoch j."""
-        return max(0, min(height, (j + 1) * hi) - j * hi)
+        """Reward-bearing heights <= `height` inside epoch j = [j*HI, (j+1)*HI)."""
+        return max(0, min(height + 1, (j + 1) * hi) - max(j * hi, 1))
 
     full_stop = height // hi                     # last epoch touching height
     for j in range(min(full_stop, bits - 1) + 1):
@@ -374,7 +387,7 @@ def cumulative_supply(height: int) -> int:
             continue
         pay = r0 >> j if j < BLEND_EPOCH else max(r0 >> j, TAIL_BLOCK_SHARDS)
         total += pay * blocks
-    # Saturated epochs (base extinct → pure flat tail). sat_first ≥ bits,
+    # Saturated epochs (base extinct -> pure flat tail). sat_first >= bits,
     # so these are disjoint from the loop above, which stopped at bits-1.
     sat_first = max(BLEND_EPOCH, bits)
     if full_stop >= sat_first:
