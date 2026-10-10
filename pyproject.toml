@@ -28,3 +28,10 @@ prism = "chain.cli:main"
 [tool.setuptools.packages.find]
 where = ["prism"]
 exclude = ["tests*", "testnet*", "entry*", "__pycache__*"]
+
+[tool.pytest.ini_options]
+# The third-party `libtmux` package ships a pytest plugin whose fixtures carry
+# marks (illegal since pytest 8.3+), which crashes collection on modern pytest.
+# We never use libtmux, so disable its auto-loaded plugin.
+addopts = "-p no:libtmux"
+testpaths = ["prism/tests"]
