@@ -35,23 +35,51 @@ def _decay_factor_blocks() -> int:
     return HALVING_INTERVAL_BLOCKS
 
 
+# Cap-aware transition height: the first block whose cumulative pre-tail
+# emission reaches/approaches the 21M hard cap. Derived from the closed form
+# for the geometric sum — no search loop, so it is O(1) and usable inside the
+# per-block consensus path. Heights are 1-indexed for rewards (genesis pays
+# nobody), so epoch k covers heights [k*HI + 1, (k+1)*HI] paying R0 >> k, and
+# the sum through epoch K-1 is R0 * HI * (2 - 2^(1-K)). The smallest K with
+# that sum >= CAP satisfies 2^-(K-1) <= 1 - CAP/(2*R0*HI); we take the exact
+# integer condition by bit-length instead of floating-point logs.
+def _cap_transition_epoch() -> int:
+    num = 2 * INITIAL_BASE_REWARD_SHARDS * HALVING_INTERVAL_BLOCKS - TOTAL_SUPPLY_SHARDS
+    den = 2 * INITIAL_BASE_REWARD_SHARDS * HALVING_INTERVAL_BLOCKS
+    # need (R0*HI) >> (K-1) <= num/den * ... ; solve via doubling:
+    # smallest m = K-1 with  ((R0*HI) >> m) * den <= num  (integer-safe).
+    m = 0
+    unit = INITIAL_BASE_REWARD_SHARDS * HALVING_INTERVAL_BLOCKS
+    while (unit >> m) * den > num:
+        m += 1
+    return m + 1
+
+
+CAP_TRANSITION_EPOCH = _cap_transition_epoch()
+#: First height at which the pre-tail curve has reached/approached the cap and
+#: the constant tail takes over (spec §4.1 "until the 21M cap is approached").
+CAP_HEIGHT = CAP_TRANSITION_EPOCH * HALVING_INTERVAL_BLOCKS
+
+
 def base_reward(height: int) -> int:
     """Pre-tail base block reward in shards at `height`.
 
     Geometric decay: reward(h) = R0 * (1/2)^(h / HALVING_INTERVAL_BLOCKS),
-    computed exactly as R0 >> k with a remainder-corrected floor so total
-    emitted never exceeds the cap. Height 0 gets R0.
+    computed exactly as R0 >> k. The curve stops at the cap-approach boundary
+    (CAP_HEIGHT): beyond it the base reward is 0 and the consensus-fixed tail
+    takes over, so total issuance converges toward — and never runs away past
+    — the 21M hard cap (spec §4.1, Decision D1). Height 0 gets R0.
     """
     if height < 0:
         raise ValueError("negative height")
     k = height // _decay_factor_blocks()
-    if k >= 63:                      # underflow guard; effectively zero
+    if k >= CAP_TRANSITION_EPOCH:    # cap approached; tail phase takes over
         return 0
     return INITIAL_BASE_REWARD_SHARDS >> k
 
 
 def tail_reward(height: int) -> int:
-    """Per-block tail emission once the pre-tail curve has decayed to zero.
+    """Per-block tail emission once the pre-tail curve has reached the cap.
 
     Tail = 0.6%/yr of CURRENT supply, paid per block. We approximate the
     compounding conservatively with simple interest on the capped supply:
