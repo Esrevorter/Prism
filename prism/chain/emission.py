@@ -30,34 +30,34 @@ Founder decisions encoded here (2026-10-08 / 2026-10-10):
 
 Schedule shape under the shipped parameters:
 
-  * Epoch-boundary cap transition: none exists. The plateau 2·U clears the
-    99%-of-cap approach target by only 400 shards, and integer floor drift
-    in R0 >> k keeps every finite partial sum strictly below the ideal
-    geometric series, so _cap_transition_epoch() returns None. That is the
-    correct, deliberate outcome: the tail does not wait for a boundary that
-    arithmetic can never reach.
-  * Blended regime instead (the primary path, not a fallback). Let
-    j = BLEND_EPOCH = 7, the first epoch whose base reward R0 >> j falls
-    below TAIL_BLOCK_SHARDS:
+  * Blended regime (the primary path). Let j = BLEND_EPOCH, the first epoch
+    whose base reward R0 >> j falls below TAIL_BLOCK_SHARDS (j = 6 under
+    the shipped constants):
       - epochs 0..j-1 pay pure decay R0 >> k (halving as usual);
       - epoch j onward every block pays exactly TAIL_BLOCK_SHARDS, split as
         the decayed base plus a top-up; the top-up saturates at the full
         flat tail once the base has shifted to zero, so issuance runs
         forever at ≈0.6%/yr on the 21M reference.
-    Supply therefore plateaus at S_pre + HI·TAIL = U·(2^j − 1) + tail-year
-    ≈ 20,627,578 PRSM < 21M before epoch j, then crosses the 21M reference
-    cap inside epoch j (CAP_CROSS_HEIGHT ≈ year 11.36) and grows linearly
-    thereafter — D1's "constant tail forever" leg, with the cap as the
-    approach point of the decay curve rather than a hard ceiling on the
-    tail (Monero precedent).
+    Supply therefore plateaus below 21M during pure decay (s_pre ≈
+    20.465M PRSM through epoch j-1), then crosses the 21M reference cap
+    once inside the blend (CAP_CROSS_HEIGHT ≈ year 16.2) and grows
+    linearly thereafter — D1's "constant tail forever" leg, with the cap
+    as the approach point of the decay curve rather than a hard ceiling
+    on the tail (Monero precedent).
+  * Epoch-boundary cap transition: CAP_TRANSITION_EPOCH simulates the pure
+    decay leg against the approach target. Because floor drift across the
+    successive right-shifts keeps every finite partial sum strictly below
+    the ideal plateau 2·U — which itself clears the target by only 400
+    shards — the answer is None under the shipped parameters. That is
+    deliberate, not an error: the tail does not wait for a boundary that
+    integer arithmetic can never reach. If a future parameterisation ever
+    makes the target reachable at an epoch boundary, CAP_TRANSITION_EPOCH/
+    CAP_HEIGHT become set and the pure-tail handover path takes over
+    automatically; both paths share the same simulation-derived constants.
   * The halving cliff at each epoch boundary (R0 >> k → R0 >> (k+1)) is
     the intended, consensus-critical shape of a decaying schedule; the
     blend handover itself is monotone by construction (last pure block
     pays ≥ TAIL_BLOCK_SHARDS ≥ first blended block).
-  * If a future parameter change ever makes the approach target reachable
-    at an epoch boundary, CAP_TRANSITION_EPOCH/CAP_HEIGHT become set and
-    the pure-tail handover path takes over automatically; both paths share
-    the same simulation-derived constants and stay bounded consistently.
 
 CAP_TRANSITION_EPOCH is computed by exact height-level simulation at import
 (≤ bitlen(R0) big-int iterations) — never by a closed form, because floor
@@ -85,14 +85,21 @@ from .params import (
 # ---------------------------------------------------------------------------
 # Approach rule: R0 is sized so the halving plateau 2·U reaches APPROACH_BPS
 # of the reference cap — the Option-B contract. _TARGET_SHARDS pins the
-# epoch-boundary transition test; under the shipped parameters that test
-# never fires (see module docstring) and the blend path carries issuance to
+# epoch-boundary transition test; under the shipped blend schedule that test
+# never fires (see module docstring) and the tail carries issuance across
 # the cap instead.
 # ---------------------------------------------------------------------------
 APPROACH_BPS = 9900          # plateau target := 99% of the reference cap
 
 #: Epoch-boundary transition target, in shards.
 _TARGET_SHARDS = (TOTAL_SUPPLY_SHARDS * APPROACH_BPS) // 10_000
+
+#: Per-block amount of the constant tail: simple interest on the reference
+#: cap — D1's "≈0.6%/yr" leg made exact against the 21M figure:
+#: cap · TAIL_ANNUAL_RATE_BPS / blocks_per_year. Non-discretionary.
+#: Defined here because the derivation helpers below reference it.
+TAIL_BLOCK_SHARDS = (TOTAL_SUPPLY_SHARDS * TAIL_ANNUAL_RATE_BPS) \
+                    // (10_000 * BLOCKS_PER_YEAR)
 
 
 def _initial_base_reward_shards() -> int:
@@ -132,24 +139,21 @@ PRE_TAIL_PLATEAU_SHARDS = 2 * INITIAL_BASE_REWARD_SHARDS * HALVING_INTERVAL_BLOC
 
 
 def _cap_transition_epoch() -> int | None:
-    """First epoch index K whose end-of-epoch cumulative pre-tail supply
-    reaches _TARGET_SHARDS; None if the decay curve never crosses it.
+    """First epoch index K whose end-of-epoch cumulative PRE-TAIL (pure
+    decay) supply reaches _TARGET_SHARDS; None if the decay curve never
+    crosses it.
 
     Exact height-level simulation: epoch k pays HI blocks at R0 >> k
     (heights k·HI+1 .. (k+1)·HI, matching base_reward's h // HI indexing).
-    Runs ONCE at import, ≤ bitlen(R0) ≈ 33 iterations; the result becomes a
+    Runs ONCE at import, ≤ bitlen(R0) iterations; the result becomes a
     consensus constant. No closed form: floor-drift across successive
     right-shifts breaks naive geometric identities (see module docstring).
-    Under the shipped parameters the answer is None — deliberate, not an
-    error; the blend regime then governs the tail handover.
 
-    The simulation follows the CONSENSUS payment shape of the decay leg:
-    once the blend epoch j is reached, per-block issuance holds flat at
-    TAIL_BLOCK_SHARDS (base + top-up), so the simulated schedule is epochs
-    0..j-1 at R0>>k followed by the flat tail — identical to what blocks
-    actually pay. Testing the pure-decay plateau instead would be moot
-    anyway: with R0 ≥ TAIL_BLOCK_SHARDS whenever the blend engages, every
-    epoch-boundary partial sum stays below the plateau bound checked here.
+    This test deliberately excludes tail top-ups: CAP_TRANSITION_EPOCH
+    marks where the DECAY leg alone approaches the cap, which is what
+    governs the pure-tail handover in base_reward/tail_reward. The blend
+    regime (top-up from BLEND_HEIGHT) is the fallback path for schedules
+    whose decay plateau falls short of the target.
     """
     hi = HALVING_INTERVAL_BLOCKS
     r0 = INITIAL_BASE_REWARD_SHARDS
@@ -158,14 +162,7 @@ def _cap_transition_epoch() -> int | None:
         r = r0 >> k
         if r == 0:
             return None                     # extinct below target
-        if r < TAIL_BLOCK_SHARDS:
-            # blend epoch: from here blocks pay the flat tail; the ideal
-            # plateau bound 2·U ≥ TARGET already guarantees reachability
-            # only if the pure series could cross — under the shipped
-            # parameters this branch keeps s pinned below the target and
-            # the loop terminates via extinction without a boundary hit.
-            pass
-        s += max(r, TAIL_BLOCK_SHARDS) * hi
+        s += r * hi
         if s >= _TARGET_SHARDS:
             return k
     return None
@@ -178,12 +175,6 @@ CAP_TRANSITION_EPOCH = _cap_transition_epoch()
 #: BLEND_HEIGHT governs instead).
 CAP_HEIGHT = (None if CAP_TRANSITION_EPOCH is None
               else (CAP_TRANSITION_EPOCH + 1) * HALVING_INTERVAL_BLOCKS)
-
-#: Per-block amount of the constant tail: simple interest on the reference
-#: cap — D1's "≈0.6%/yr" leg made exact against the 21M figure:
-#: cap · TAIL_ANNUAL_RATE_BPS / blocks_per_year. Non-discretionary.
-TAIL_BLOCK_SHARDS = (TOTAL_SUPPLY_SHARDS * TAIL_ANNUAL_RATE_BPS) \
-                    // (10_000 * BLOCKS_PER_YEAR)
 
 
 def _blend_epoch() -> int | None:
