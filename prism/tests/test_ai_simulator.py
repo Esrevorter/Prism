@@ -23,7 +23,7 @@ NOW = 1_893_456_000
 
 def book():
     return W.AddressBook([
-        W.Contact("alex", "Alex (mastering)", "prsm1alexaaaaaa", ["alex"],
+        W.Contact("alex", "Alex (design)", "prsm1alexaaaaaa", ["alex"],
                   verified=True, verification_method="qr_in_person"),
     ])
 
@@ -131,7 +131,7 @@ class TestSigningGate:
         self.gate = SIM.SigningGate()
 
     def test_happy_path_proceeds_with_preview(self):
-        it = compiler().compile("Send $50 to Alex for the mastering session",
+        it = compiler().compile("Send $50 to Alex for the design session",
                                 now_unix=NOW)
         rev = self.gate.review(it, snap(50), now_unix=NOW,
                                recipient_name="Alex", contact_verified=True)

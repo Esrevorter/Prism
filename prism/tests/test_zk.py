@@ -61,7 +61,7 @@ def test_income_happy_path():
     vals = [11, 22, 33, 44]
     claim = C.IncomeClaim(values=vals, total=sum(vals),
                           expiry_unix=_now() + 3600, verifier_nonce=NONCE,
-                          consented_counterparties=[b"alex", b"studio"])
+                          consented_counterparties=[b"alex", b"client"])
     key, proof, stmt = C.prove_income(claim)
     assert verify(key, proof, expected_statement=stmt)
     assert C.verify_disclosure(key, proof, stmt=stmt, now_unix=_now())

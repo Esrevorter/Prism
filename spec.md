@@ -37,7 +37,7 @@ Prism is a privacy-first, AI-native Layer-1 cryptocurrency that combines:
 - **Novel selective disclosure ("The Prism Protocol")** — user-controlled zero-knowledge proofs that reveal only chosen facts about chosen funds, to chosen parties, for chosen durations.
 - **AI-native accessibility** — on-device intelligence that makes self-custody forgiving, understandable, and low-friction for non-technical users.
 
-**Primary persona (v1 focus):** Independent creative professionals (e.g., music producers) who receive irregular global income, pay collaborators frequently, value privacy, and are underserved by hostile crypto UX.
+**Primary persona (v1 focus):** Independent creative professionals (e.g., designers, writers, photographers, musicians, video editors) who receive irregular global income, pay collaborators frequently, value privacy, and are underserved by hostile crypto UX.
 
 **In scope for v1:** Base chain, RingCT + ZKP layer, MPC wallet with social recovery, AI-assisted native wallet app, micro-fee economy, scoped auditor view keys.
 
@@ -248,13 +248,13 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
   "received_at_height": 123456,
   "maturity": "unlocked|locked|spent",
   "risk_label": { "score": 0.02, "source": "on_device_model_v3", "flags": [] },
-  "privacy_tags": ["standard_addr", "subaddr:royalties"]
+  "privacy_tags": ["standard_addr", "subaddr:client-work"]
 }
 
 // Contact / Address Book
 {
   "contact_id": "uuid",
-  "display_name": "Alex (mastering)",
+  "display_name": "Alex (design)",
   "payment_address": "prsm1...",
   "verified": true, "verification_method": "qr_in_person|dns_proof|trust_chain",
   "nickname_aliases": ["alex", "alex@studio"],   // used by NL compiler
@@ -264,13 +264,13 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
 // Transaction Intent (the contract between NL layer and signer)
 {
   "intent_id": "uuid",
-  "raw_utterance": "Send $50 to Alex for the mastering session, keep it private",
+  "raw_utterance": "Send $50 to Alex for the design session, keep it private",
   "compiled": {
     "action": "transfer",
     "recipient_ref": "contact:alex",
     "amount": { "fiat_quote": { "currency": "USD", "value": 50.00, "oracle": "medianizer", "max_slippage_pct": 2.0 }, "or_prsm": null },
     "privacy_mode": "default_max",
-    "memo": "Mastering session",
+    "memo": "Design session",
     "fee": "base_only"
   },
   "simulation": { "predicted_effects": "...", "risk_score": 0.01, "warnings": [] },
@@ -349,7 +349,7 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
 3. Risk model labels inbound outputs (e.g., "from newly seen address") — informational only.
 
 ### 7.3 Natural-Language Send (Happy Path)
-1. User types/says: *"Send $50 to Alex for the mastering session, keep it private."*
+1. User types/says: *"Send $50 to Alex for the design session, keep it private."*
 2. **NL Compiler** produces an Intent (§6.2). Ambiguity handling:
    - Unknown contact → single clarifying chip ("Did you mean Alex Rivera?"), never a wall of options.
    - Fiat amount → live oracle quote shown with locked 60-second rate window and max-slippage guard.
