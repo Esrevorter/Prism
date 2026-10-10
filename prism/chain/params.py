@@ -17,50 +17,58 @@ TOTAL_SUPPLY_SHARDS = TOTAL_SUPPLY_PRSM * SHARDS_PER_PRSM
 
 BLOCK_TIME_SECONDS = 120                            # §4.1
 BLOCKS_PER_YEAR = (365 * 24 * 3600) // BLOCK_TIME_SECONDS   # 157,680
-# D1 CONFLICT RESOLUTION (founder decision 2026-10-10, option (c)):
-# "shorten the halving interval."
+# D1 CONFLICT RESOLUTION (founder decision 2026-10-10, Option B):
+# "raise the initial annual emission so the halving curve reaches 21M."
 #
 # The conflict: D1 says "halving curve until the 21M cap is approached, then
 # constant ≈0.6%/yr tail". A pure geometric halving curve has finite plateau
 # S∞ = 2·U where U = R0·HI is one epoch's total issuance; it can only ever
 # "approach" the cap if S∞ ≥ APPROACH threshold. Under the old parameters
-# (per-block reward R0 ≈ 2.1M PRSM/yr equivalent, halving every 2 years) the
-# plateau was 2U ≈ 8.4M PRSM < 20.79M (99% of cap) — unreachable, so the
-# curve would run forever and never transition (see git history, D1 CONFLICT
-# FLAG raised 2026-10-10).
+# (R0 ≈ 2.1M PRSM/yr, halving every 315,360 blocks = 2 years) the plateau
+# was 2U ≈ 8.4M PRSM < 20.79M (99% of cap) — unreachable, so the curve ran
+# forever without transitioning (D1 CONFLICT FLAG raised 2026-10-10).
+# An intermediate revision first tried shortening the halving interval
+# (option (c), HI = 780,517 blocks); the founder subsequently overrode that
+# with Option B, which keeps the RFC-0001 2-year cadence and instead raises
+# the launch emission rate.
 #
-# Resolution chosen by the founder: shorten the halving interval. The other
-# half of option (c) — implicit in the goal "halving curve reaches the cap" —
-# is that the per-BLOCK reward must stay at its spec value (R0 = 2.1M
-# PRSM/yr equivalent, i.e. 1,331,811,263 shards/block). Halving more often
-# then stretches the curve over more calendar time, raising the epoch-total
-# plateau S∞ = 2·R0·HI toward the cap. Derivation (exact integer math):
-#   need  S∞ = 2·R0·HI ≥ TARGET = CAP · APPROACH_BPS / 10⁴ = 20.79M PRSM
-#   =>    HI ≥ TARGET / (2·R0) = 780,516.000… blocks
-#   smallest whole-block HI satisfying it: 780,517 (= 4.9560… yr, ~14.87 mo).
-# With HI = 780,517 the curve crosses 99% of the cap at epoch K = 6
-# (height 4,683,102 ≈ year 29.7): cumulative pre-tail supply there is
-# 20,790,000.00000196 PRSM ≥ target, after which the pure constant tail
-# (TAIL_BLOCK_SHARDS, ≈0.6%/yr on the 21M reference) takes over forever.
-# Supply never exceeds TOTAL_SUPPLY_SHARDS before the tail leg, and the
-# blended-tail fallback in emission.py remains as a safety net should any
-# future parameterisation make the cap unreachable again.
+# Derivation (exact integer math, Option B):
+#   plateau S∞ = 2·U = 2·R0·HI must reach TARGET = CAP·APPROACH_BPS/10⁴
+#   with HI = 315,360 (2 yr @ 120 s, RFC-0001) and TARGET = 20.79M PRSM:
+#     R0 ≥ TARGET / (2·HI) = 32,955.7... shards/block
+#          ≈ 10.4998M PRSM per calendar year — the founder's "~10.5M/yr"
+#          figure (= cap/2). Policy constant below: 10_500_000 PRSM/yr.
+#   emission.py realises it exactly in whole shards/block via ceiling
+#   division on the epoch target U = TARGET/2:
+#     R0 = ceil(TARGET / (2·HI)) = 32,956 shards/block, so the exact epoch
+#     total HI·R0 clears TARGET/2 and the plateau 2·U ≥ TARGET always holds
+#     (transition guaranteed to fire; overshoot < 1 micro-PRSM).
+#   Calendar-year equivalent: 32,956 × 157,680 = 10,500,328.08 PRSM/yr —
+#   within 328 PRSM/yr (0.003%) of the 10.5M policy figure.
+# With these constants the curve crosses 99% of the cap at epoch K = 7
+# (height 2,207,520 ≈ year 14); cumulative pre-tail supply there is
+# ≈20,790,000 PRSM (< 21M by construction — the 99% approach threshold
+# leaves ~210K PRSM of headroom), after which the pure constant tail
+# (TAIL_BLOCK_SHARDS = cap·60bps/blocks_per_year, ≈0.6%/yr on the 21M
+# reference) takes over forever. Pre-tail supply never exceeds
+# TOTAL_SUPPLY_SHARDS, and the blended-tail fallback in emission.py remains
+# as a safety net should any future parameterisation make the cap
+# unreachable again.
 # spec.md §4.1/D1/§13/§14 amended accordingly (RFC process, 2026-10-10).
-HALVING_YEARS_LABEL = "≈4.956 (14.87 months)"       # informational only
-HALVING_INTERVAL_BLOCKS = 780_517                   # D1-c: exact minimum HI
-                                                    # whose plateau 2·R0·HI
-                                                    # reaches 99% of the cap
+HALVING_YEARS_LABEL = "2 (315,360 blocks @ 120 s)"  # informational only
+# RFC-0001 RESOLVED (2026-10-08): halving every 2 years at the 120 s target
+# cadence = 315,360 blocks (the 787,750 figure in early drafts was Monero's
+# number under its legacy 60 s block time and does not apply to Prism).
+# Option B restores this cadence; the cap-reachability burden moves entirely
+# onto the initial emission rate (INITIAL_ANNUAL_EMISSION_PRSM below).
+HALVING_INTERVAL_BLOCKS = 315_360                   # 2 years @ 120 s (RFC-0001)
 
-# History: RFC-0001 RESOLVED (2026-10-08) pinned "halving every 2 years at a
-# 120 s target cadence" = 315,360 blocks (the 787,750 figure in early drafts
-# was Monero's number under its legacy 60 s block time). That interval made
-# D1's "halving curve → 21M cap + tail" unsatisfiable (plateau ≈ 8.4M < 99%
-# cap); on 2026-10-10 the founder resolved the conflict via option (c):
-# shorten the halving interval. NOTE ON WORDING: relative to the 2-year
-# RFC-0001 draft this interval is longer in calendar terms but far shorter
-# *per unit of emitted supply* — each halving now releases only ≈1.05M PRSM
-# (vs 4.2M), i.e. the emission schedule is compressed into finer steps so
-# the cap becomes reachable. See block comment above for the derivation.
+#: Founder-policy initial annual emission at launch, in PRSM (Option B,
+#: 2026-10-10: cap/2 = 10.5M PRSM/yr). Chosen so the halving plateau
+#: 2·U = 2·R0·HI reaches 99% of the 21M cap (exact minimum ≈ 10.4998M/yr).
+#: The consensus per-block reward is derived from this figure in
+#: emission.py (ceil to whole shards); realised rate lands within 0.003%.
+INITIAL_ANNUAL_EMISSION_PRSM = TOTAL_SUPPLY_PRSM // 2   # 10,500,000 PRSM/yr
 
 TAIL_ANNUAL_RATE_BPS = 60                           # ≈0.6%/yr forever (D1)
 DEV_FUND_SHARE_BPS = 500                            # 5% of each block reward
