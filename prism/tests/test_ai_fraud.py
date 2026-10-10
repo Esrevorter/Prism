@@ -63,7 +63,7 @@ class TestRuleOverlay:
         assert self.ov.matches_phrase("urgent: transfer to customer support")
 
     def test_benign_memo_misses(self):
-        assert not self.ov.matches_phrase("mastering session")
+        assert not self.ov.matches_phrase("design session")
         assert not self.ov.matches_phrase("rent share for October")
 
     def test_lookalike_detection(self):
@@ -174,7 +174,7 @@ def benign_corpus(n=400):
             destination=f"contact:c{i % 25}",
             amount_shard=(i % 90 + 5) * 1_000_000,
             balance_shard=5_000_000_000,
-            memo=["mixing fee", "session", "royalty split", "lunch"][i % 4],
+            memo=["design fee", "session", "invoice #204", "lunch"][i % 4],
             contact_verified=True,
             seen_before=i % 7 != 0,           # occasional new-but-normal payee
         ))

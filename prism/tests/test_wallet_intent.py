@@ -20,7 +20,7 @@ NOW = 1_893_456_000  # arbitrary fixed wall-clock; time is always injected
 
 def book():
     return W.AddressBook([
-        W.Contact("alex", "Alex (mastering)", "prsm1alexaaaaaa",
+        W.Contact("alex", "Alex (design)", "prsm1alexaaaaaa",
                   ["alex", "alex@studio"], verified=True,
                   verification_method="qr_in_person"),
         W.Contact("sam", "Sam Rivera", "prsm1sammmmmmm", ["sam"],
@@ -92,11 +92,11 @@ class TestAddressBook:
 class TestParse:
     def test_happy_path_fields(self):
         p = W.parse_utterance(
-            "Send $50 to Alex for the mastering session, keep it private")
+            "Send $50 to Alex for the design session, keep it private")
         assert p.action == "transfer"
         assert p.fiat_amount == 50.0
         assert p.recipient_term.lower().startswith("alex")
-        assert "mastering session" in (p.memo or "")
+        assert "design session" in (p.memo or "")
         assert not p.explicit_public
 
     def test_prsm_amount_captured_as_string(self):
@@ -125,7 +125,7 @@ class TestParse:
 class TestCompileHappyPath:
     def test_fiat_intent_locks_quote_window(self):
         it = compiler().compile(
-            "Send $50 to Alex for the mastering session, keep it private",
+            "Send $50 to Alex for the design session, keep it private",
             now_unix=NOW)
         assert it.status == "awaiting_confirm"
         q = it.compiled.amount["fiat_quote"]
@@ -138,7 +138,7 @@ class TestCompileHappyPath:
         assert "PRSM" in eff and "Fee: $0.001" in eff
 
     def test_prsm_intent_exact_shards(self):
-        it = compiler().compile("Pay Sam 0.25 PRSM for the mix", now_unix=NOW)
+        it = compiler().compile("Pay Sam 0.25 PRSM for the proofs", now_unix=NOW)
         assert it.compiled.amount == {"or_prsm": 25_000_000}
         assert it.total_cost_shard() == 25_000_000 + W.BASE_FEE_SHARD
 

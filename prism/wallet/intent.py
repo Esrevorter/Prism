@@ -110,7 +110,7 @@ class Contact:
     def normalized(self) -> "Contact":
         aliases = [a.strip().lower() for a in self.nickname_aliases]
         # The display name's first token is always an implicit alias so
-        # "Alex (mastering)" answers to "alex" (§6.2 nickname_aliases).
+        # "Alex (design)" answers to "alex" (§6.2 nickname_aliases).
         head = re.split(r"[\s(]", self.display_name.strip(), 1)[0].lower()
         if head and head not in aliases:
             aliases.append(head)
@@ -798,11 +798,11 @@ def apply_clarification(pending: Intent, answer: str, book: AddressBook,
 # (utterance, expected_status, expected_action, expected_recipient_prefix,
 #  expected_amount_kind)
 BENCHMARK_CASES: list[tuple[str, str, str, Optional[str], str]] = [
-    ("Send $50 to Alex for the mastering session, keep it private",
+    ("Send $50 to Alex for the design session, keep it private",
      "awaiting_confirm", "transfer", "contact:alex", "fiat_quote"),
     ("send 12.5 PRSM to alex@studio",
      "awaiting_confirm", "transfer", "contact:alex", "or_prsm"),
-    ("Pay Sam 0.25 PRSM for the mix",
+    ("Pay Sam 0.25 PRSM for the proofs",
      "awaiting_confirm", "transfer", "contact:sam", "or_prsm"),
     ("Send $20 to Jordan for session fees",
      "awaiting_confirm", "transfer", "contact:jordan", "fiat_quote"),
@@ -820,7 +820,7 @@ BENCHMARK_CASES: list[tuple[str, str, str, Optional[str], str]] = [
      "error", "", None, ""),
     ("Send 3 PRSM to Alex please, keep it private",
      "awaiting_confirm", "transfer", "contact:alex", "or_prsm"),
-    ("send $12.34 to sam for stem revisions",
+    ("send $12.34 to sam for logo revisions",
      "awaiting_confirm", "transfer", "contact:sam", "fiat_quote"),
 ]
 
