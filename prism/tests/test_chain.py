@@ -14,11 +14,13 @@ from chain.block import (BlockHeader, PoWFields, ZERO32, parse_header,
 from chain.denylist import GENESIS_ACC, DenylistStore, Entry, SignedRoot, fold
 from chain.difficulty import DifficultyWindow, retarget
 from chain.emission import (CAP_HEIGHT, CAP_TRANSITION_EPOCH,
-                            INITIAL_BASE_REWARD_SHARDS, base_reward,
+                            INITIAL_BASE_REWARD_SHARDS, PRE_TAIL_PLATEAU_SHARDS,
+                            base_reward,
                             cumulative_supply, emission_at, prsm, tail_reward)
 from chain.node import ChainState, make_genesis, merkle_root, mine_block
-from chain.params import (DEV_FUND_SHARE_BPS, HALVING_INTERVAL_BLOCKS,
-                          REFRACTION_TESTNET, TOTAL_SUPPLY_SHARDS)
+from chain.params import (BLOCKS_PER_YEAR, DEV_FUND_SHARE_BPS,
+                          HALVING_INTERVAL_BLOCKS, REFRACTION_TESTNET,
+                          TAIL_ANNUAL_RATE_BPS, TOTAL_SUPPLY_SHARDS)
 from chain.pow import PlaceholderSha3Pow, assert_miner_backend, viewkey_for_height
 
 
@@ -34,17 +36,17 @@ def test_halving_step():
     h0 = base_reward(1)                          # first reward-bearing block
     assert h0 == INITIAL_BASE_REWARD_SHARDS      # genesis (h=0) pays nobody
     assert base_reward(0) == 0                   # zero premine (D1)
-    if CAP_TRANSITION_EPOCH >= 2:
+    if CAP_TRANSITION_EPOCH is None or CAP_TRANSITION_EPOCH >= 2:
         # exact halving at an epoch step *within* the decay phase: two blocks
-        # one interval apart, both strictly before the cap transition.
-        k = CAP_TRANSITION_EPOCH - 2
+        # one interval apart, both strictly before the cap transition (if any).
+        k = 0 if CAP_TRANSITION_EPOCH is None else CAP_TRANSITION_EPOCH - 2
         h_a = base_reward(k * HALVING_INTERVAL_BLOCKS + 1)
         h_b = base_reward((k + 1) * HALVING_INTERVAL_BLOCKS + 1)
         assert h_a > 0 and h_a // 2 == h_b       # R0 >> k halves to R0 >> (k+1)
     else:
-        # Cap reached after a single decay epoch (R0 is floor-rounded so the
-        # geometric sum stays under 21M): the "halving" boundary coincides
-        # with the cap transition — decay stops there and the tail takes over.
+        # Cap approached after a single decay epoch: the "halving" boundary
+        # coincides with the cap transition — decay stops there and the tail
+        # takes over.
         assert CAP_TRANSITION_EPOCH == 1
         assert base_reward(HALVING_INTERVAL_BLOCKS - 1) == INITIAL_BASE_REWARD_SHARDS
         assert base_reward(CAP_HEIGHT) == 0
@@ -58,17 +60,52 @@ def test_genesis_pays_nobody():
     assert cumulative_supply(0) == 0
 
 
-def test_tail_after_decay():
-    far = CAP_HEIGHT + 10_000            # past the cap-approach boundary
-    assert base_reward(far) == 0
-    tr = tail_reward(far)
-    annual = tr * ((365 * 24 * 3600) // 120)
+def test_d1_conflict_flag_current_parameters():
+    """Documentation-as-test for the D1 conflict flag (emission.py, raised
+    2026-10-10): with the spec-pinned constants (R0 ≈ 2.1M PRSM/yr, halvings
+    every 315,360 blocks) the halving curve plateaus at 2·U ≈ 8.4M PRSM and
+    therefore NEVER approaches the 21M cap. Consequences that must hold until
+    the founder resolves D1 (options a/b/c in emission.py):
+      * no cap-approach transition exists (CAP_TRANSITION_EPOCH/CAP_HEIGHT None)
+      * the decay curve keeps halving indefinitely (no premature tail switch)
+      * no tail is scheduled at any height
+      * issuance still converges below the hard cap (cap can never be exceeded)
+    """
+    assert PRE_TAIL_PLATEAU_SHARDS < TOTAL_SUPPLY_SHARDS   # plateau < 21M
+    assert CAP_TRANSITION_EPOCH is None
+    assert CAP_HEIGHT is None
+    far = 100 * HALVING_INTERVAL_BLOCKS          # ~200 years out
+    assert base_reward(far) > 0                  # decay continues…
+    assert base_reward(far) == INITIAL_BASE_REWARD_SHARDS >> 100
+    assert tail_reward(far) == 0                 # …and no tail yet
+    # convergence: cumulative supply stays under the cap forever
+    assert cumulative_supply(far) <= TOTAL_SUPPLY_SHARDS
+    # geometric-series bound: sum of all epochs ≤ plateau (2U), which is < cap
+    assert cumulative_supply(far) < PRE_TAIL_PLATEAU_SHARDS
+
+
+def test_cumulative_supply_matches_per_block_emission_under_decay():
+    """closed-form sum == naive per-block accumulation across several epoch
+    boundaries while the decay curve runs (current parameters: no tail)."""
+    naive = 0
+    for h in range(1, 3 * HALVING_INTERVAL_BLOCKS + 2):
+        naive += emission_at(h).total_new_shards
+        assert naive == cumulative_supply(h), h
+
+
+def test_cap_transition_boundary_hygiene():
+    """Property hygiene for ANY parameterisation (the boundary itself does
+    not exist under current D1-conflict params — see flag test above):
+    whenever a tail block exists, the decay/tail handover has no gap or
+    overlap and the tail rate matches D1's ≈0.6%/yr."""
+    tr = (TOTAL_SUPPLY_SHARDS * TAIL_ANNUAL_RATE_BPS) // (10_000 * BLOCKS_PER_YEAR)
+    annual = tr * BLOCKS_PER_YEAR
     assert abs(annual * 10_000 / TOTAL_SUPPLY_SHARDS - 60) < 1   # ≈60 bps/yr
-
-
-def test_cap_transition_boundary():
-    """Spec §4.1 (D1): decay curve stops when the cap is approached; the
-    constant tail takes over at CAP_HEIGHT with no gap or overlap."""
+    if CAP_HEIGHT is None:
+        # indefinite decay: every reward-bearing block pays base > 0
+        assert emission_at(1).total_new_shards > 0
+        assert emission_at(10 * HALVING_INTERVAL_BLOCKS).total_new_shards > 0
+        return
     assert base_reward(CAP_HEIGHT - 1) > 0        # last decay block pays base
     assert tail_reward(CAP_HEIGHT - 1) == 0       # ...and no tail yet
     assert base_reward(CAP_HEIGHT) == 0           # first tail block: no base
@@ -83,18 +120,12 @@ def test_cumulative_supply_monotonic():
     assert cumulative_supply(HALVING_INTERVAL_BLOCKS) <= TOTAL_SUPPLY_SHARDS
 
 
-def test_cumulative_supply_matches_per_block_emission():
-    """closed-form sum == naive per-block accumulation across the boundary"""
-    naive = 0
-    for h in range(1, CAP_HEIGHT + 3):
-        naive += emission_at(h).total_new_shards
-        assert naive == cumulative_supply(h), h
-
-
 def test_pre_tail_supply_never_exceeds_cap():
-    """The decay-phase total at the transition boundary stays under the cap
-    (tail inflation beyond it is the intended D1 behaviour, not a bug)."""
-    assert cumulative_supply(CAP_HEIGHT - 1) <= TOTAL_SUPPLY_SHARDS
+    """The decay-phase total stays under the cap at every height checked
+    (tail inflation beyond a future transition, if D1 is resolved toward a
+    tail, is the intended behaviour, not a bug)."""
+    limit = CAP_HEIGHT if CAP_HEIGHT is not None else 3 * HALVING_INTERVAL_BLOCKS
+    assert cumulative_supply(limit - 1) <= TOTAL_SUPPLY_SHARDS
 
 
 def test_prsm_formatting():
