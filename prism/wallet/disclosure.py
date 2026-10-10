@@ -176,33 +176,86 @@ def make_scoped_view_key(view_secret_a: int, root_key: bytes, scope_id: str,
                          window_end_ts=window_end_ts)
 
 
-def make_ownership_proof(sv: ScopedViewKey, e_shared: bytes) -> Point:
+def _coerce_point(p) -> Point:
+    """Accept a Point, raw encoded bytes, or a hex string."""
+    if isinstance(p, Point):
+        return p
+    if isinstance(p, (bytes, bytearray)):
+        return decode(bytes(p), require_canonical=True)
+    if isinstance(p, str):
+        return decode(bytes.fromhex(p), require_canonical=True)
+    raise DisclosureError(f"cannot interpret {type(p).__name__} as a point")
+
+
+def make_ownership_proof(sv: ScopedViewKey, e_shared: bytes,
+                         view_secret_a: Optional[int] = None,
+                         view_pub=None,
+                         tx_pub_R=None) -> Point:
     """Wallet side: proof point W for one claimed output.
 
-    W = Hs(e)·G − s·B, where e = keccak(a·R) is the tx ECDH shared secret
-    the wallet recovered during scan and stores per owned output (§6.2
-    Owned-Output record).
+    With ``view_secret_a`` (the scalar ``a``, required by the package
+    builder for its provenance check) and ``tx_pub_R`` supplied, the
+    wallet recomputes the ECDH hash through the scoped secret:
+    e' = keccak(s·R) with s = c·a.  Because s·R = c·(a·R) = c·(r·A),
+    this equals the stored ``e_shared`` = keccak(a·R) iff the output is
+    genuinely ours under this scope — a cheap self-check that refuses to
+    mint proofs over stale records.  ``view_pub`` (A = a·G) is accepted
+    for API compatibility; without the scalar it adds no check power.
+    Otherwise the scan-recovered ``e_shared`` bytes are used directly.
+    In both cases:
+
+        W = Hs(e)·G − s·B,  where s = c·a is the scoped secret.
+
+    The auditor's linear test W + s·B == P then expands to
+    Hs(e)·G + B == P — the standard receiver identity — while shipping
+    neither a nor c separately.  Deriving Hs(e)·G from a·R = s·A (with
+    s = c·a published in the scoped key) is a computational Diffie-
+    Hellman problem, which is why the wallet must hold a to build W.
     """
-    hs_e = int.from_bytes(e_shared, "little") % L
+    if view_secret_a is not None and tx_pub_R is not None:
+        from prism.crypto.stealth import compute_shared_secret_receiver
+        # Recompute the ECDH hash through the *scoped* secret only:
+        # s·R = (c·a)·R = c·(r·A) — the wallet never multiplies by raw a
+        # here, which keeps the proof compatible with view-only custody.
+        # The result matches the stored e_shared exactly when the claimed
+        # output truly belongs to this wallet under scope multiplier c;
+        # for any foreign output it differs, so W lands off-chain and the
+        # auditor's equation fails loudly.  A mismatch therefore flags a
+        # stale/mismatched owned-output record rather than silently
+        # building a bogus proof.
+        e = compute_shared_secret_receiver(sv.scoped_secret,
+                                           _coerce_point(tx_pub_R))
+        if e != e_shared:
+            raise DisclosureError(
+                "e_shared disagrees with keccak(s·R) for the scoped key "
+                "and tx_pub_R — stale owned-output record or foreign "
+                "output")
+    else:
+        e = e_shared
+    hs_e = int.from_bytes(e, "little") % L
     return BASE.mul(hs_e).sub(sv.spend_pub.mul(sv.scoped_secret))
 
 
-def scoped_owns_output(sv: ScopedViewKey, W: Point,
+def scoped_owns_output(sv: ScopedViewKey, W,
                        stealth_P: Point) -> bool:
     """Auditor-side ownership test for one claimed output.
 
     True iff W + s·B == P. Expanding W = Hs(e)·G − s·B shows this is
     exactly the receiver identity Hs(e)·G + B == P — without revealing a
-    or c separately.
+    or c separately.  Non-Point values for ``W`` (integers, raw bytes of
+    the wrong length, undecodable hex) simply fail the test rather than
+    raising, so verifiers can feed arbitrary claim fields straight in.
 
     Soundness: forging a pass for an output one does not receive requires
     producing W with W == P − s·B for a foreign P, given only s = c·a and
     the public points — i.e. computing Hs(e)·G with knowledge of a beyond
-    what s = c·a leaks (an ECDLP in the gap between a and c·a under the
+    what s = c·a leaks (a CDH/ECDLP in the gap between a and c·a under the
     random-oracle model for c). Omission (not enumerating an owned output)
     remains possible and is inherent to enumeration-based disclosure; the
     Phase-2 circuits (§5.3) replace it with range proofs over the full set.
     """
+    if not isinstance(W, Point):
+        return False
     lhs = W.add(sv.spend_pub.mul(sv.scoped_secret))
     return lhs.encode() == stealth_P.encode()
 
@@ -330,10 +383,12 @@ class DisclosurePackage:
 # ---------------------------------------------------------------------------
 
 def build_disclosure_package(*, view_secret_a: int, root_key: bytes,
-                             spend_pub: Point, scope_id: str,
+                             scope_id: str,
                              statement_type: str, owned: list[dict],
                              period: tuple[int, int],
                              verifier_nonce: bytes,
+                             spend_pub: Optional[Point] = None,
+                             view_pub=None,
                              expiry_days: int = DEFAULT_VALIDITY_DAYS,
                              now_ts: Optional[int] = None
                              ) -> DisclosurePackage:
@@ -341,21 +396,47 @@ def build_disclosure_package(*, view_secret_a: int, root_key: bytes,
 
     Each element of `owned` (wallet-side Owned-Output record, §6.2):
         txid (bytes), output_index, amount_shard, blinding (int),
-        e_shared (bytes — keccak(a·R) recovered by the scan).
+        e_shared (bytes — keccak(a·R) recovered by the scan),
+        tx_pub_R (optional Point/bytes — when present the wallet
+                  recomputes e = keccak(a·R) from ``view_secret_a`` and
+                  cross-checks it against the stored ``e_shared``).
     The wallet knows a and c; it ships per-output proof points
     W = Hs(e)·G − s·B so the auditor's test W + s·B == P is linear in B.
+
+    Spend pubkey B (the recipient long-term spend public key that pins
+    stealth addresses P = Hs(e)·G + B) comes from the explicit
+    ``spend_pub`` argument or, for scanner-style callers that only carry
+    view-level material, from each owned-output record's ``spend_pub``
+    field.  ``view_pub`` (A = a·G) is accepted for API compatibility;
+    it is already implied by ``view_secret_a`` and carries no extra
+    verification power without the scalar, so it is not required.
     """
     if statement_type not in SUPPORTED_STATEMENTS:
         raise DisclosureError(f"unsupported statement {statement_type!r}")
     if not owned:
         raise DisclosureError("cannot disclose an empty set")
+    if spend_pub is None and not any(o.get("spend_pub") is not None
+                                     for o in owned):
+        raise DisclosureError(
+            "no spend pubkey B: pass spend_pub= explicitly or carry a "
+            "'spend_pub' per owned-output record")
+    # If spend_pub was not passed directly, take it from the first
+    # record that supplies one (all records of one wallet share B).
+    if spend_pub is None:
+        for o in owned:
+            if o.get("spend_pub") is not None:
+                spend_pub = _coerce_point(o["spend_pub"])
+                break
     now = _now() if now_ts is None else now_ts
     sv = make_scoped_view_key(view_secret_a, root_key, scope_id,
                               spend_pub, period[0], period[1])
     claims = []
     total = 0
     for o in owned:
-        W = make_ownership_proof(sv, o["e_shared"])
+        W = make_ownership_proof(sv, o["e_shared"],
+                                 view_secret_a=view_secret_a,
+                                 view_pub=view_pub,
+                                 tx_pub_R=o.get("tx_pub_R"))
         claims.append(OutputClaim(
             txid_hex=o["txid"].hex(),
             output_index=int(o["output_index"]),
@@ -611,8 +692,13 @@ class DisclosureRegistry:
     # -- operations ---------------------------------------------------------
 
     def record(self, pkg: DisclosurePackage, *,
-               verifier_label: str) -> RegistryEntry:
-        """Log a freshly generated disclosure (§7.6 step 5)."""
+               verifier_label: str,
+               now_ts: Optional[int] = None) -> RegistryEntry:
+        """Log a freshly generated disclosure (§7.6 step 5).
+
+        ``now_ts`` is accepted for deterministic/testable event timestamps;
+        the recorded entry mirrors the package's own issued/expiry times.
+        """
         e = RegistryEntry(
             disclosure_id=pkg.disclosure_id,
             statement_type=pkg.statement_type,
@@ -624,7 +710,9 @@ class DisclosureRegistry:
             expiry_ts=pkg.expiry_ts,
             disclosure_hash_hex=pkg.disclosure_hash().hex(),
         )
-        self._append(e.body())
+        body = e.body()
+        body["ts"] = now
+        self._append(body)
         return e
 
     def revoke(self, disclosure_id: str, *,
@@ -643,6 +731,8 @@ class DisclosureRegistry:
         body["entry_id"] = str(uuid.uuid4())
         body["status"] = STATUS_REVOKED
         body["revoked_ts"] = now
+        body["issued_ts"] = latest["issued_ts"]   # keep original issuance
+        body["expiry_ts"] = latest["expiry_ts"]
         self._append(body)
         return True
 
