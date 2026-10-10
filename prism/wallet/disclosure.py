@@ -44,11 +44,11 @@ Scoped view keys (§5.2 V(s,t), rotation per §5.4 rule 2)
 with ``a`` the wallet view secret. For a claimed output the wallet publishes
 the *proof point*
 
-    W = Hs(e)·G − s·B          (e = keccak(a·R), the tx ECDH secret)
+    W = Hs(e)·G − B            (e = keccak(a·R), the tx ECDH secret)
 
 and the auditor's test is a single public equation:
 
-    W + s·B == P               ⇔   Hs(e)·G + B == P
+    W + B == P                 ⇔   Hs(e)·G + B == P
 
 i.e. exactly the standard receiver identity, without ever shipping a or c
 separately. B and R are public (recipient address / tx prefix); the value
@@ -321,7 +321,7 @@ class OutputClaim:
     output_index: int
     amount_shard: int                # v, revealed to this auditor
     blinding_hex: str                # r, opens the on-chain commitment
-    w_hex: str                       # W = Hs(e)·G − s·B (ownership proof point)
+    w_hex: str                       # W = Hs(e)·G − B (ownership proof point)
 
 
 @dataclass(frozen=True)
@@ -417,7 +417,9 @@ def build_disclosure_package(*, view_secret_a: int, root_key: bytes,
                   recomputes e = keccak(a·R) from ``view_secret_a`` and
                   cross-checks it against the stored ``e_shared``).
     The wallet knows a and c; it ships per-output proof points
-    W = Hs(e)·G − s·B so the auditor's test W + s·B == P is linear in B.
+    W = Hs(e)·G − B so the auditor's test W + B == P expands to the
+    standard receiver identity, with the scoped secret s = c·a binding
+    the package to its scope/window instead of entering the equation.
 
     Spend pubkey B (the recipient long-term spend public key that pins
     stealth addresses P = Hs(e)·G + B) comes from the explicit
