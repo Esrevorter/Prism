@@ -241,13 +241,32 @@ class TestVerifierRejections:
         assert not rep.ok and any("commitment opening fails" in e for e in rep.errors)
 
     def test_wrong_W_fails_ownership(self, scenario):
+        # Deterministic wrong-W: a valid but unrelated curve point.
+        # (Flipping a byte of the real W was nondeterministic — roughly half
+        # of the time the tampered encoding is not a curve point at all, so
+        # verification aborted earlier with "claim parse failed" instead of
+        # reaching the ownership gate.)
+        from prism.crypto.stealth import public_key
+        bad_W = public_key(0xC0FFEE)
+        pkg2 = _swap_claim(scenario["pkg"], index=0,
+                           w_hex=encode(bad_W).hex())
+        rep = verify_package(pkg2, chain=scenario["chain"],
+                             expected_nonce=scenario["nonce"],
+                             now_ts=scenario["now"])
+        assert not rep.ok and any("does not own" in e for e in rep.errors)
+
+    def test_malformed_W_rejected(self, scenario):
+        # A flipped-bit tamper may or may not decode to a curve point; either
+        # way the package must be rejected deterministically.
         bad = bytes((b ^ 0x01) for b in bytes.fromhex(
             scenario["pkg"].claims[0].w_hex))
         pkg2 = _swap_claim(scenario["pkg"], index=0, w_hex=bad.hex())
         rep = verify_package(pkg2, chain=scenario["chain"],
                              expected_nonce=scenario["nonce"],
                              now_ts=scenario["now"])
-        assert not rep.ok and any("does not own" in e for e in rep.errors)
+        assert not rep.ok and any(("does not own" in e or
+                                   "claim parse failed" in e)
+                                  for e in rep.errors)
 
     def test_output_index_out_of_range(self, scenario):
         pkg2 = _swap_claim(scenario["pkg"], index=0, output_index=99)
