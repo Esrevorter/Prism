@@ -21,7 +21,7 @@ NOW = 1_893_456_000  # arbitrary fixed wall-clock; time is always injected
 def book():
     return W.AddressBook([
         W.Contact("alex", "Alex (design)", "prsm1alexaaaaaa",
-                  ["alex", "alex@studio"], verified=True,
+                  ["alex", "alex@agency"], verified=True,
                   verification_method="qr_in_person"),
         W.Contact("sam", "Sam Rivera", "prsm1sammmmmmm", ["sam"],
                   verified=True, verification_method="dns_proof"),
@@ -70,7 +70,7 @@ class TestAddressBook:
         assert [c.contact_id for c in hits] == ["alex"]
 
     def test_casefold_and_whitespace(self):
-        assert len(book().lookup("  ALEX@STUDIO ")) == 1
+        assert len(book().lookup("  ALEX@AGENCY ")) == 1
 
     def test_ambiguous_returns_many(self):
         b = book()

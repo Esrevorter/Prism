@@ -6,11 +6,11 @@
 
 ## The main screen
 
-Calm by default. What you see: your balance (one number, one fiat estimate), recent activity in plain language ("Royalty split from StreamCo · received Tuesday"), and two big buttons: **Send** and **Receive**. Everything else is behind progressive disclosure — the "advanced" panel (rings, decoys, raw intents, per-output controls) starts OFF and remembers if you turn it on. No badges, no streaks, no gamification; financial software that manufactures urgency is a dark pattern.
+Calm by default. What you see: your balance (one number, one fiat estimate), recent activity in plain language ("Payment from ClientCo · received Tuesday"), and two big buttons: **Send** and **Receive**. Everything else is behind progressive disclosure — the "advanced" panel (rings, decoys, raw intents, per-output controls) starts OFF and remembers if you turn it on. No badges, no streaks, no gamification; financial software that manufactures urgency is a dark pattern.
 
 ## Accounts & sub-addresses
 
-One wallet holds named accounts ("Royalties", "Collaborations", "Savings") with unlimited sub-addresses each. Different sub-addresses give different platforms/payers — payments to them all land in your account, but *you* can tell sources apart locally even though the chain can't link them. Handy: "this sub-address is only for Studio X" makes later disclosures cleanly scoped ([Preparing a Tax Disclosure](Preparing-a-Tax-Disclosure.md)).
+One wallet holds named accounts ("Client income", "Collaborations", "Savings") with unlimited sub-addresses each. Different sub-addresses give different platforms/payers — payments to them all land in your account, but *you* can tell sources apart locally even though the chain can't link them. Handy: "this sub-address is only for Client X" makes later disclosures cleanly scoped ([Preparing a Tax Disclosure](Preparing-a-Tax-Disclosure.md)).
 
 ## Sending
 

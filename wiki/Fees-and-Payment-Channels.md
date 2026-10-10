@@ -22,7 +22,7 @@ Fees + block emission compensate miners securing the chain (see [Monetary Policy
 | Everyday send | Base fee | 0.0001 PRSM | ≤ 2 blocks (~4 min) typical |
 | In a hurry | Fast (≤10× base) | ≤ 0.001 PRSM | next block |
 | Receiving | free | — | spendable after 10 confirmations (~20 min maturity rule) |
-| Tips / microroyalties | **channel** | ≈ 0 | instant |
+| Tips / micropayments | **channel** | ≈ 0 | instant |
 | Big batch day | channel or plain sends, either way trivial | — | — |
 
 Gas abstraction note: fees are paid in PRSM itself — there is no separate gas token to acquire, hoard, or run out of.
@@ -33,7 +33,7 @@ Gas abstraction note: fees are paid in PRSM itself — there is no separate gas 
 
 ```text
 on-chain                     off-chain (instant, ~free)              on-chain
-   │ open (fund 50 PRSM)        ┌─ tip → ─┬─ royalty split → ─┐        │ close
+   │ open (fund 50 PRSM)        ┌─ tip → ─┬─ payout → ─┐        │ close
    ▼═══════════════════════◄═══╪═════════╪═══════════════════╪════►══▼
   tx #1                        both hold signed balance updates, newest wins
 ```
@@ -43,7 +43,7 @@ on-chain                     off-chain (instant, ~free)              on-chain
 - **Watchtowers:** register an encrypted penalty blob with a third party. If your counterparty vanishes or tries to broadcast an old state, the watchtower submits the latest correct one (unilateral close with delay), and cheating closes get *penalized* — the cheat's signature lets you claim the whole channel balance (E3).
 - Channel funds inherit the same privacy guarantees as on-chain outputs; capacity opening uses your normal coins.
 
-**When channels shine for the target user:** recurring collaborator payouts (a session musician you pay weekly), platform microroyalties (fractions of a cent that would be silly on-chain), point-of-sale tips, subscription metering. One-time large transfers can just go on-chain — the base fee makes that cheap enough already.
+**When channels shine for the target user:** recurring collaborator payouts (a contractor you pay weekly), platform micropayments (fractions of a cent that would be silly on-chain), point-of-sale tips, subscription metering. One-time large transfers can just go on-chain — the base fee makes that cheap enough already.
 
 Status: L2 channel logic is scaffolded (`prism/l2/`) and lands in Phase 3 ([Roadmap](Roadmap.md)); fee-policy code paths are implemented and tested today (`chain/params.py`, node acceptance rules).
 

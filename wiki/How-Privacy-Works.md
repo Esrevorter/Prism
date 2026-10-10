@@ -63,7 +63,7 @@ Even perfect crypto leaks if the first node you broadcast from knows your IP. Pr
 ## 5. What privacy does *not* hide (honest limits)
 
 - **Fees** are visible (fixed base 0.0001 PRSM + optional priority ≤10×).
-- **Timing & volume:** observers see block cadence and how much data moves. Correlating "Maya's studio got paid" with "someone paid something right after" is metadata heuristics — mitigated by batching/lateness norms in the wallet, not eliminated by math.
+- **Timing & volume:** observers see block cadence and how much data moves. Correlating "Maya got paid" with "someone paid something right after" is metadata heuristics — mitigated by batching/lateness norms in the wallet, not eliminated by math.
 - **A global passive adversary** that records everything forever and has quantum-scale analysis tools degrades ring sizes over long horizons. Our threat model states this plainly ([Security Model](Security-Model.md)).
 - **Compelled disclosure:** if *you* hand over your view key or a proof, privacy ends by design — that's the user-controlled half of "clarity on your terms."
 - **Endpoint compromise:** malware reading your live wallet memory is out of scope beyond OS-provided enclave protections. We say so rather than pretend otherwise.

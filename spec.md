@@ -230,7 +230,7 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
 // Wallet Account
 {
   "account_id": "uuid",
-  "name": "Royalties",
+  "name": "Client income",
   "scheme": "mpc_threshold",          // | "seed_legacy"
   "threshold": 3, "total_shares": 5,
   "signer_registry": [ { "share_id": "...", "device|contact": "...", "transport": "ee2ee" } ],
@@ -257,7 +257,7 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
   "display_name": "Alex (design)",
   "payment_address": "prsm1...",
   "verified": true, "verification_method": "qr_in_person|dns_proof|trust_chain",
-  "nickname_aliases": ["alex", "alex@studio"],   // used by NL compiler
+  "nickname_aliases": ["alex", "alex@agency"],   // used by NL compiler
   "consent_to_be_named_in_disclosures": false
 }
 
@@ -433,7 +433,7 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 ### 10.2 Channels
 - Bidirectional, commitment-based (LN-like) with watchtower outsourcing (encrypted penalty blobs).
 - Channel open/close cost = 2 base-fee transactions. In-channel payments: effectively zero fee, instant.
-- Target use: recurring collaborator payouts, tips, microroyalties.
+- Target use: recurring collaborator payouts, tips, micropayments.
 
 ### 10.3 Fiat Pricing Oracle (wallet-level, not consensus)
 - Median-of-N off-chain exchange quotes with signed price feeds; used only for display and slippage guards in intents. Chain itself has no oracle dependency.

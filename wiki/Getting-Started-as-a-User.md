@@ -52,7 +52,7 @@ Target: under 5 minutes, **no seed phrase required**.
 
 ## 💰 Step 2 — Receiving money
 
-1. Tap **Receive** → pick account (e.g., "Royalties") or sub-address → show QR.
+1. Tap **Receive** → pick account (e.g., "Client income") or sub-address → show QR.
 2. Payer scans; within ~2 minutes the payment appears **pending**, then confirms after 10 blocks (~20 min) with a notification at whatever intensity you set (*calm / normal / loud*).
 3. Every payment lands at a brand-new one-time address behind the scenes — the address you shared is safe to reuse because it never actually appears on-chain ([How Privacy Works](How-Privacy-Works.md)).
 
@@ -60,7 +60,7 @@ Target: under 5 minutes, **no seed phrase required**.
 
 Type or say:
 
-> **"Send $50 to Alex for the mastering session, keep it private."**
+> **"Send $50 to Alex for the session, keep it private."**
 
 What happens, visibly:
 

@@ -12,7 +12,7 @@
 
 **Is there a token I can buy right now?** **No.** There is no live network, no sale, no contract address. Zero pre-mine means literally nobody — including the founders — holds early PRSM. Anything selling "PRSM" today is fraudulent. ([Roadmap](Roadmap.md))
 
-**Who's it for?** Designed around independent creatives (producers living on irregular global income), but the features generalize to anyone with a paycheck-plus-side-hustle life. ([spec §1](../spec.md))
+**Who's it for?** Designed around independent creative professionals living on irregular global income, but the features generalize to anyone with a paycheck-plus-side-hustle life. ([spec §1](../spec.md))
 
 ## Privacy & disclosure
 

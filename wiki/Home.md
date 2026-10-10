@@ -16,7 +16,7 @@
 |---|---|
 | **Curious** — heard about Prism, want the gist in 10 minutes | → [Prism in Plain English](Prism-in-Plain-English.md) |
 | **A future user** — want to set up a wallet and get paid | → [Getting Started as a User](Getting-Started-as-a-User.md) |
-| **An artist/freelancer** — wondering if this fits your workflow | → [Using the Wallet](Using-the-Wallet.md) · [Preparing a Tax Disclosure](Preparing-a-Tax-Disclosure.md) |
+| **A creative professional/freelancer** — wondering if this fits your workflow | → [Using the Wallet](Using-the-Wallet.md) · [Preparing a Tax Disclosure](Preparing-a-Tax-Disclosure.md) |
 | **Security-minded** — want the honest threat model, not marketing | → [Security Model & Honest Limits](Security-Model.md) |
 | **A developer** — want to build or contribute | → [Getting Started as a Developer](Getting-Started-as-a-Developer.md) |
 | **An auditor / researcher** | → [Architecture](Architecture.md) → [Cryptography Deep Dive](Cryptography-Deep-Dive.md) → [Testing & Quality](Testing-&-Quality.md) |

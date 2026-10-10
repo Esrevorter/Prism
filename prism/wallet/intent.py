@@ -800,7 +800,7 @@ def apply_clarification(pending: Intent, answer: str, book: AddressBook,
 BENCHMARK_CASES: list[tuple[str, str, str, Optional[str], str]] = [
     ("Send $50 to Alex for the design session, keep it private",
      "awaiting_confirm", "transfer", "contact:alex", "fiat_quote"),
-    ("send 12.5 PRSM to alex@studio",
+    ("send 12.5 PRSM to alex@agency",
      "awaiting_confirm", "transfer", "contact:alex", "or_prsm"),
     ("Pay Sam 0.25 PRSM for the proofs",
      "awaiting_confirm", "transfer", "contact:sam", "or_prsm"),
