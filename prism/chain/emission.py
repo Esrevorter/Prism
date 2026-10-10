@@ -35,24 +35,33 @@ def _decay_factor_blocks() -> int:
     return HALVING_INTERVAL_BLOCKS
 
 
-# Cap-aware transition height: the first block whose cumulative pre-tail
-# emission reaches/approaches the 21M hard cap. Derived from the closed form
-# for the geometric sum — no search loop, so it is O(1) and usable inside the
-# per-block consensus path. Heights are 1-indexed for rewards (genesis pays
-# nobody), so epoch k covers heights [k*HI + 1, (k+1)*HI] paying R0 >> k, and
-# the sum through epoch K-1 is R0 * HI * (2 - 2^(1-K)). The smallest K with
-# that sum >= CAP satisfies 2^-(K-1) <= 1 - CAP/(2*R0*HI); we take the exact
-# integer condition by bit-length instead of floating-point logs.
+# Cap-aware transition height: the first halving-epoch boundary at which the
+# cumulative pre-tail emission has reached/approached the 21M hard cap; from
+# there on, the constant tail takes over. Closed-form derivation (no search
+# loop, so O(1) and safe inside the per-block consensus path):
+#
+#   Heights are 1-indexed for rewards (genesis pays nobody), so epoch k
+#   covers heights [k*HI + 1, (k+1)*HI] and pays R0 >> k per block. The
+#   cumulative sum through the end of epoch K-1 is  S(K) = U * (2 - 2^(1-K)),
+#   where U = R0 * HI (the first epoch's total) and 2*U = 2S(∞) is the
+#   supremum of the geometric series. The smallest K with S(K) >= CAP obeys
+#       U >> (K-1)  <=  (2U - CAP) / 2      (integer division, exact bound)
+#   so K = 1 + bitlen(U) - bitlen(2U - CAP) when 2U > CAP, else K = 1.
+#
+# Note: R0 is floor-rounded to whole shards, so U < CAP/2 and the closed-form
+# transition epoch is 1 here — i.e. the decay curve alone never overshoots the
+# cap and the tail begins immediately after the first halving interval. If a
+# future parameter change ever makes 2U > CAP (curve would run past the cap),
+# this formula stops the curve early instead.
+_U_FIRST_EPOCH = INITIAL_BASE_REWARD_SHARDS * HALVING_INTERVAL_BLOCKS
+_TWO_U = 2 * _U_FIRST_EPOCH
+
+
 def _cap_transition_epoch() -> int:
-    num = 2 * INITIAL_BASE_REWARD_SHARDS * HALVING_INTERVAL_BLOCKS - TOTAL_SUPPLY_SHARDS
-    den = 2 * INITIAL_BASE_REWARD_SHARDS * HALVING_INTERVAL_BLOCKS
-    # need (R0*HI) >> (K-1) <= num/den * ... ; solve via doubling:
-    # smallest m = K-1 with  ((R0*HI) >> m) * den <= num  (integer-safe).
-    m = 0
-    unit = INITIAL_BASE_REWARD_SHARDS * HALVING_INTERVAL_BLOCKS
-    while (unit >> m) * den > num:
-        m += 1
-    return m + 1
+    if _TWO_U <= TOTAL_SUPPLY_SHARDS:      # decay sum alone stays under cap
+        return 1                            # tail starts at the first boundary
+    slack = (_TWO_U - TOTAL_SUPPLY_SHARDS) // 2
+    return 1 + _U_FIRST_EPOCH.bit_length() - slack.bit_length()
 
 
 CAP_TRANSITION_EPOCH = _cap_transition_epoch()
@@ -68,10 +77,13 @@ def base_reward(height: int) -> int:
     computed exactly as R0 >> k. The curve stops at the cap-approach boundary
     (CAP_HEIGHT): beyond it the base reward is 0 and the consensus-fixed tail
     takes over, so total issuance converges toward — and never runs away past
-    — the 21M hard cap (spec §4.1, Decision D1). Height 0 gets R0.
+    — the 21M hard cap (spec §4.1, Decision D1). Height 0 (genesis) pays
+    nobody; the first reward-bearing block is height 1.
     """
     if height < 0:
         raise ValueError("negative height")
+    if height == 0:
+        return 0                            # genesis pays nobody (D1, zero premine)
     k = height // _decay_factor_blocks()
     if k >= CAP_TRANSITION_EPOCH:    # cap approached; tail phase takes over
         return 0
@@ -84,8 +96,11 @@ def tail_reward(height: int) -> int:
     Tail = 0.6%/yr of CURRENT supply, paid per block. We approximate the
     compounding conservatively with simple interest on the capped supply:
     (TOTAL_SUPPLY * 60 bps) / blocks_per_year. Consensus-fixed, non-discretionary.
+    Genesis (height 0) pays nobody.
     """
-    if base_reward(height) > 0:
+    if height <= 0:
+        return 0
+    if height < CAP_HEIGHT:
         return 0
     return (TOTAL_SUPPLY_SHARDS * TAIL_ANNUAL_RATE_BPS) // (10_000 * BLOCKS_PER_YEAR)
 
@@ -114,21 +129,36 @@ def cumulative_supply(height: int) -> int:
     """Total shards emitted through block `height` inclusive.
 
     Closed form for the decay phase: sum over complete halving epochs plus
-    the partial current epoch. O(number of halvings) — cheap.
+    the partial current epoch, then a constant tail above CAP_HEIGHT.
+    O(CAP_TRANSITION_EPOCH) — cheap and bounded. Genesis (height 0) pays
+    nobody, so the sum runs over reward-bearing heights 1..height.
     """
+    if height < 0:
+        raise ValueError("negative height")
+    hi = HALVING_INTERVAL_BLOCKS
+    # base_reward(h) pays R0 >> (h // hi) for 1 <= h < CAP_HEIGHT, so the
+    # reward-bearing heights of decay epoch j are [j*hi + 1, (j+1)*hi] — all
+    # hi blocks — except the final epoch K-1, whose block at height K*hi ==
+    # CAP_HEIGHT is tail-only (base_reward returns 0 there). Genesis (height
+    # 0) pays nobody. completed = number of fully finished decay epochs.
+    completed = min(height // hi, CAP_TRANSITION_EPOCH)
     total = 0
-    r = INITIAL_BASE_REWARD_SHARDS
-    h = 0
-    while r > 0 and h <= height:
-        epoch_end = min(height + 1, h + _decay_factor_blocks())
-        n = epoch_end - h
-        total += r * n
-        h += _decay_factor_blocks()
-        r //= 2
-    # tail blocks above the decay horizon
-    if height >= h:
-        tr = tail_reward(h)
-        total += tr * (height - h + 1)
+    if completed >= 1:
+        for j in range(completed):
+            n = hi - (1 if j == CAP_TRANSITION_EPOCH - 1 else 0)
+            total += (INITIAL_BASE_REWARD_SHARDS >> j) * n
+    elif height > 0:
+        # still inside epoch 0: heights 1..height pay R0 (height 0 pays none)
+        return INITIAL_BASE_REWARD_SHARDS * height
+    # partial current decay epoch (only while still in the decay phase)
+    if completed < CAP_TRANSITION_EPOCH:
+        first_uncounted = completed * hi + 1
+        if height >= first_uncounted:
+            total += base_reward(first_uncounted) * (height - first_uncounted + 1)
+    # constant tail from CAP_HEIGHT onward (same value as tail_reward())
+    if height >= CAP_HEIGHT:
+        tr = tail_reward(CAP_HEIGHT)
+        total += tr * (height - CAP_HEIGHT + 1)
     return total
 
 
