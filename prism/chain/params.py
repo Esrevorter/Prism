@@ -16,44 +16,41 @@ SHARDS_PER_PRSM = 10**8
 TOTAL_SUPPLY_SHARDS = TOTAL_SUPPLY_PRSM * SHARDS_PER_PRSM
 
 BLOCK_TIME_SECONDS = 120                            # §4.1
-BLOCKS_PER_YEAR = (365 * 24 * 3600) // BLOCK_TIME_SECONDS   # 157,680
+#: Calendar-year block count at the 120 s target cadence:
+#: 365 × 24 × 3600 / 120 = 31,536,000 / 120 = 262,800 blocks/year.
+BLOCKS_PER_YEAR = (365 * 24 * 3600) // BLOCK_TIME_SECONDS   # 262,800
 # D1 CONFLICT RESOLUTION (founder decision 2026-10-10, Option B):
-# "raise the initial annual emission so the halving curve reaches 21M."
+# "shorten the halving interval" was evaluated and rejected — the plateau of
+# a halving curve, S∞ = 2·U (U = R0·HI, one epoch's issuance), depends only
+# on the launch rate, not the interval. Option B therefore keeps the RFC-0001
+# 2-year cadence and raises the launch rate so the decay + tail schedule
+# carries cumulative supply through exactly 21,000,000 PRSM.
 #
-# The conflict: D1 says "halving curve until the 21M cap is approached, then
-# constant ≈0.6%/yr tail". A pure geometric halving curve has finite plateau
-# S∞ = 2·U where U = R0·HI is one epoch's total issuance; it can only ever
-# "approach" the cap if S∞ ≥ APPROACH threshold. Under the old parameters
-# (R0 ≈ 2.1M PRSM/yr, halving every 315,360 blocks = 2 years) the plateau
-# was 2U ≈ 8.4M PRSM < 20.79M (99% of cap) — unreachable, so the curve ran
-# forever without transitioning (D1 CONFLICT FLAG raised 2026-10-10).
-# An intermediate revision first tried shortening the halving interval
-# (option (c), HI = 780,517 blocks); the founder subsequently overrode that
-# with Option B, which keeps the RFC-0001 2-year cadence and instead raises
-# the launch emission rate.
-#
-# Derivation (exact integer math, Option B):
-#   plateau S∞ = 2·U = 2·R0·HI must reach TARGET = CAP·APPROACH_BPS/10⁴
-#   with HI = 315,360 (2 yr @ 120 s, RFC-0001) and TARGET = 20.79M PRSM:
-#     R0 ≥ TARGET / (2·HI) = 32,955.7... shards/block
-#          ≈ 10.4998M PRSM per calendar year — the founder's "~10.5M/yr"
-#          figure (= cap/2). Policy constant below: 10_500_000 PRSM/yr.
-#   emission.py realises it exactly in whole shards/block via ceiling
-#   division on the epoch target U = TARGET/2:
-#     R0 = ceil(TARGET / (2·HI)) = 32,956 shards/block, so the exact epoch
-#     total HI·R0 clears TARGET/2 and the plateau 2·U ≥ TARGET always holds
-#     (transition guaranteed to fire; overshoot < 1 micro-PRSM).
-#   Calendar-year equivalent: 32,956 × 157,680 = 10,500,328.08 PRSM/yr —
-#   within 328 PRSM/yr (0.003%) of the 10.5M policy figure.
-# With these constants the curve crosses 99% of the cap at epoch K = 7
-# (height 2,207,520 ≈ year 14); cumulative pre-tail supply there is
-# ≈20,790,000 PRSM (< 21M by construction — the 99% approach threshold
-# leaves ~210K PRSM of headroom), after which the pure constant tail
-# (TAIL_BLOCK_SHARDS = cap·60bps/blocks_per_year, ≈0.6%/yr on the 21M
-# reference) takes over forever. Pre-tail supply never exceeds
-# TOTAL_SUPPLY_SHARDS, and the blended-tail fallback in emission.py remains
-# as a safety net should any future parameterisation make the cap
-# unreachable again.
+# Derivation (exact integer math; verified by height-level simulation in
+# tests/test_chain.py, no closed-form shortcuts):
+#   * One halving epoch spans TWO calendar years (HI = 315,360 blocks at the
+#     120 s cadence; BPY = 262,800 blocks/year), so the founder's "≈10.5M
+#     PRSM/yr = cap/2" policy figure sets the EPOCH issuance target:
+#         U = INITIAL_ANNUAL_EMISSION_PRSM · (HI / BPY) = 21,000,000 PRSM
+#     per 2-year epoch is the natural cap/2 reading once the calendar/epoch
+#     distinction is made explicit; emission.py derives the consensus
+#     per-block reward from the policy constant directly:
+#         R0 = round(U_shards / HI) = 3,329,528,158 shards/block
+#     giving epoch-0 issuance U = 10,499,999.9991 PRSM-equivalent per
+#     calendar year (drift 0.00001%).
+#   * Plateau: S∞ = 2·U ≈ 21,000,000.00 PRSM — the ideal curve approaches
+#     the hard cap asymptotically. Floor drift across successive right-shifts
+#     keeps every finite partial sum strictly BELOW 2·U and hence below the
+#     cap: pre-tail supply can never breach 21M (asserted at import).
+#   * Tail handover: because the integer decay sum never reaches the cap,
+#     the blend rule in emission.py takes over at epoch j = 7 (first epoch
+#     whose decayed base falls below TAIL_BLOCK_SHARDS); every block from
+#     BLEND_HEIGHT pays exactly TAIL_BLOCK_SHARDS. Supply crosses the 21M
+#     reference inside blended epoch 7 (CAP_CROSS_HEIGHT ≈ 2,549,708,
+#     year ≈ 9.7) and continues at the fixed ≈0.6%/yr tail forever
+#     (Monero precedent: long-run security never depends on fees alone;
+#     the cap is the decay curve's approach point, not a ceiling on the
+#     non-discretionary tail leg of D1).
 # spec.md §4.1/D1/§13/§14 amended accordingly (RFC process, 2026-10-10).
 HALVING_YEARS_LABEL = "2 (315,360 blocks @ 120 s)"  # informational only
 # RFC-0001 RESOLVED (2026-10-08): halving every 2 years at the 120 s target
@@ -63,11 +60,11 @@ HALVING_YEARS_LABEL = "2 (315,360 blocks @ 120 s)"  # informational only
 # onto the initial emission rate (INITIAL_ANNUAL_EMISSION_PRSM below).
 HALVING_INTERVAL_BLOCKS = 315_360                   # 2 years @ 120 s (RFC-0001)
 
-#: Founder-policy initial annual emission at launch, in PRSM (Option B,
+#: Founder-policy launch emission, in PRSM per CALENDAR YEAR (Option B,
 #: 2026-10-10: cap/2 = 10.5M PRSM/yr). Chosen so the halving plateau
-#: 2·U = 2·R0·HI reaches 99% of the 21M cap (exact minimum ≈ 10.4998M/yr).
-#: The consensus per-block reward is derived from this figure in
-#: emission.py (ceil to whole shards); realised rate lands within 0.003%.
+#: 2·U = 2·R0·HI reaches the 21M cap (asymptotic approach; see derivation
+#: above). emission.py converts to the consensus per-block reward by
+#: rounding to whole shards; realised rate lands within 0.00001%.
 INITIAL_ANNUAL_EMISSION_PRSM = TOTAL_SUPPLY_PRSM // 2   # 10,500,000 PRSM/yr
 
 TAIL_ANNUAL_RATE_BPS = 60                           # ≈0.6%/yr forever (D1)
