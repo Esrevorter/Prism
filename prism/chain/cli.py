@@ -13,9 +13,9 @@ import json
 import sys
 
 from . import __version__, SPEC_VERSION
-from .emission import (CAP_HEIGHT, CAP_TRANSITION_EPOCH,
-                     PRE_TAIL_PLATEAU_SHARDS, cumulative_supply, emission_at,
-                     prsm)
+from .emission import (BLEND_HEIGHT, CAP_CROSS_HEIGHT, CAP_HEIGHT,
+                     CAP_TRANSITION_EPOCH, PRE_TAIL_PLATEAU_SHARDS,
+                     cumulative_supply, emission_at, prsm)
 from .node import ChainState, make_genesis, mine_block
 from .params import NETWORKS, REFRACTION_TESTNET
 from .pow import PlaceholderSha3Pow, assert_miner_backend
@@ -38,18 +38,20 @@ def _header_dict(b) -> dict:
 
 
 def _d1_status() -> str:
-    """Human-readable status of the D1 emission-curve conflict flag.
+    """Human-readable status of the D1 emission schedule (resolved by
+    founder decision Option B, 2026-10-10).
 
-    With the spec-pinned constants the halving curve plateaus at ~8.4M PRSM
-    and never approaches the 21M cap, so no tail transition is scheduled;
-    see prism/chain/emission.py (D1 CONFLICT FLAG) for the three candidate
-    resolutions awaiting a founder decision."""
-    if CAP_HEIGHT is None:
-        return ("OPEN-FLAG: decay curve plateaus at %s PRSM (< 21M cap); "
-                "no tail transition scheduled — D1 resolution required"
-                % prsm(PRE_TAIL_PLATEAU_SHARDS))
-    return ("tail takes over at height %d (epoch %d)"
-            % (CAP_HEIGHT, CAP_TRANSITION_EPOCH))
+    Under the shipped parameters the decay curve approaches but never
+    reaches the 21M reference in integer arithmetic, so the tail blend
+    governs: from BLEND_HEIGHT every block pays exactly the fixed tail
+    rate and cumulative supply crosses 21M at CAP_CROSS_HEIGHT, after
+    which the ≈0.6%/yr tail continues forever."""
+    if CAP_HEIGHT is not None:
+        return ("tail takes over at height %d (epoch %d)"
+                % (CAP_HEIGHT, CAP_TRANSITION_EPOCH))
+    return ("blend regime: tail engages at height %d, 21M reference crossed "
+            "at height %d (%s PRSM), fixed tail thereafter"
+            % (BLEND_HEIGHT, CAP_CROSS_HEIGHT, prsm(PRE_TAIL_PLATEAU_SHARDS)))
 
 
 def cmd_genesis(a):

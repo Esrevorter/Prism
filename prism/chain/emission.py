@@ -12,10 +12,10 @@ Founder decisions encoded here (2026-10-08 / 2026-10-10):
   * Halving interval: 315,360 blocks = 2 years at the 120 s target cadence
     (RFC-0001). Shortening it was considered and rejected: the plateau of a
     halving curve depends only on the launch rate, not the interval.
-  * Launch rate ≈10.5M PRSM/yr = cap/2 (Option B), so the decay + tail blend
-    carries cumulative supply through exactly 21,000,000 PRSM at roughly the
-    sixteen-year mark, after which the non-discretionary 0.6%/yr tail
-    continues forever (Monero precedent: long-run miner security never
+  * Launch scale ≈10.5M PRSM = cap/2 per halving epoch (Option B), so the
+    decay + tail blend carries cumulative supply through exactly
+    21,000,000 PRSM at roughly the eleven-year mark, after which the
+    non-discretionary 0.6%/yr tail continues forever (Monero precedent: long-run miner security never
     depends on fees alone). R0 is derived from the EPOCH approach target —
     the smallest whole-shard reward whose ideal halving plateau
     Σ_k R0·HI·2^-k = 2·R0·HI reaches 99% of the cap:
@@ -39,8 +39,8 @@ Schedule shape under the shipped parameters:
         flat tail once the base has shifted to zero, so issuance runs
         forever at ≈0.6%/yr on the 21M reference.
     Supply therefore plateaus below 21M during pure decay (s_pre ≈
-    20.465M PRSM through epoch j-1), then crosses the 21M reference cap
-    once inside the blend (CAP_CROSS_HEIGHT ≈ year 16.2) and grows
+    20.628M PRSM through epoch j-1), then crosses the 21M reference cap
+    once inside the blend (CAP_CROSS_HEIGHT = 2,984,354 ≈ year 11.4) and grows
     linearly thereafter — D1's "constant tail forever" leg, with the cap
     as the approach point of the decay curve rather than a hard ceiling
     on the tail (Monero precedent).
@@ -196,44 +196,33 @@ def _cap_cross_height() -> int | None:
 
     Informational consensus-derived constant (block explorers, RPC status):
     under the shipped blend schedule supply crosses the 21M reference cap
-    once, at roughly the ten-year mark, and the fixed tail continues
-    thereafter. Exact epoch-level simulation over the same integer terms as
-    base_reward/tail_reward — every height in epoch k pays a constant amount
-    — so it is O(bitlen(R0)) big-int steps, not per-block. Evaluated last,
-    after the reward functions are defined.
+    exactly once, inside the blend regime, and the fixed tail continues
+    thereafter. Computed by binary search on cumulative_supply — the single
+    authoritative closed form — so it cannot disagree with it by construction.
+    Monotone non-decreasing supply makes the search sound. Evaluated last,
+    after cumulative_supply is defined.
     """
-    hi = HALVING_INTERVAL_BLOCKS
-    CAP = TOTAL_SUPPLY_SHARDS
-    r0 = INITIAL_BASE_REWARD_SHARDS
-    # Epoch j covers heights [j*hi, (j+1)*hi); epoch 0 loses height 0 to the
-    # genesis convention (base_reward(0) == 0). Within an epoch every block
-    # pays max(R0 >> j, tail) except the single transition block at the very
-    # start of the blend epoch, where the decayed base still exceeds the
-    # tail and no top-up applies yet. Summing epoch by epoch keeps this
-    # function exact against emission_at — the cross-check assert below
-    # pins it. O(bitlen(R0)) big-int steps, not per-block.
-    s_prefix = 0                                   # supply through end of epoch j-1
-    for j in range(1, 8 * r0.bit_length()):
-        pay = max(r0 >> j, TAIL_BLOCK_SHARDS)
-        if pay == 0:
-            return None                            # issuance stopped below cap
-        step = pay * hi
-        if s_prefix + step >= CAP:
-            blocks = -(-(CAP - s_prefix) // pay)
-            return j * hi + blocks                 # first height of epoch j + n-1
-        s_prefix += step
-        # Correct the running sum for the blend-entry block: at height
-        # j*hi with j == BLEND_EPOCH the block pays R0 >> j (> tail), which
-        # the flat `pay` term already includes; no correction needed because
-        # max() selects the same value. Heights below BLEND_HEIGHT pay pure
-        # decay, also covered by max(). Genesis gap handled at j == 1 by
-        # starting the loop's prefix at epoch 0's true total:
-        # (recomputed below so the prefix stays exact across the boundary)
-    return None
+    cap = TOTAL_SUPPLY_SHARDS
+    if cumulative_supply(_CAP_CROSS_UPPER_BOUND) < cap:
+        return None
+    lo, hi = 1, _CAP_CROSS_UPPER_BOUND
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if cumulative_supply(mid) >= cap:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
 
 
 BLEND_EPOCH = _blend_epoch()
 BLEND_HEIGHT = None if BLEND_EPOCH is None else BLEND_EPOCH * HALVING_INTERVAL_BLOCKS
+
+#: Search bound for _cap_cross_height: supply grows by at least one tail
+#: shard per block once the blend engages, so crossing (if it happens) is
+#: found well inside this horizon; the plateau check below makes the
+#: "never crosses" case cheap to detect as well.
+_CAP_CROSS_UPPER_BOUND = 100 * HALVING_INTERVAL_BLOCKS
 
 # Import-time invariants. These encode the Option-B contract; violating any
 # of them is a parameterisation bug, not a runtime condition — fail loudly.
