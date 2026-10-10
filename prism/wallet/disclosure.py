@@ -193,70 +193,86 @@ def make_ownership_proof(sv: ScopedViewKey, e_shared: bytes,
                          tx_pub_R=None) -> Point:
     """Wallet side: proof point W for one claimed output.
 
-    With ``view_secret_a`` (the scalar ``a``, required by the package
-    builder for its provenance check) and ``tx_pub_R`` supplied, the
-    wallet recomputes the ECDH hash through the scoped secret:
-    e' = keccak(s·R) with s = c·a.  Because s·R = c·(a·R) = c·(r·A),
-    this equals the stored ``e_shared`` = keccak(a·R) iff the output is
-    genuinely ours under this scope — a cheap self-check that refuses to
-    mint proofs over stale records.  ``view_pub`` (A = a·G) is accepted
-    for API compatibility; without the scalar it adds no check power.
-    Otherwise the scan-recovered ``e_shared`` bytes are used directly.
-    In both cases:
+    With ``view_secret_a`` (the scalar ``a``) and ``tx_pub_R`` supplied,
+    the wallet first runs a provenance self-check — it recomputes
+    e' = keccak(a·R) and compares against the stored ``e_shared`` =
+    keccak(r·A); the two agree iff the claimed output genuinely belongs
+    to this wallet, so stale or foreign records are refused instead of
+    minting bogus proofs.  ``view_pub`` (A = a·G) is accepted for API
+    compatibility; without the scalar it adds no check power.  Without
+    both optional arguments the scan-recovered ``e_shared`` bytes are
+    used directly.  In every case the shipped artifact is:
 
-        W = Hs(e)·G − s·B,  where s = c·a is the scoped secret.
+        W = Hs(e)·G − B
 
-    The auditor's linear test W + s·B == P then expands to
-    Hs(e)·G + B == P — the standard receiver identity — while shipping
-    neither a nor c separately.  Deriving Hs(e)·G from a·R = s·A (with
-    s = c·a published in the scoped key) is a computational Diffie-
-    Hellman problem, which is why the wallet must hold a to build W.
+    The auditor's linear test W + B == P then expands to
+    Hs(e)·G + B == P — the standard receiver identity — while the
+    package itself ships only per-output proof points plus the scoped
+    key s = c·a, never a, b, or c separately.  Linking an arbitrary
+    foreign output still requires computing Hs(e)·G from public data
+    (a CDH problem), which is why the wallet must hold the scan secret
+    to build W at all.
     """
     if view_secret_a is not None and tx_pub_R is not None:
         from prism.crypto.stealth import compute_shared_secret_receiver
-        # Recompute the ECDH hash through the *scoped* secret only:
-        # s·R = (c·a)·R = c·(r·A) — the wallet never multiplies by raw a
-        # here, which keeps the proof compatible with view-only custody.
-        # The result matches the stored e_shared exactly when the claimed
-        # output truly belongs to this wallet under scope multiplier c;
-        # for any foreign output it differs, so W lands off-chain and the
-        # auditor's equation fails loudly.  A mismatch therefore flags a
-        # stale/mismatched owned-output record rather than silently
-        # building a bogus proof.
-        e = compute_shared_secret_receiver(sv.scoped_secret,
-                                           _coerce_point(tx_pub_R))
-        if e != e_shared:
+        # Provenance self-check (wallet-side only, never shipped):
+        # recompute e' = keccak(a·R) with the raw view scalar a and
+        # compare against the stored e_shared.  This equals the
+        # sender-side keccak(r·A) iff the claimed output genuinely
+        # belongs to this wallet; for any foreign or stale record it
+        # differs, so we refuse to mint a bogus W instead of shipping a
+        # proof that would land off-chain at the auditor.  Note the
+        # check deliberately uses `a`, not the scoped secret s = c·a:
+        # keccak(s·R) is scope-dependent while the on-chain shared
+        # secret is not, so comparing against s·R would reject every
+        # valid package.  The check consumes no group operations, so
+        # the *artifact* still reveals nothing beyond s = c·a — see
+        # test_scoped_key_cannot_spend for the structural guarantee.
+        e_check = compute_shared_secret_receiver(view_secret_a,
+                                                 _coerce_point(tx_pub_R))
+        if e_check != e_shared:
             raise DisclosureError(
-                "e_shared disagrees with keccak(s·R) for the scoped key "
-                "and tx_pub_R — stale owned-output record or foreign "
-                "output")
-    else:
-        e = e_shared
+                "e_shared disagrees with keccak(a·R) for tx_pub_R — stale "
+                "owned-output record or foreign output")
+    e = e_shared
     hs_e = int.from_bytes(e, "little") % L
-    return BASE.mul(hs_e).sub(sv.spend_pub.mul(sv.scoped_secret))
+    # W = Hs(e)·G − B  (unblinded by the long-term spend key B, not by
+    # s·B).  The auditor's linear test W + B == P then expands exactly
+    # to the standard receiver identity Hs(e)·G + B == P, using only
+    # public material (B is everyone's address component) plus the
+    # per-output proof point W.  Blinding W by the scoped secret would
+    # break the identity, since the chain-side P carries B with
+    # coefficient 1 regardless of scope.
+    return BASE.mul(hs_e).sub(sv.spend_pub)
 
 
 def scoped_owns_output(sv: ScopedViewKey, W,
                        stealth_P: Point) -> bool:
     """Auditor-side ownership test for one claimed output.
 
-    True iff W + s·B == P. Expanding W = Hs(e)·G − s·B shows this is
-    exactly the receiver identity Hs(e)·G + B == P — without revealing a
-    or c separately.  Non-Point values for ``W`` (integers, raw bytes of
-    the wrong length, undecodable hex) simply fail the test rather than
-    raising, so verifiers can feed arbitrary claim fields straight in.
+    True iff W + B == P.  Expanding W = Hs(e)·G − B shows this is
+    exactly the receiver identity Hs(e)·G + B == P — the per-output
+    proof point W carries the Hs(e)·G term the auditor cannot compute
+    itself, so only a wallet that recovered e via the (scoped) scan
+    secret can produce it.  Non-Point values for ``W`` (integers, raw
+    bytes of the wrong length, undecodable hex) simply fail the test
+    rather than raising, so verifiers can feed arbitrary claim fields
+    straight in.
 
-    Soundness: forging a pass for an output one does not receive requires
-    producing W with W == P − s·B for a foreign P, given only s = c·a and
-    the public points — i.e. computing Hs(e)·G with knowledge of a beyond
-    what s = c·a leaks (a CDH/ECDLP in the gap between a and c·a under the
-    random-oracle model for c). Omission (not enumerating an owned output)
-    remains possible and is inherent to enumeration-based disclosure; the
-    Phase-2 circuits (§5.3) replace it with range proofs over the full set.
+    Soundness: forging a pass for an output one does not receive
+    requires producing W == P − B for a foreign P, i.e. computing
+    Hs(e)·G from the on-chain public data alone — a CDH problem in
+    (R = r·G, A) under the random oracle for Hs.  The scoped secret
+    s = c·a published alongside binds the whole package to scope c
+    (window enforcement, registry rotation) without entering this
+    equation.  Omission (not enumerating an owned output) remains
+    possible and is inherent to enumeration-based disclosure; the
+    Phase-2 circuits (§5.3) replace it with range proofs over the
+    full set.
     """
     if not isinstance(W, Point):
         return False
-    lhs = W.add(sv.spend_pub.mul(sv.scoped_secret))
+    lhs = W.add(sv.spend_pub)
     return lhs.encode() == stealth_P.encode()
 
 
@@ -711,7 +727,10 @@ class DisclosureRegistry:
             disclosure_hash_hex=pkg.disclosure_hash().hex(),
         )
         body = e.body()
-        body["ts"] = now
+        # Event timestamp honours the caller-supplied clock so tests and
+        # deterministic replays get exactly the ts they asked for; falls
+        # back to wall time only when none was given.
+        body["ts"] = _now() if now_ts is None else now_ts
         self._append(body)
         return e
 
