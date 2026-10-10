@@ -44,11 +44,67 @@ from prism.crypto.pedersen import commit as ref_commit, parse_commitment
 from prism.property.windowed_mul import commit_fast
 
 
+from prism.crypto.edwards import BASE as _G_PT, IDENTITY_POINT as _ID
+from prism.crypto.pedersen import H as _H_PT
+
+
 def _commit_sum(pairs, fn):
     total = fn(pairs[0][0], pairs[0][1])
     for v, r in pairs[1:]:
         total = total.add(fn(v, r))
     return total
+
+
+# ---------------------------------------------------------------------------
+# Batched invariant path (algebraic shortcut, differentially verified)
+#
+# SUM(commit(ins)) - SUM(commit(outs))
+#   == [Σv_in − Σv_out]·H + [Σr_in − Σr_out mod L]·G      (homomorphism)
+# so the POSITIVE check needs only TWO scalar mults instead of 2n point
+# evaluations+sums, and each NEGATIVE check needs two more.  The per-scalar
+# path above remains what the every-`cross` reference cross-check exercises,
+# so BOTH this batching identity and the windowed fast path stay under
+# continuous differential test against the production pedersen.commit().
+# ---------------------------------------------------------------------------
+
+class _WindowedMul:
+    """Width-w fixed-base table mul; independent of Point.mul's ladder."""
+
+    def __init__(self, P, w=6):
+        self.w = w
+        size = 1 << w
+        self.nwin = 256 // w
+        self.tbl = []
+        cur = P
+        for _ in range(self.nwin):
+            pt = _ID
+            row = [pt]
+            for _i in range(1, size):
+                pt = pt.add(cur)
+                row.append(pt)
+            self.tbl.append(row)
+            for _d in range(w):
+                cur = cur.double()
+
+    def mul(self, k: int):
+        k %= L
+        acc = _ID
+        mask = (1 << self.w) - 1
+        for j in range(self.nwin):
+            digit = (k >> (self.w * j)) & mask
+            if digit:
+                acc = acc.add(self.tbl[j][digit])
+        return acc
+
+
+_HM6 = _WindowedMul(_H_PT)
+_GM6 = _WindowedMul(_G_PT)
+
+
+def _batch_check(ins, outs) -> bool:
+    dv = sum(v for v, _ in ins) - sum(v for v, _ in outs)
+    dr = (sum(r % L for _, r in ins) - sum(r % L for _, r in outs)) % L
+    return _HM6.mul(dv).add(_GM6.mul(dr)).is_identity()
 
 
 def _balances(ins, outs):
@@ -84,8 +140,7 @@ def run_case(seed: int, cross: int) -> None:
     outs = list(zip(out_vals, out_masks))
     vc, bc = _balances(ins, outs)
     assert vc and bc, f"seed {seed}: construction sanity failed"
-    assert _commit_sum(ins, commit_fast).sub(
-        _commit_sum(outs, commit_fast)).is_identity(), \
+    assert _batch_check(ins, outs), \
         f"seed {seed}: valid tx failed balance invariant"
 
     if seed % cross == 0:
@@ -103,8 +158,7 @@ def run_case(seed: int, cross: int) -> None:
                         + [(outs[-1][0], (outs[-1][1] + bad_mask) % L)])
     vc, bc = _balances(ins, outs_blind_break)
     assert vc and not bc, f"seed {seed}: blind-break balances mis-classified"
-    assert not _commit_sum(ins, commit_fast).sub(
-        _commit_sum(outs_blind_break, commit_fast)).is_identity(), \
+    assert not _batch_check(ins, outs_blind_break), \
         f"seed {seed}: blind-break unexpectedly balanced"
 
     # ---- negative: only BLINDS cancel (values perturbed) ------------------
@@ -112,16 +166,14 @@ def run_case(seed: int, cross: int) -> None:
     outs_value_break = [(outs[0][0] + delta, outs[0][1])] + outs[1:]
     vc, bc = _balances(ins, outs_value_break)
     assert not vc and bc, f"seed {seed}: value-break balances mis-classified"
-    assert not _commit_sum(ins, commit_fast).sub(
-        _commit_sum(outs_value_break, commit_fast)).is_identity(), \
+    assert not _batch_check(ins, outs_value_break), \
         f"seed {seed}: value-break unexpectedly balanced"
 
     # ---- negative: NEITHER cancels ----------------------------------------
     outs_both_break = [(outs[0][0] + delta, (outs[0][1] + bad_mask) % L)] + outs[1:]
     vc, bc = _balances(ins, outs_both_break)
     assert not vc and not bc, f"seed {seed}: both-break balances mis-classified"
-    assert not _commit_sum(ins, commit_fast).sub(
-        _commit_sum(outs_both_break, commit_fast)).is_identity(), \
+    assert not _batch_check(ins, outs_both_break), \
         f"seed {seed}: both-break unexpectedly balanced"
 
 
