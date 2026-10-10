@@ -82,12 +82,13 @@ def scenario():
             key_images=(images[i],))
         records.append(rec)
         owned.append({"txid": txid, "output_index": 0, "amount_shard": amt,
-                      "blinding": bl, "e_shared": sim["e_shared"]})
+                      "blinding": bl, "e_shared": sim["e_shared"],
+                      "tx_pub_R": sim["R"]})
 
     chain = ChainIndex(records)
     nonce = keccak_256(b"accountant-nonce")[:16]
     pkg = build_disclosure_package(
-        view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY, spend_pub=SPEND_PUB_B,
+        view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY, view_pub=VIEW_PUB_A,
         scope_id="tax-2026", statement_type=STATEMENT_INCOME_ATTRIBUTION,
         owned=owned, period=period, verifier_nonce=nonce,
         now_ts=now)
@@ -142,10 +143,10 @@ class TestScopedViewKeys:
         sim = make_chain_output(keccak_256(b"t"), 1000, 42)
         owned = [{"txid": keccak_256(b"t"), "output_index": 0,
                   "amount_shard": 1000, "blinding": 42,
-                  "e_shared": sim["e_shared"]}]
+                  "e_shared": sim["e_shared"], "tx_pub_R": sim["R"]}]
         pkg = build_disclosure_package(
             view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY,
-            spend_pub=SPEND_PUB_B, scope_id="s",
+            view_pub=VIEW_PUB_A, scope_id="s",
             statement_type=STATEMENT_PAYMENT_EXISTENCE, owned=owned,
             period=(now - 10, now + 10), verifier_nonce=b"\x01" * 16,
             now_ts=now)
@@ -154,9 +155,9 @@ class TestScopedViewKeys:
     def test_ownership_test_honest_path(self, scenario):
         sv = ScopedViewKey.from_public_dict(scenario["pkg"].scoped_key)
         for claim, rec in zip(scenario["pkg"].claims, scenario["records"]):
-            k = int(claim.k_hex, 16)
+            W = decode(bytes.fromhex(claim.w_hex), require_canonical=True)
             P, _C = rec.outputs[claim.output_index]
-            assert scoped_owns_output(sv, k, decode(P))
+            assert scoped_owns_output(sv, W, decode(P))
 
     def test_ownership_fails_for_foreign_output(self, scenario):
         """A random (k, P) pair cannot pass the linear test."""
@@ -238,9 +239,10 @@ class TestVerifierRejections:
                              now_ts=scenario["now"])
         assert not rep.ok and any("commitment opening fails" in e for e in rep.errors)
 
-    def test_wrong_k_fails_ownership(self, scenario):
-        pkg2 = _swap_claim(scenario["pkg"], index=0, k_hex=format(
-            (int(scenario["pkg"].claims[0].k_hex, 16) + 7) % L, "064x"))
+    def test_wrong_W_fails_ownership(self, scenario):
+        bad = bytes((b ^ 0x01) for b in bytes.fromhex(
+            scenario["pkg"].claims[0].w_hex))
+        pkg2 = _swap_claim(scenario["pkg"], index=0, w_hex=bad.hex())
         rep = verify_package(pkg2, chain=scenario["chain"],
                              expected_nonce=scenario["nonce"],
                              now_ts=scenario["now"])
@@ -355,7 +357,7 @@ class TestProverGuards:
         with pytest.raises(DisclosureError):
             build_disclosure_package(
                 view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY,
-                spend_pub=SPEND_PUB_B, scope_id="s",
+                view_pub=VIEW_PUB_A, scope_id="s",
                 statement_type=STATEMENT_INCOME_ATTRIBUTION, owned=[],
                 period=(0, 10), verifier_nonce=b"\x00" * 16)
 
@@ -364,11 +366,12 @@ class TestProverGuards:
         with pytest.raises(DisclosureError):
             build_disclosure_package(
                 view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY,
-                spend_pub=SPEND_PUB_B, scope_id="s",
+                view_pub=VIEW_PUB_A, scope_id="s",
                 statement_type="source_provenance",
                 owned=[{"txid": b"\x01" * 32, "output_index": 0,
                         "amount_shard": 1, "blinding": 1,
-                        "e_shared": b"\x02" * 32}],
+                        "e_shared": b"\x02" * 32,
+                        "tx_pub_R": SPEND_PUB_B}],
                 period=(0, 10), verifier_nonce=b"\x00" * 16)
 
     def test_default_validity_is_90_days(self, scenario):

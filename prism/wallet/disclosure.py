@@ -42,14 +42,17 @@ Scoped view keys (§5.2 V(s,t), rotation per §5.4 rule 2)
 --------------------------------------------------------
 ``scoped_secret s = c·a mod L``, ``c = H(domain ‖ root_key ‖ scope_id)``,
 with ``a`` the wallet view secret. For a claimed output the wallet publishes
-``k = Hs(e)/c mod L`` (it knows both), making the auditor-side test linear:
+the *proof point*
 
-    T = k·s   ⇒   T·G + B == P          (same geometry as full scan:
-                                         Hs(e)·G + B == P, since k·s = Hs(e))
+    W = Hs(e)·G − s·B          (e = keccak(a·R), the tx ECDH secret)
 
-Rotation: a fresh scope_id yields an unrelated multiplier c′, hence an
-unrelated s′; a leaked old scoped key gives nothing about post-rotation
-packages because each package re-derives its own k under its own c.
+and the auditor's test is a single public equation:
+
+    W + s·B == P               ⇔   Hs(e)·G + B == P
+
+i.e. exactly the standard receiver identity, without ever shipping a or c
+separately. B and R are public (recipient address / tx prefix); the value
+opening C = v·H + r·G pins amounts to chain commitments independently.
 
 Registry semantics (D3: expire-and-rotate)
 ------------------------------------------
@@ -124,7 +127,12 @@ def derive_scope_multiplier(root_key: bytes, scope_id: str) -> int:
 
 @dataclass(frozen=True)
 class ScopedViewKey:
-    """V(s,t): re-blinded scan secret s = c·a, public spend anchor B, window."""
+    """V(s,t): re-blinded scan secret s = c·a, spend anchor B, window.
+
+    The auditor holds s but never raw a; ownership proofs are per-output
+    (see :func:`scoped_owns_output`), so the package discloses nothing
+    beyond the enumerated claims.
+    """
     scope_id: str
     scoped_secret: int           # s = c·a mod L — shared with chosen auditor
     spend_pub: Point             # B — long-term spend pubkey (public anyway)
@@ -168,17 +176,35 @@ def make_scoped_view_key(view_secret_a: int, root_key: bytes, scope_id: str,
                          window_end_ts=window_end_ts)
 
 
-def scoped_owns_output(sv: ScopedViewKey, k: int, stealth_P: Point) -> bool:
+def make_ownership_proof(sv: ScopedViewKey, e_shared: bytes) -> Point:
+    """Wallet side: proof point W for one claimed output.
+
+    W = Hs(e)·G − s·B, where e = keccak(a·R) is the tx ECDH shared secret
+    the wallet recovered during scan and stores per owned output (§6.2
+    Owned-Output record).
+    """
+    hs_e = int.from_bytes(e_shared, "little") % L
+    return BASE.mul(hs_e).sub(sv.spend_pub.mul(sv.scoped_secret))
+
+
+def scoped_owns_output(sv: ScopedViewKey, W: Point,
+                       stealth_P: Point) -> bool:
     """Auditor-side ownership test for one claimed output.
 
-    True iff k·s·G + B == P, where s is the scoped secret and k the link
-    scalar shipped in the claim (wallet sets k = Hs(e)/c so that k·s = Hs(e),
-    reproducing the standard stealth identity Hs(e)·G + B == P).
+    True iff W + s·B == P. Expanding W = Hs(e)·G − s·B shows this is
+    exactly the receiver identity Hs(e)·G + B == P — without revealing a
+    or c separately.
+
+    Soundness: forging a pass for an output one does not receive requires
+    producing W with W == P − s·B for a foreign P, given only s = c·a and
+    the public points — i.e. computing Hs(e)·G with knowledge of a beyond
+    what s = c·a leaks (an ECDLP in the gap between a and c·a under the
+    random-oracle model for c). Omission (not enumerating an owned output)
+    remains possible and is inherent to enumeration-based disclosure; the
+    Phase-2 circuits (§5.3) replace it with range proofs over the full set.
     """
-    if not (0 <= k < L):
-        return False
-    T = BASE.mul(k * sv.scoped_secret % L)
-    return T.add(sv.spend_pub).encode() == stealth_P.encode()
+    lhs = W.add(sv.spend_pub.mul(sv.scoped_secret))
+    return lhs.encode() == stealth_P.encode()
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +219,7 @@ class ChainTxRecord:
     block_ts: int                    # header timestamp of inclusion block
     outputs: tuple                   # per output: (P_enc 32B, C_enc 32B)
     key_images: tuple = ()           # input images (bytes), double-spend gate
+    tx_pub_R_enc: Optional[bytes] = None   # tx-prefix ephemeral public key R
 
 
 class ChainIndex:
@@ -220,12 +247,12 @@ class ChainIndex:
 
 @dataclass(frozen=True)
 class OutputClaim:
-    """One claimed received output: location + value opening + link scalar."""
+    """One claimed received output: location + value opening + proof point."""
     txid_hex: str
     output_index: int
     amount_shard: int                # v, revealed to this auditor
     blinding_hex: str                # r, opens the on-chain commitment
-    k_hex: str                       # k = Hs(e)/c mod L
+    w_hex: str                       # W = Hs(e)·G − s·B (ownership proof point)
 
 
 @dataclass(frozen=True)
@@ -314,9 +341,9 @@ def build_disclosure_package(*, view_secret_a: int, root_key: bytes,
 
     Each element of `owned` (wallet-side Owned-Output record, §6.2):
         txid (bytes), output_index, amount_shard, blinding (int),
-        e_shared (bytes — keccak(r·A) from the scan), 
-    The wallet knows a and computes Hs(e) itself; it publishes
-    k = Hs(e)·c⁻¹ mod L so the auditor's test is linear in s = c·a.
+        e_shared (bytes — keccak(a·R) recovered by the scan).
+    The wallet knows a and c; it ships per-output proof points
+    W = Hs(e)·G − s·B so the auditor's test W + s·B == P is linear in B.
     """
     if statement_type not in SUPPORTED_STATEMENTS:
         raise DisclosureError(f"unsupported statement {statement_type!r}")
@@ -325,19 +352,16 @@ def build_disclosure_package(*, view_secret_a: int, root_key: bytes,
     now = _now() if now_ts is None else now_ts
     sv = make_scoped_view_key(view_secret_a, root_key, scope_id,
                               spend_pub, period[0], period[1])
-    c = derive_scope_multiplier(root_key, scope_id)
-    c_inv = pow(c, L - 2, L)
     claims = []
     total = 0
     for o in owned:
-        hs_e = int.from_bytes(o["e_shared"], "little") % L
-        k = hs_e * c_inv % L
+        W = make_ownership_proof(sv, o["e_shared"])
         claims.append(OutputClaim(
             txid_hex=o["txid"].hex(),
             output_index=int(o["output_index"]),
             amount_shard=int(o["amount_shard"]),
             blinding_hex=format(int(o["blinding"]), "064x"),
-            k_hex=format(k, "064x"),
+            w_hex=encode(W).hex(),
         ))
         total += int(o["amount_shard"])
     return DisclosurePackage(
@@ -423,7 +447,7 @@ def verify_package(pkg: DisclosurePackage, *, chain: ChainIndex,
     for c in pkg.claims:
         try:
             txid = bytes.fromhex(c.txid_hex)
-            k = int(c.k_hex, 16)
+            W = decode(bytes.fromhex(c.w_hex), require_canonical=True)
             r_blind = int(c.blinding_hex, 16)
         except (ValueError, TypeError) as e:
             errs.append(f"claim parse failed: {e}")
@@ -453,8 +477,8 @@ def verify_package(pkg: DisclosurePackage, *, chain: ChainIndex,
                         f"{c.txid_hex[:16]}...[{c.output_index}]")
             continue
 
-        # 4b. recipient ownership via the scoped key
-        if not scoped_owns_output(sv, k, P):
+        # 4b. recipient ownership via the scoped key (test W + s·A == P)
+        if not scoped_owns_output(sv, W, P):
             errs.append(f"scoped key does not own "
                         f"{c.txid_hex[:16]}...[{c.output_index}]")
             continue
