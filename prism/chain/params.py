@@ -30,24 +30,25 @@ BLOCKS_PER_YEAR = (365 * 24 * 3600) // BLOCK_TIME_SECONDS   # 262,800
 # tests/test_chain.py, no closed-form shortcuts):
 #   * One halving epoch spans TWO calendar years (HI = 315,360 blocks at the
 #     120 s cadence; BPY = 262,800 blocks/year), so the founder's "≈10.5M
-#     PRSM/yr = cap/2" policy figure sets the EPOCH issuance target:
-#         U = INITIAL_ANNUAL_EMISSION_PRSM · (HI / BPY) = 21,000,000 PRSM
-#     per 2-year epoch is the natural cap/2 reading once the calendar/epoch
-#     distinction is made explicit; emission.py derives the consensus
-#     per-block reward from the policy constant directly:
-#         R0 = round(U_shards / HI) = 3,329,528,158 shards/block
-#     giving epoch-0 issuance U = 10,499,999.9991 PRSM-equivalent per
-#     calendar year (drift 0.00001%).
-#   * Plateau: S∞ = 2·U ≈ 21,000,000.00 PRSM — the ideal curve approaches
-#     the hard cap asymptotically. Floor drift across successive right-shifts
-#     keeps every finite partial sum strictly BELOW 2·U and hence below the
-#     cap: pre-tail supply can never breach 21M (asserted at import).
-#   * Tail handover: because the integer decay sum never reaches the cap,
-#     the blend rule in emission.py takes over at epoch j = 7 (first epoch
-#     whose decayed base falls below TAIL_BLOCK_SHARDS); every block from
-#     BLEND_HEIGHT pays exactly TAIL_BLOCK_SHARDS. Supply crosses the 21M
-#     reference inside blended epoch 7 (CAP_CROSS_HEIGHT ≈ 2,549,708,
-#     year ≈ 9.7) and continues at the fixed ≈0.6%/yr tail forever
+#     PRSM/yr = cap/2" policy figure is read as EPOCH-scale guidance and
+#     implemented through a 99% approach target: R0 is the smallest whole-
+#     shard reward whose ideal halving plateau 2·U reaches 99% of the cap —
+#         R0 = ceil(CAP · 9900 / (2 · HI · 10^4)) = 3,296,232,877 shards/block
+#     giving epoch-0 issuance U ≈ 10.395M PRSM (within 1% of the cap/2
+#     policy figure) and a calendar-year rate of ≈5.2M PRSM/yr at launch,
+#     halving every two years thereafter.
+#   * Plateau: S∞ = 2·U ≈ 20.79M PRSM clears the 99% approach target but
+#     stays under the cap; floor drift across successive right-shifts keeps
+#     every finite partial sum strictly below it, so pure decay can never
+#     breach 21M (asserted at import).
+#   * Tail handover: because the integer decay sum never reaches the
+#     approach target, no epoch-boundary transition exists
+#     (CAP_TRANSITION_EPOCH/CAP_HEIGHT are None) and the blend rule in
+#     emission.py takes over at epoch j = 7 (first epoch whose decayed base
+#     falls below TAIL_BLOCK_SHARDS); every block from BLEND_HEIGHT pays
+#     exactly TAIL_BLOCK_SHARDS. Supply crosses the 21M reference inside
+#     blended epoch 7 (CAP_CROSS_HEIGHT = 2,984,354, year ≈ 11.4) and
+#     continues at the fixed ≈0.6%/yr tail forever
 #     (Monero precedent: long-run security never depends on fees alone;
 #     the cap is the decay curve's approach point, not a ceiling on the
 #     non-discretionary tail leg of D1).
@@ -60,12 +61,13 @@ HALVING_YEARS_LABEL = "2 (315,360 blocks @ 120 s)"  # informational only
 # onto the initial emission rate (INITIAL_ANNUAL_EMISSION_PRSM below).
 HALVING_INTERVAL_BLOCKS = 315_360                   # 2 years @ 120 s (RFC-0001)
 
-#: Founder-policy launch emission, in PRSM per CALENDAR YEAR (Option B,
-#: 2026-10-10: cap/2 = 10.5M PRSM/yr). Chosen so the halving plateau
-#: 2·U = 2·R0·HI reaches the 21M cap (asymptotic approach; see derivation
-#: above). emission.py converts to the consensus per-block reward by
-#: rounding to whole shards; realised rate lands within 0.00001%.
-INITIAL_ANNUAL_EMISSION_PRSM = TOTAL_SUPPLY_PRSM // 2   # 10,500,000 PRSM/yr
+#: Founder-policy launch emission scale, in PRSM (Option B, 2026-10-10:
+#: cap/2 = 10.5M). Read as EPOCH-scale guidance: the consensus per-block
+#: reward R0 is sized so epoch-0 issuance lands within 1% of this figure
+#: and the halving plateau 2·U reaches the 99% approach target of the cap
+#: (see derivation above). emission.py pins the contract with import-time
+#: asserts; realised drift < 1%.
+INITIAL_ANNUAL_EMISSION_PRSM = TOTAL_SUPPLY_PRSM // 2   # 10,500,000 PRSM
 
 TAIL_ANNUAL_RATE_BPS = 60                           # ≈0.6%/yr forever (D1)
 DEV_FUND_SHARE_BPS = 500                            # 5% of each block reward

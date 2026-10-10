@@ -13,9 +13,10 @@ from chain.block import (BlockHeader, PoWFields, ZERO32, parse_header,
                          validate_header_basic)
 from chain.denylist import GENESIS_ACC, DenylistStore, Entry, SignedRoot, fold
 from chain.difficulty import DifficultyWindow, retarget
-from chain.emission import (CAP_HEIGHT, CAP_TRANSITION_EPOCH,
+from chain.emission import (BLEND_EPOCH, BLEND_HEIGHT, CAP_CROSS_HEIGHT,
+                            CAP_HEIGHT, CAP_TRANSITION_EPOCH,
                             INITIAL_BASE_REWARD_SHARDS, PRE_TAIL_PLATEAU_SHARDS,
-                            base_reward,
+                            TAIL_BLOCK_SHARDS, base_reward,
                             cumulative_supply, emission_at, prsm, tail_reward)
 from chain.node import ChainState, make_genesis, merkle_root, mine_block
 from chain.params import (BLOCKS_PER_YEAR, DEV_FUND_SHARE_BPS,
@@ -60,35 +61,53 @@ def test_genesis_pays_nobody():
     assert cumulative_supply(0) == 0
 
 
-def test_d1_conflict_flag_current_parameters():
-    """Documentation-as-test for the D1 conflict flag (emission.py, raised
-    2026-10-10): with the spec-pinned constants (R0 ≈ 2.1M PRSM/yr, halvings
-    every 315,360 blocks) the halving curve plateaus at 2·U ≈ 8.4M PRSM and
-    therefore NEVER approaches the 21M cap. Consequences that must hold until
-    the founder resolves D1 (options a/b/c in emission.py):
-      * no cap-approach transition exists (CAP_TRANSITION_EPOCH/CAP_HEIGHT None)
-      * the decay curve keeps halving indefinitely (no premature tail switch)
-      * no tail is scheduled at any height
-      * issuance still converges below the hard cap (cap can never be exceeded)
+def test_d1_option_b_contract_current_parameters():
+    """Documentation-as-test for the D1 resolution (founder decision
+    2026-10-10, Option B): launch epoch issuance ≈10.5M PRSM (cap/2) with
+    the RFC-0001 2-year halving cadence, so the decay + tail blend carries
+    cumulative supply through exactly 21,000,000 PRSM and the fixed
+    ≈0.6%/yr tail continues forever (Monero precedent — the cap is the
+    decay curve's approach point, not a ceiling on the non-discretionary
+    tail leg). Contract that must hold under the shipped constants:
+      * plateau 2·U clears the 99% approach target but stays under the cap
+      * no epoch-boundary transition exists (integer floor drift keeps
+        every finite pure-decay sum below target): CAP_TRANSITION_EPOCH /
+        CAP_HEIGHT are None and the blend regime governs
+      * the blend handover is monotone (no reward cliff inversion)
+      * supply crosses the 21M reference exactly once, inside the blend
+      * far in the future every block still pays exactly the flat tail
     """
-    assert PRE_TAIL_PLATEAU_SHARDS < TOTAL_SUPPLY_SHARDS   # plateau < 21M
+    assert PRE_TAIL_PLATEAU_SHARDS >= (TOTAL_SUPPLY_SHARDS * 9900) // 10_000
+    assert PRE_TAIL_PLATEAU_SHARDS < TOTAL_SUPPLY_SHARDS   # ideal plateau < cap
     assert CAP_TRANSITION_EPOCH is None
     assert CAP_HEIGHT is None
-    far = 100 * HALVING_INTERVAL_BLOCKS          # ~200 years out
-    assert base_reward(far) > 0                  # decay continues…
-    assert base_reward(far) == INITIAL_BASE_REWARD_SHARDS >> 100
-    assert tail_reward(far) == 0                 # …and no tail yet
-    # convergence: cumulative supply stays under the cap forever
-    assert cumulative_supply(far) <= TOTAL_SUPPLY_SHARDS
-    # geometric-series bound: sum of all epochs ≤ plateau (2U), which is < cap
-    assert cumulative_supply(far) < PRE_TAIL_PLATEAU_SHARDS
+    assert BLEND_EPOCH is not None and BLEND_EPOCH >= 1
+    # Monotone handover: last pure-decay block pays ≥ the tail it blends into.
+    assert base_reward(BLEND_HEIGHT - 1) >= TAIL_BLOCK_SHARDS
+    # Blend engages exactly where the decayed base drops below the tail.
+    assert INITIAL_BASE_REWARD_SHARDS >> BLEND_EPOCH < TAIL_BLOCK_SHARDS
+    # From the blend onward every block pays exactly TAIL_BLOCK_SHARDS.
+    for h in (BLEND_HEIGHT, BLEND_HEIGHT + 1, (BLEND_EPOCH + 3) * HALVING_INTERVAL_BLOCKS):
+        assert emission_at(h).total_new_shards == TAIL_BLOCK_SHARDS
+    # Cap crossing is pinned by the closed form and happens inside the blend.
+    assert CAP_CROSS_HEIGHT is not None and CAP_CROSS_HEIGHT > BLEND_HEIGHT
+    assert cumulative_supply(CAP_CROSS_HEIGHT) >= TOTAL_SUPPLY_SHARDS
+    assert cumulative_supply(CAP_CROSS_HEIGHT - 1) < TOTAL_SUPPLY_SHARDS
+    # Far future: base extinct, flat tail forever; supply strictly grows.
+    far = 100 * HALVING_INTERVAL_BLOCKS
+    assert base_reward(far) == 0                   # R0 >> 100 == 0
+    assert tail_reward(far) == TAIL_BLOCK_SHARDS
+    assert cumulative_supply(far) > cumulative_supply(CAP_CROSS_HEIGHT)
 
 
 def test_cumulative_supply_matches_per_block_emission_under_decay():
     """closed-form sum == naive per-block accumulation across several epoch
-    boundaries while the decay curve runs (current parameters: no tail)."""
+    boundaries while the decay curve runs, plus the blend-entry epochs
+    where the top-up tail engages (Option B shipped parameters)."""
     naive = 0
-    for h in range(1, 3 * HALVING_INTERVAL_BLOCKS + 2):
+    limit = (BLEND_EPOCH + 2) * HALVING_INTERVAL_BLOCKS + 1 if \
+        BLEND_EPOCH is not None else 3 * HALVING_INTERVAL_BLOCKS + 2
+    for h in range(1, limit + 1):
         naive += emission_at(h).total_new_shards
         assert naive == cumulative_supply(h), h
 
@@ -121,10 +140,11 @@ def test_cumulative_supply_monotonic():
 
 
 def test_pre_tail_supply_never_exceeds_cap():
-    """The decay-phase total stays under the cap at every height checked
-    (tail inflation beyond a future transition, if D1 is resolved toward a
-    tail, is the intended behaviour, not a bug)."""
-    limit = CAP_HEIGHT if CAP_HEIGHT is not None else 3 * HALVING_INTERVAL_BLOCKS
+    """The pure-decay leg (before the tail blend engages) stays under the
+    hard cap at every height — Option B's convergence guarantee. Tail
+    inflation beyond CAP_CROSS_HEIGHT is the intended D1 behaviour (fixed
+    ≈0.6%/yr forever), not a bug."""
+    limit = CAP_HEIGHT if CAP_HEIGHT is not None else BLEND_HEIGHT
     assert cumulative_supply(limit - 1) <= TOTAL_SUPPLY_SHARDS
 
 
