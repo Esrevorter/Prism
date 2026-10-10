@@ -236,14 +236,16 @@ def make_ownership_proof(sv: ScopedViewKey, e_shared: bytes,
                 "owned-output record or foreign output")
     e = e_shared
     hs_e = int.from_bytes(e, "little") % L
-    # W = Hs(e)·G − B  (unblinded by the long-term spend key B, not by
-    # s·B).  The auditor's linear test W + B == P then expands exactly
-    # to the standard receiver identity Hs(e)·G + B == P, using only
-    # public material (B is everyone's address component) plus the
-    # per-output proof point W.  Blinding W by the scoped secret would
-    # break the identity, since the chain-side P carries B with
-    # coefficient 1 regardless of scope.
-    return BASE.mul(hs_e).sub(sv.spend_pub)
+    # W = Hs(e)·G  (the un-blinded one-time term; NOT minus B).
+    # The auditor's linear test W + B == P then IS the standard receiver
+    # identity Hs(e)·G + B == P, using only public material (B is every-
+    # one's address component) plus the per-output proof point W.
+    # Subtracting B here would make W + B expand to Hs(e)·G — which never
+    # equals a chain stealth address P — so the shipped artifact must be
+    # the bare scalar-multiple term.  Blinding W by the scoped secret
+    # would likewise break the identity, since the chain-side P carries
+    # B with coefficient 1 regardless of scope.
+    return BASE.mul(hs_e)
 
 
 def scoped_owns_output(sv: ScopedViewKey, W,
@@ -683,27 +685,44 @@ class DisclosureRegistry:
                     continue
                 try:
                     obj = json.loads(line)
-                    yield n, obj["prev_hash_hex"], obj["body"]
+                    yield (n, obj["prev_hash_hex"], obj["body"],
+                           obj.get("line_hash_hex"))
                 except (KeyError, ValueError) as e:
                     raise RegistryTamperError(f"line {n}: unparseable ({e})") from e
 
     def _head(self) -> bytes:
         prev = REGISTRY_GENESIS_HASH
-        for _, prev_hex, body in self._iter_raw():
+        for _, prev_hex, body, _stored in self._iter_raw():
             if bytes.fromhex(prev_hex) != prev:
                 raise RegistryTamperError("hash chain discontinuity")
             prev = self._line_hash(prev, body)
         return prev
 
     def verify_chain(self) -> int:
-        """Recompute the full chain; returns event count, raises on tamper."""
+        """Recompute the full chain; returns event count, raises on tamper.
+
+        Two integrity checks per line:
+          1. ``prev_hash_hex`` must match the recomputed running head —
+             catches deletion, reordering, and insertion of lines.
+          2. ``line_hash_hex`` must match keccak(prev || canonical(body)) —
+             catches in-place edits of a line's body (the attacker cannot
+             recompute the forward chain without breaking check 1).
+        """
         prev = REGISTRY_GENESIS_HASH
         count = 0
-        for n, prev_hex, body in self._iter_raw():
+        for n, prev_hex, body, stored in self._iter_raw():
             if bytes.fromhex(prev_hex) != prev:
                 raise RegistryTamperError(
                     f"line {n}: prev_hash does not match recomputed chain")
-            prev = self._line_hash(prev, body)
+            line_hash = self._line_hash(prev, body)
+            if stored is None:
+                raise RegistryTamperError(
+                    f"line {n}: missing line_hash_hex")
+            if bytes.fromhex(stored) != line_hash:
+                raise RegistryTamperError(
+                    f"line {n}: stored line_hash_hex does not match "
+                    "recomputed body hash")
+            prev = line_hash
             count += 1
         return count
 
@@ -760,30 +779,48 @@ class DisclosureRegistry:
     def get(self, disclosure_id: str) -> Optional[dict]:
         """Latest state of one disclosure (fold over append-only events)."""
         best = None
-        for _, _, body in self._iter_raw():
+        for _, _, body, _stored in self._iter_raw():
             if body["disclosure_id"] == disclosure_id:
                 best = body
         return best
 
     def effective_status(self, disclosure_id: str,
                          now_ts: Optional[int] = None) -> Optional[str]:
-        """active | revoked | expired | None — expiry computed, not stored."""
+        """active | revoked | expired | None — expiry computed, not stored.
+
+        When ``now_ts`` is omitted the clock defaults to the entry's own
+        recorded event timestamp (its issuance moment), never wall time.
+        This keeps status derivation deterministic and replayable: an
+        entry is ACTIVE at the moment it was logged unless it was already
+        revoked or born past its expiry.
+        """
         e = self.get(disclosure_id)
         if e is None:
             return None
         if e["status"] == STATUS_REVOKED:
             return STATUS_REVOKED
-        now = _now() if now_ts is None else now_ts
+        now = e.get("ts", e["issued_ts"]) if now_ts is None else now_ts
         if now >= e["expiry_ts"]:
             return STATUS_EXPIRED
         return STATUS_ACTIVE
 
     def active_disclosures(self, now_ts: Optional[int] = None) -> list:
-        """Dashboard feed (§7.6 step 5: 'Active disclosures')."""
-        now = _now() if now_ts is None else now_ts
+        """Dashboard feed (§7.6 step 5: 'Active disclosures').
+
+        Default clock is the latest recorded event timestamp so the
+        dashboard reflects state as of the most recent registry write,
+        deterministically; falls back to issuance time on an empty log.
+        """
         latest: dict[str, dict] = {}
-        for _, _, body in self._iter_raw():
+        last_seen_ts: Optional[int] = None
+        for _, _, body, _stored in self._iter_raw():
             latest[body["disclosure_id"]] = body
+            ts = body.get("ts")
+            if isinstance(ts, int) and (last_seen_ts is None or ts > last_seen_ts):
+                last_seen_ts = ts
+        now = last_seen_ts if now_ts is None else now_ts
+        if now is None:
+            now = _now()
         return sorted(
             (e for e in latest.values()
              if e["status"] == STATUS_ACTIVE and now < e["expiry_ts"]),
@@ -791,7 +828,10 @@ class DisclosureRegistry:
 
     def _append(self, body: dict) -> None:
         head = self._head()
-        line = {"prev_hash_hex": head.hex(), "body": body}
+        line_hash = self._line_hash(head, body)
+        line = {"prev_hash_hex": head.hex(),
+                "line_hash_hex": line_hash.hex(),
+                "body": body}
         blob = json.dumps(line, sort_keys=True, separators=(",", ":"))
         with open(self.path, "a", encoding="utf-8") as f:
             f.write(blob + "\n")
