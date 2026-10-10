@@ -22,6 +22,13 @@ classifiers = [
 ]
 dependencies = []            # stdlib-only core; no third-party runtime deps
 
+[project.optional-dependencies]
+# Test-only extras; the runtime core stays stdlib-only.
+# pycryptodome gates 7 differential Keccak tests in prism/tests/test_crypto.py
+# (byte-exact cross-check of our Keccak-f[1600] permutation vs a reference
+# implementation); those tests skip cleanly when it is absent.
+test = ["pytest>=7", "pycryptodome>=3.19"]
+
 [project.scripts]
 prism = "chain.cli:main"
 
