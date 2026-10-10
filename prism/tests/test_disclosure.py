@@ -88,7 +88,8 @@ def scenario():
     chain = ChainIndex(records)
     nonce = keccak_256(b"accountant-nonce")[:16]
     pkg = build_disclosure_package(
-        view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY, view_pub=VIEW_PUB_A,
+        view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY, spend_pub=SPEND_PUB_B,
+        view_pub=VIEW_PUB_A,
         scope_id="tax-2026", statement_type=STATEMENT_INCOME_ATTRIBUTION,
         owned=owned, period=period, verifier_nonce=nonce,
         now_ts=now)
@@ -146,7 +147,7 @@ class TestScopedViewKeys:
                   "e_shared": sim["e_shared"], "tx_pub_R": sim["R"]}]
         pkg = build_disclosure_package(
             view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY,
-            view_pub=VIEW_PUB_A, scope_id="s",
+            spend_pub=SPEND_PUB_B, view_pub=VIEW_PUB_A, scope_id="s",
             statement_type=STATEMENT_PAYMENT_EXISTENCE, owned=owned,
             period=(now - 10, now + 10), verifier_nonce=b"\x01" * 16,
             now_ts=now)
@@ -357,7 +358,7 @@ class TestProverGuards:
         with pytest.raises(DisclosureError):
             build_disclosure_package(
                 view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY,
-                view_pub=VIEW_PUB_A, scope_id="s",
+                spend_pub=SPEND_PUB_B, view_pub=VIEW_PUB_A, scope_id="s",
                 statement_type=STATEMENT_INCOME_ATTRIBUTION, owned=[],
                 period=(0, 10), verifier_nonce=b"\x00" * 16)
 
@@ -366,7 +367,7 @@ class TestProverGuards:
         with pytest.raises(DisclosureError):
             build_disclosure_package(
                 view_secret_a=VIEW_SECRET_A, root_key=ROOT_KEY,
-                view_pub=VIEW_PUB_A, scope_id="s",
+                spend_pub=SPEND_PUB_B, view_pub=VIEW_PUB_A, scope_id="s",
                 statement_type="source_provenance",
                 owned=[{"txid": b"\x01" * 32, "output_index": 0,
                         "amount_shard": 1, "blinding": 1,
@@ -387,7 +388,8 @@ class TestRegistry:
     @pytest.fixture
     def reg(self, tmp_path, scenario):
         r = DisclosureRegistry(str(tmp_path / "registry.jsonl"))
-        r.record(scenario["pkg"], verifier_label="Alex (accountant)")
+        r.record(scenario["pkg"], verifier_label="Alex (accountant)",
+                 now_ts=scenario["now"])
         return r
 
     def test_record_then_get(self, reg, scenario):
@@ -430,7 +432,7 @@ class TestRegistry:
         # second disclosure, then revoke first
         p2 = DisclosurePackage.from_json(scenario["pkg"].to_json())
         object.__setattr__(p2, "disclosure_id", "second-id")
-        reg.record(p2, verifier_label="Tax office")
+        reg.record(p2, verifier_label="Tax office", now_ts=scenario["now"])
         did1 = scenario["pkg"].disclosure_id
         actives = {e["disclosure_id"] for e in reg.active_disclosures()}
         assert actives == {did1, "second-id"}
@@ -452,7 +454,7 @@ class TestRegistry:
     def test_deleted_line_detected(self, reg, tmp_path, scenario):
         p2 = DisclosurePackage.from_json(scenario["pkg"].to_json())
         object.__setattr__(p2, "disclosure_id", "third-id")
-        reg.record(p2, verifier_label="x")
+        reg.record(p2, verifier_label="x", now_ts=scenario["now"])
         with open(reg.path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         assert len(lines) == 2
@@ -464,7 +466,7 @@ class TestRegistry:
     def test_reordered_lines_detected(self, reg, tmp_path, scenario):
         p2 = DisclosurePackage.from_json(scenario["pkg"].to_json())
         object.__setattr__(p2, "disclosure_id", "fourth-id")
-        reg.record(p2, verifier_label="x")
+        reg.record(p2, verifier_label="x", now_ts=scenario["now"])
         with open(reg.path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         with open(reg.path, "w", encoding="utf-8") as f:
@@ -489,7 +491,8 @@ class TestRegistry:
         revoke → cooperating verifier rejects; registry history intact."""
         reg = DisclosureRegistry(str(tmp_path / "wallet.jsonl"))
         pkg = scenario["pkg"]
-        reg.record(pkg, verifier_label="Alex (accountant)")
+        reg.record(pkg, verifier_label="Alex (accountant)",
+                   now_ts=scenario["now"])
         rep = verify_package(pkg, chain=scenario["chain"],
                              expected_nonce=scenario["nonce"],
                              now_ts=scenario["now"],
