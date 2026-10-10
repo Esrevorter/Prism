@@ -14,17 +14,19 @@ Founder decisions encoded here (2026-10-08 / 2026-10-10):
     halving curve depends only on the launch rate, not the interval.
   * Launch rate ≈10.5M PRSM/yr = cap/2 (Option B), so the decay + tail blend
     carries cumulative supply through exactly 21,000,000 PRSM at roughly the
-    ten-year mark, after which the non-discretionary 0.6%/yr tail continues
-    forever (Monero precedent: long-run miner security never depends on fees
-    alone). Deriving R0 from the CALENDAR year overshoots 2x — one halving
-    epoch spans two calendar years, so an annual-rate derivation makes epoch
-    0 alone pay > cap and breaches the hard cap immediately. R0 is therefore
-    derived from the EPOCH target U = TARGET/2:
+    sixteen-year mark, after which the non-discretionary 0.6%/yr tail
+    continues forever (Monero precedent: long-run miner security never
+    depends on fees alone). R0 is derived from the EPOCH approach target —
+    the smallest whole-shard reward whose ideal halving plateau
+    Σ_k R0·HI·2^-k = 2·R0·HI reaches 99% of the cap:
 
         R0 = ceil(CAP · APPROACH_BPS / (2 · HI · 10^4)) = 3,296,232,877
 
-    whose calendar-year equivalent is 10,499,837.7 PRSM/yr — within 0.002%
-    of the policy figure. An import-time assert pins this contract.
+    Calendar-year equivalent: R0 · BPY = 10,499,837.7 PRSM/yr — within
+    0.002% of the policy figure. Deriving R0 from the calendar year directly
+    overshoots ~2x: one halving epoch spans two calendar years, so an
+    annual-rate derivation makes epoch 0 alone pay ≈21M and breaches the
+    hard cap almost immediately. An import-time assert pins this contract.
 
 Schedule shape under the shipped parameters:
 
@@ -90,19 +92,21 @@ def _initial_base_reward_shards() -> int:
 
         R0 = ceil(_TARGET_SHARDS / (2 · HALVING_INTERVAL_BLOCKS)) = 3,296,232,877
 
-    Calendar-year equivalent: R0·BLOCKS_PER_YEAR ≈ 10,499,837.7 PRSM/yr,
-    within 0.002% of the INITIAL_ANNUAL_EMISSION_PRSM policy figure (10.5M).
-    Deriving R0 from the calendar year instead (R0 = P·SPP/BPY) doubles the
-    launch rate, because one halving epoch spans two calendar years; epoch 0
-    alone then pays > 21M and breaches the hard cap. The assert below pins
-    this trap shut permanently.
+    Epoch 0 then pays U ≈ 10.395M PRSM — within 1% of the founder's cap/2
+    epoch target (INITIAL_ANNUAL_EMISSION_PRSM = 10.5M per 2-year halving
+    epoch; the policy figure is read as EPOCH issuance, which is what makes
+    the plateau 2·U ≈ 20.79M clear 99% of the cap while every finite partial
+    sum stays below 21M). The load-bearing trap: sizing a full calendar year
+    of issuance per epoch doubles the launch rate; epoch 0 alone then pays
+    ≈21M and breaches the hard cap immediately. The assert below pins this
+    contract shut.
     """
     r0 = -(-_TARGET_SHARDS // (2 * HALVING_INTERVAL_BLOCKS))   # ceil division
-    annual_prsm = r0 * BLOCKS_PER_YEAR / SHARDS_PER_PRSM
-    policy = INITIAL_ANNUAL_EMISSION_PRSM
-    assert abs(annual_prsm - policy) <= policy * 0.001, (
-        f"derived launch rate {annual_prsm:,.0f} PRSM/yr drifted >0.1% from "
-        f"founder policy {policy:,} PRSM/yr")
+    epoch_prsm = r0 * HALVING_INTERVAL_BLOCKS / SHARDS_PER_PRSM
+    policy_epoch = INITIAL_ANNUAL_EMISSION_PRSM   # cap/2 per halving epoch
+    assert abs(epoch_prsm - policy_epoch) <= policy_epoch * 0.01, (
+        f"derived epoch issuance {epoch_prsm:,.0f} PRSM drifted >1% from "
+        f"founder epoch target {policy_epoch:,} PRSM")
     return r0
 
 
