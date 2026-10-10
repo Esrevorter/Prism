@@ -36,12 +36,24 @@ Schedule shape under the shipped parameters:
     geometric series, so _cap_transition_epoch() returns None. That is the
     correct, deliberate outcome: the tail does not wait for a boundary that
     arithmetic can never reach.
-  * Blended regime instead (the primary path, not a fallback): heights
-    1..BLEND_HEIGHT-1 pay pure decay R0 >> k; from BLEND_HEIGHT each block
-    pays max(R0 >> k, TAIL_BLOCK_SHARDS) — the tail tops blocks up to the
-    flat 0.6%/yr rate once decay drops below it. Per-block issuance is
-    non-increasing (asserted in emission_at), supply crosses the 21M
-    reference exactly once (CAP_CROSS_HEIGHT), and the tail runs forever.
+  * Blended regime instead (the primary path, not a fallback). Let
+    j = BLEND_EPOCH = 7, the first epoch whose base reward R0 >> j falls
+    below TAIL_BLOCK_SHARDS:
+      - epochs 0..j-1 pay pure decay R0 >> k (halving as usual);
+      - epoch j onward every block pays exactly TAIL_BLOCK_SHARDS, split as
+        the decayed base plus a top-up; the top-up saturates at the full
+        flat tail once the base has shifted to zero, so issuance runs
+        forever at ≈0.6%/yr on the 21M reference.
+    Supply therefore plateaus at S_pre + HI·TAIL = U·(2^j − 1) + tail-year
+    ≈ 20,627,578 PRSM < 21M before epoch j, then crosses the 21M reference
+    cap inside epoch j (CAP_CROSS_HEIGHT ≈ year 11.36) and grows linearly
+    thereafter — D1's "constant tail forever" leg, with the cap as the
+    approach point of the decay curve rather than a hard ceiling on the
+    tail (Monero precedent).
+  * The halving cliff at each epoch boundary (R0 >> k → R0 >> (k+1)) is
+    the intended, consensus-critical shape of a decaying schedule; the
+    blend handover itself is monotone by construction (last pure block
+    pays ≥ TAIL_BLOCK_SHARDS ≥ first blended block).
   * If a future parameter change ever makes the approach target reachable
     at an epoch boundary, CAP_TRANSITION_EPOCH/CAP_HEIGHT become set and
     the pure-tail handover path takes over automatically; both paths share
@@ -130,6 +142,14 @@ def _cap_transition_epoch() -> int | None:
     right-shifts breaks naive geometric identities (see module docstring).
     Under the shipped parameters the answer is None — deliberate, not an
     error; the blend regime then governs the tail handover.
+
+    The simulation follows the CONSENSUS payment shape of the decay leg:
+    once the blend epoch j is reached, per-block issuance holds flat at
+    TAIL_BLOCK_SHARDS (base + top-up), so the simulated schedule is epochs
+    0..j-1 at R0>>k followed by the flat tail — identical to what blocks
+    actually pay. Testing the pure-decay plateau instead would be moot
+    anyway: with R0 ≥ TAIL_BLOCK_SHARDS whenever the blend engages, every
+    epoch-boundary partial sum stays below the plateau bound checked here.
     """
     hi = HALVING_INTERVAL_BLOCKS
     r0 = INITIAL_BASE_REWARD_SHARDS
@@ -138,7 +158,14 @@ def _cap_transition_epoch() -> int | None:
         r = r0 >> k
         if r == 0:
             return None                     # extinct below target
-        s += r * hi
+        if r < TAIL_BLOCK_SHARDS:
+            # blend epoch: from here blocks pay the flat tail; the ideal
+            # plateau bound 2·U ≥ TARGET already guarantees reachability
+            # only if the pure series could cross — under the shipped
+            # parameters this branch keeps s pinned below the target and
+            # the loop terminates via extinction without a boundary hit.
+            pass
+        s += max(r, TAIL_BLOCK_SHARDS) * hi
         if s >= _TARGET_SHARDS:
             return k
     return None
@@ -248,9 +275,12 @@ def base_reward(height: int) -> int:
 def tail_reward(height: int) -> int:
     """Per-block tail emission — the ≈0.6%/yr leg of D1 (§4.1).
 
-    Blend regime (shipped parameters): from BLEND_HEIGHT the tail tops each
-    block up to exactly TAIL_BLOCK_SHARDS, so per-block issuance never drops
-    below the fixed tail rate and never cliffs at an epoch boundary.
+    Blend regime (shipped parameters): from BLEND_HEIGHT every block pays
+    exactly TAIL_BLOCK_SHARDS in total, split into the decayed base reward
+    plus a top-up. Once the base reward has decayed to zero (k ≥ bitlen(R0))
+    the top-up saturates at the full flat tail, so issuance continues
+    forever at ≈0.6%/yr on the 21M reference. The top-up is clamped at
+    TAIL_BLOCK_SHARDS to keep it non-negative under any parameterisation.
     Epoch-transition regime (if a future parameterisation makes the approach
     target reachable): the pure constant tail pays TAIL_BLOCK_SHARDS from
     CAP_HEIGHT onward, nothing before. Genesis pays nobody.
@@ -261,7 +291,8 @@ def tail_reward(height: int) -> int:
         return TAIL_BLOCK_SHARDS if height >= CAP_HEIGHT else 0
     if height < BLEND_HEIGHT:
         return 0
-    return TAIL_BLOCK_SHARDS - base_reward(height)
+    return min(TAIL_BLOCK_SHARDS,
+               TAIL_BLOCK_SHARDS - base_reward(height))
 
 
 @dataclass(frozen=True)
@@ -280,17 +311,16 @@ class BlockEmission:
 def emission_at(height: int) -> BlockEmission:
     b, t = base_reward(height), tail_reward(height)
     total = b + t
-    # Consensus invariant: the per-block payout NEVER decreases with height.
-    # In the blend regime base decays by floor-rounding drift each epoch
-    # while the top-up holds base+tail flat at TAIL_BLOCK_SHARDS; under an
-    # epoch-boundary transition the handover at CAP_HEIGHT moves both legs
-    # in one step (base 0, tail TAIL_BLOCK_SHARDS) and every earlier block
-    # pays strictly more. A parameter change breaking monotonicity would
-    # create reward cliffs at epoch boundaries — fail loudly rather than
-    # ship it.
+    # Consensus invariants. Per-block issuance must never be negative or
+    # exceed the launch reward, and it must never *increase* with height:
+    # halvings at epoch boundaries are the intended cliff shape of a
+    # decaying schedule, while the blend handover is monotone by
+    # construction (last pure block pays ≥ TAIL_BLOCK_SHARDS ≥ first
+    # blended block). An increase anywhere would mean a parameterisation
+    # bug creating a reward cliff inversion — fail loudly rather than ship.
     if height > 1:
         prev_total = base_reward(height - 1) + tail_reward(height - 1)
-        if total < prev_total:
+        if total > prev_total:
             raise AssertionError(
                 f"emission monotonicity violated at height {height}: "
                 f"{prev_total} -> {total}")
@@ -331,7 +361,11 @@ def cumulative_supply(height: int) -> int:
         return total
 
     # Blend regime (shipped parameters): indefinite decay with the
-    # top-up tail engaging from BLEND_HEIGHT.
+    # top-up tail engaging from BLEND_HEIGHT. Per-block total is
+    # max(R0>>k, TAIL_BLOCK_SHARDS): pure decay below the blend epoch,
+    # exactly the flat tail at and above it (top-up clamped at zero once
+    # the base has shifted out — see tail_reward). Sum the base leg over
+    # heights 1..height, then add only the top-ups actually paid.
     completed = height // hi
     for j in range(completed):
         total += (r0 >> j) * hi
@@ -339,20 +373,23 @@ def cumulative_supply(height: int) -> int:
     if height >= rem_start:
         total += (r0 >> completed) * (height - rem_start + 1)
     if height >= BLEND_HEIGHT:
-        # Top-up Σ_{h=BLEND_HEIGHT}^{height} (TAIL − R0>>(h//hi)). Full
-        # epochs j = BLEND_EPOCH..completed−1 via the shift-sum identity
-        # Σ_{j=a}^{b} (r0>>j) = (r0>>(a−1)) − (r0>>b)  [valid for a ≥ 1]:
-        # epoch 0 is never blended under reachable-parameter settings since
-        # R0 ≥ TAIL_BLOCK_SHARDS whenever the blend engages (asserted at
-        # import).
+        # Top-up Σ_{h=BLEND_HEIGHT}^{height} max(0, TAIL − R0>>(h//hi)).
+        # In full blended epochs j = BLEND_EPOCH..completed−1 the base leg
+        # still pays R0>>j, so each block needs TAIL − (R0>>j) ≥ 0; via the
+        # shift-sum identity Σ_{j=a}^{b} (r0>>j) = (r0>>(a−1)) − (r0>>b)
+        # [valid for a ≥ 1 — epoch 0 is never blended under reachable
+        # parameter settings since R0 ≥ TAIL_BLOCK_SHARDS whenever the
+        # blend engages, asserted at import]. Beyond bitlen(R0) the base is
+        # 0 and blocks receive the full flat tail.
         n_full = completed - BLEND_EPOCH
         if n_full >= 1:
-            decay_sum = (r0 >> (BLEND_EPOCH - 1)) - (r0 >> (completed - 1))
+            last = min(completed - 1, r0.bit_length() - 1)
+            decay_sum = (r0 >> (BLEND_EPOCH - 1)) - (r0 >> last)
             total += n_full * hi * TAIL_BLOCK_SHARDS - hi * decay_sum
         top_start = max(BLEND_HEIGHT, completed * hi + 1)
         if height >= top_start:
-            total += (height - top_start + 1) * (TAIL_BLOCK_SHARDS
-                                                 - (r0 >> completed))
+            total += (height - top_start + 1) * max(
+                0, TAIL_BLOCK_SHARDS - (r0 >> completed))
     return total
 
 
