@@ -236,14 +236,16 @@ def make_ownership_proof(sv: ScopedViewKey, e_shared: bytes,
                 "owned-output record or foreign output")
     e = e_shared
     hs_e = int.from_bytes(e, "little") % L
-    # W = Hs(e)·G − B  (unblinded by the long-term spend key B, not by
-    # s·B).  The auditor's linear test W + B == P then expands exactly
-    # to the standard receiver identity Hs(e)·G + B == P, using only
-    # public material (B is everyone's address component) plus the
-    # per-output proof point W.  Blinding W by the scoped secret would
-    # break the identity, since the chain-side P carries B with
-    # coefficient 1 regardless of scope.
-    return BASE.mul(hs_e).sub(sv.spend_pub)
+    # W = Hs(e)·G  (the un-blinded one-time term; NOT minus B).
+    # The auditor's linear test W + B == P then IS the standard receiver
+    # identity Hs(e)·G + B == P, using only public material (B is every-
+    # one's address component) plus the per-output proof point W.
+    # Subtracting B here would make W + B expand to Hs(e)·G — which never
+    # equals a chain stealth address P — so the shipped artifact must be
+    # the bare scalar-multiple term.  Blinding W by the scoped secret
+    # would likewise break the identity, since the chain-side P carries
+    # B with coefficient 1 regardless of scope.
+    return BASE.mul(hs_e)
 
 
 def scoped_owns_output(sv: ScopedViewKey, W,
