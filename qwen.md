@@ -21,3 +21,15 @@
 - If retries continue to fail, escalate the backoff exponentially: 10 s → 20 s → 40 s, reducing the request payload on each attempt.
 - Reduce token payload sizes by omitting unneeded code context if rate limits continue to trigger. Prefer targeted `sed -n`/line-range views over full-file cat, and `pytest -k` subsets over full suite runs when diagnosing repeated failures.
 - If you hit the `429 Throttling.BurstRate` error ("Request rate increased too quickly"), you must pause all execution entirely for **10 seconds** (upgraded from 5 s) before attempting an exponential backoff retry, and resume at half the previous request velocity.
+
+## Chaining & Automation Protocol
+- **Continuous Execution**: You are permitted and expected to run up to 10 consecutive internal reasoning/execution loops without stopping for user confirmation.
+- **Self-Termination Rule**: Do not ask "Should I proceed?", "Would you like me to run the tests?", or "What should I do next?". Instead, immediately state your next objective and execute it.
+- **The Loop Cycle**: For every subtask defined in `spec.md`, follow this loop automatically:
+  1. Implement changes.
+  2. Run/simulate tests.
+  3. Analyze errors (if any).
+  4. Fix and re-test.
+  5. Move directly to the next subtask.
+- **Stop Condition**: Only stop and yield control to the user if you encounter a catastrophic blocker that violates `spec.md` or when the entire task list is 100% complete.
+
