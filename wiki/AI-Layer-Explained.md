@@ -6,7 +6,7 @@
 
 ## The one-sentence version
 
-The AI turns *"send $50 to Alex for the mastering session, keep it private"* into an exact, safe, explained transaction — and then **stops before signing**, because everything irreversible still requires you.
+The AI turns *"send $50 to Alex for the session, keep it private"* into an exact, safe, explained transaction — and then **stops before signing**, because everything irreversible still requires you.
 
 ## Why on-device is non-negotiable
 
@@ -33,7 +33,7 @@ This is the most important sentence in the page: **numbers in previews come from
 
 ## Autonomous agents: autopilot with seatbelts
 
-Recurring chores (round-ups, DCA, royalty-split reminders) run under **explicit permission grants**:
+Recurring chores (round-ups, DCA, invoice-split reminders) run under **explicit permission grants**:
 
 ```jsonc
 { "agent": "auto_dutcher.v1", "capability": "buy_prsm_fiat_drip",

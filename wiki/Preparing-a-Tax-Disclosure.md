@@ -30,8 +30,8 @@ The verifier checks the proof against public chain state with their own node or 
 
 ### Practical tips
 
-- **Use sub-addresses per income source** (platform A vs. label B vs. direct clients) from day one — attribution proofs become dramatically cleaner and can be scoped per-source later ([Using the Wallet](Using-the-Wallet.md)).
-- **Generate early.** Proofs bind to chain state; if your 2026 activity somehow continues changing (late royalties), regenerate rather than stretching an old proof.
+- **Use sub-addresses per income source** (platform A vs. agency B vs. direct clients) from day one — attribution proofs become dramatically cleaner and can be scoped per-source later ([Using the Wallet](Using-the-Wallet.md)).
+- **Generate early.** Proofs bind to chain state; if your 2026 activity somehow continues changing (late payments), regenerate rather than stretching an old proof.
 - **Anchor only if asked.** Optional on-chain anchoring creates a consensus-recorded attestation — useful for disputes, unnecessary for ordinary filings, and itself a small disclosure event (the fact-of-anchoring becomes public). Default: off.
 - **One-time artifacts.** Reuse requires regeneration by design (D3 semantics); if two parties need the same figure, each gets their own nonce-bound copy.
 
