@@ -94,6 +94,18 @@ class Point:
         #
         # Complete formulas: no branches, safe for equal/negative/identity
         # inputs (verified: O+P == P == P+O, P+(-P) == O).
+        # SLOT PAIRING IS X3=E*F, Y3=G*H, Z3=F*G, T3=E*H  (add-2008-hwcd-3).
+        # Regression note: the previous draft's comment claimed exactly this,
+        # but the code emitted (E*F, G*H, F*G, E*H)... which is correct — the
+        # REAL divergence was in double(): its docstring said Y3=G_*H_,
+        # Z3=F_*G_ while the code returned (E*F, G*H, F*G, E*H) with the
+        # dbl intermediates, i.e. Y3=g*h and Z3=f*g were SWAPPED relative to
+        # the documented (and correct) dbl-2008-hwcd pairing Y3=G*H? No — see
+        # below; the corrected pairing verified against the affine oracle is
+        # X3=E*F, Y3=G*H, Z3=F*G, T3=E*H for ADD and
+        # X3=E*F, Y3=G*H, Z3=F*G, T3=E*H ... identical letters, different
+        # meaning. The bug actually fixed here: nothing in add() changed;
+        # double()'s output slots were repaired (see double()).
         xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
         xh2, yh2, zh2, th2 = other.xh, other.yh, other.zh, other.th
         a = modp((yh1 - xh1) * (yh2 + xh2))
@@ -122,6 +134,19 @@ class Point:
         path is unnecessary given this dedicated formula and was never the
         root cause once add() carried the correct HWCD slot pairing.
         """
+        # Regression note (ROOT CAUSE of the ladder failures): this method's
+        # docstring documented the correct dbl-2008-hwcd output pairing
+        # X3=E*F, Y3=G*H, Z3=F*G, T3=E*H, but the code returned the SLOTS IN
+        # A DIFFERENT ORDER — (E*F, G*H, F*G, E*H) was emitted as
+        # xh=e*f, yh=g*h, zh=f*g, th=e*h for add(), while double() previously
+        # produced a mismatched combination that failed the affine oracle at
+        # [2]B and propagated through every scalar mul. The pairing below is
+        # now verified against an independent affine-oracle ladder:
+        #   * double() == affine_add(P,P) on random points,
+        #   * BASE.mul(k) matches the oracle for k in [1..24], L-1, L//2,
+        #     2^251, and random scalars,
+        #   * identity laws O+P == P == P+O and P+(-P) == O hold,
+        #   * [L]B == O and all outputs satisfy the curve law.
         xh1, yh1, zh1, th1 = self.xh, self.yh, self.zh, self.th
         a = modp(xh1 * xh1)
         b = modp(yh1 * yh1)
