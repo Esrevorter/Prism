@@ -1,3 +1,15 @@
+# QWEN SYSTEM OPERATING CONSTRAINTS
+You must strictly cross-reference and follow the constraints provided across our system files before outputting any answer or code block.
+
+## Reference Map
+- **General Architecture & Rules:** See @rules.md
+- **Safety & Behavioral Guardrails:** See @ethics.md
+- **Technical & Feature Requirements:** See @spec.md
+
+## Execution Enforcement
+1. Before generating any response, verify that your claims are grounded entirely by the parameters laid out in @spec.md.
+2. If a library, function, or fact is requested that contradicts or is absent from @spec.md, do not fabricate a plausible-sounding alternative. State explicitly that it is missing or unsupported.
+
 # Qwen Code Rules & Operational Constraints
 
 # Qwen3-Coder Client Scaling & Anti-Burst Rules
