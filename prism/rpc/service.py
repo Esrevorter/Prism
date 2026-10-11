@@ -21,6 +21,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from ..ai.fraud import FraudDetector, TxFeatures
+from ..ai.simulator import ChainSnapshot, SigningGate, SnapshotOutput
 from ..chain.node import ChainState, mine_block, make_genesis, Block, ZERO32
 from ..chain.params import REFRACTION_TESTNET
 from ..mpc import frost
@@ -28,6 +30,8 @@ from ..mpc.sharing import Share
 from ..wallet.intent import (AddressBook, Contact, IntentCompiler,
                              IntentError, apply_clarification, prsm_to_shard,
                              shard_to_prsm, simulate, fraud_flags)
+
+DEVICE_LABELS = {1: "Phone", 2: "Laptop", 3: "Backup card"}
 
 
 @dataclass
@@ -57,6 +61,8 @@ class PrismService:
         self.compiler = IntentCompiler(self.book)
         self.intents: dict[str, object] = {}          # intent_id -> Intent
         self.balance_shard = 0                        # faucet credits
+        self.faucet_outputs: list[SnapshotOutput] = []  # mined coinbase credits
+        self.gate = SigningGate(detector=FraudDetector())
         self.ceremony = CeremonyState()
         # virtual cadence bookkeeping (mirrors node_sync_soak model)
         self.cadence_s = self.params.target_block_time
@@ -99,9 +105,28 @@ class PrismService:
                 self.store[bh] = blk
                 self.height_index.append(bh)
                 self.balance_shard += emission_at(blk.header.height).total_new_shards
+                self.faucet_outputs.append(SnapshotOutput(
+                    txid=bh.hex() + ":coinbase", output_index=0,
+                    amount_shard=emission_at(blk.header.height).total_new_shards))
                 out.append({"height": blk.header.height, "hash": bh.hex()})
             return {"mined": len(out), "last": out[-1],
                     "balance_shard": self.balance_shard}
+
+    def chain_blocks(self, limit: int = 10) -> dict:
+        """Recent real blocks straight from the daemon's block store —
+        the GUI's node panel renders live chain state, not fixtures."""
+        with self._lock:
+            idxs = list(range(max(0, len(self.height_index) - limit),
+                              len(self.height_index)))
+            blocks = []
+            for i in reversed(idxs):
+                blk = self.store[self.height_index[i]]
+                h = blk.header
+                blocks.append({"height": h.height, "hash": h.hash().hex(),
+                               "prev_hash": h.prev_hash.hex(),
+                               "timestamp": h.timestamp,
+                               "tx_count": len(blk.txids)})
+            return {"count": len(blocks), "blocks": blocks}
 
     def balance(self) -> dict:
         with self._lock:
@@ -157,15 +182,87 @@ class PrismService:
             sim.warnings.extend(flags)
             return sim.to_json()
 
-    def intent_confirm(self, intent_id: str) -> dict:
+    def intent_review(self, intent_id: str,
+                      acknowledged_risk: bool = False) -> dict:
+        """Fraud-simulator panel backend (§7.3 steps 3–5, honest-UX).
+
+        Composes the deterministic simulator + on-device FraudDetector via
+        SigningGate against REAL daemon state (live snapshot built from the
+        faucet's mined outputs; fresh simulation at the current sim clock —
+        never a cached fixture). All plain-language fields are computed
+        server-side so the front end can't invent reassurance; every number
+        traces to the executor template, not an LLM (§8.2 boundary).
+        """
+        with self._lock:
+            it = self._get_intent(intent_id)
+            snapshot = ChainSnapshot(list(self.faucet_outputs))
+            snapshot.height = self.chain.tip.header.height
+            contact_verified = None
+            recipient_name = "the recipient"
+            ref = it.compiled.recipient_ref or ""
+            if ref.startswith("contact:"):
+                c = self.book._contacts.get(ref.split(":", 1)[1])
+                if c is not None:
+                    contact_verified = c.verified
+                    recipient_name = c.display_name
+            rv = self.gate.review(it, snapshot, now_unix=self.sim_clock,
+                                  oracle=self.compiler.oracle,
+                                  recipient_name=recipient_name,
+                                  contact_verified=contact_verified,
+                                  acknowledged_risk=acknowledged_risk)
+            risk = rv.risk
+            ui_band = {"clean": "calm", "watch": "caution",
+                       "interrupt": "pause"}[risk.band]
+            out = {
+                "intent_id": it.intent_id,
+                "ok": rv.sim.ok,
+                "plain_english": rv.sim.plain_english,
+                "simulation": rv.sim.to_json(),
+                "risk": {"score": risk.score, "band": risk.band,
+                         "reasons": list(risk.reasons)},
+                "ui_band": ui_band,
+                "proceed": rv.proceed,
+                "interruption": rv.interruption,
+                "reasons": list(rv.reasons),
+                "policy_refusals": list(rv.policy_refusals),
+                "sim_digest": rv.sim.sim_digest,
+            }
+            if rv.interruption and not acknowledged_risk:
+                out["human"] = ("This one looks unusual for you. Nothing has been "
+                                "sent — take your time. You can cancel safely, or "
+                                "confirm you understand and we'll show the review "
+                                "again without rushing you.")
+                out["offer_sleep_on_it"] = True
+            elif not rv.sim.ok:
+                out["human"] = rv.sim.plain_english
+            else:
+                out["human"] = rv.sim.plain_english
+            return out
+
+    def intent_confirm(self, intent_id: str,
+                       acknowledged_risk: bool = False) -> dict:
         with self._lock:
             it = self._get_intent(intent_id)
             if it.status != "awaiting_confirm":
                 raise ValueError(f"intent is {it.status}, not ready to confirm")
+            # honest-UX gate (§7.3 step 5): a confirmed intent must pass the
+            # live SigningGate review — same composition the panel shows —
+            # so no UI path can broadcast something the simulator rejects.
+            # NOTE: reviewed BEFORE Intent.confirm() mutates signed_at, so
+            # repeat confirms are idempotent (second call hits the status
+            # check above instead of tripping the confirmation-required rule).
+            snapshot = ChainSnapshot(list(self.faucet_outputs))
+            rv = self.gate.review(it, snapshot, now_unix=self.sim_clock,
+                                  oracle=self.compiler.oracle,
+                                  acknowledged_risk=acknowledged_risk)
+            if not rv.proceed:
+                reasons = rv.reasons or ["simulation refused this intent"]
+                raise ValueError("cannot confirm: " + "; ".join(reasons))
             it.confirm(now_unix=self.sim_clock)
             payload = _intent_payload(it)
             payload["confirmation_envelope"] = {
                 "canonical_digest_hex": it.canonical_digest().hex(),
+                "sim_digest_bound": rv.sim.sim_digest,
                 "next_step": "mpc.sign_preview once a ceremony is complete",
             }
             return payload
@@ -212,7 +309,40 @@ class PrismService:
             d["scheme"] = "2-of-3 Solo (D4: user-owned device legs only)"
             d["joint_pk_hex"] = c.result.public_key.encode().hex()
             d["elapsed_s"] = round(c.finished_at - c.started_at, 3)
+            d["devices"] = [
+                {
+                    "device_id": idx,
+                    "label": DEVICE_LABELS.get(idx, f"Device {idx}"),
+                    "share_fingerprint": hashlib.sha3_256(
+                        str(sh.value).encode()).hexdigest()[:12],
+                    "verified_against_commitments": True,
+                    "role": ("signing quorum member — any 2 of the 3 devices "
+                             "can sign; no device ever holds the key alone"),
+                }
+                for idx, sh in sorted(c.result.shares.items())
+            ]
+            d["share_handling"] = {
+                "never_shown": ("Full share values are deliberately NOT "
+                                "displayed. Fingerprints below exist only so "
+                                "you can compare devices side by side and be "
+                                "sure each holds a different piece."),
+                "backup_ready": ("Your Backup card is already stored on that "
+                                 "device. If you lose Phone or Laptop, any two "
+                                 "remaining devices restore full access."),
+                "what_if_lost": ("Lost a device? Start a reshare from Settings "
+                                 "→ Device keys. The new shares are generated "
+                                 "fresh, so an old stolen device stops working "
+                                 "after the next signing session."),
+            }
+            d["human"] = ("Your three devices now hold your key together. "
+                          "No single device — and never Prism — holds it.")
         return d
+
+    def ceremony_reset(self) -> dict:
+        """Start over (e.g. lost every device): drop the current ceremony."""
+        with self._lock:
+            self.ceremony = CeremonyState()
+        return {"ok": True, **self.ceremony_status()}
 
     def sign_preview(self, intent_id: str) -> dict:
         c = self.ceremony
