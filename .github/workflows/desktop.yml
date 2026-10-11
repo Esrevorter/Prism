@@ -21,19 +21,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # One runner per installer we ship. macos-latest (arm64) produces the
+        # universal2 .dmg that also runs on Intel Macs, so no separate macos-13
+        # job is needed — that runner was retired by GitHub anyway and only
+        # produced queue delays / capacity notices.
         include:
           - os: windows-latest
             artifact_os: windows
             arch: x86_64
-          - os: ubuntu-22.04
+          - os: ubuntu-22.04     # pinned: libwebkit2gtk-4.0-dev baseline for Tauri v2
             artifact_os: linux
             arch: x86_64
           - os: macos-latest
             artifact_os: macos
-            arch: arm64
-          - os: macos-13        # Intel macOS runner (x86_64-apple-darwin)
-            artifact_os: macos
-            arch: x86_64
+            arch: universal2
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
