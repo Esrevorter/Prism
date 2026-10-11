@@ -1,0 +1,104 @@
+name: Release
+
+# Triggered by pushing a tag like v0.1.0:  git tag -a v0.1.0 -m "..." && git push origin v0.1.0
+# Only v* tags produce release artifacts; workflow_dispatch is for debugging
+# (uploads artifacts but never creates/publishes a Release).
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    # Single lightweight validation job — the per-OS build jobs below no longer
+    # duplicate the test run.
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test deps & run suite
+        run: |
+          python -m pip install --upgrade pip pytest
+          pytest prism/tests -q
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        # One runner per platform/arch we ship. Deliberately minimal:
+        #   - linux  -> ubuntu-latest (glibc baseline fine for our deps)
+        #   - macos   -> macos-latest covers both Apple Silicon AND Intel
+        #               (the PyInstaller binary is universal2: built on an
+        #                arm64 runner, it carries both slices)
+        #   - windows -> windows-latest
+        include:
+          - os: windows-latest
+            artifact_os: windows
+            arch: x86_64
+          - os: ubuntu-latest
+            artifact_os: linux
+            arch: x86_64
+          - os: macos-latest
+            artifact_os: macos
+            arch: universal2
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # PyInstaller cannot cross-compile: each binary is built on its own OS runner.
+      - name: Install build tools
+        run: python -m pip install --upgrade pip pyinstaller
+
+      # sanity check the wheel + `prism` console script too
+      - name: Build sdist/wheel
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: Build artifact
+        shell: bash
+        run: bash packaging/build_release.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prism-${{ matrix.artifact_os }}-${{ matrix.arch }}
+          path: |
+            prism-*-*.zip
+            dist/*.whl
+            dist/*.tar.gz
+
+  release:
+    needs: build
+    # Only tag pushes publish a GitHub Release; manual dispatch just uploads artifacts.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'prism-*'
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            prism-*.zip
+            *.whl
+            *.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: true   # Phase-1 reference implementation — flip to false at mainnet candidate

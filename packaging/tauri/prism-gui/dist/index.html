@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Prism Wallet</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0d1117; color: #e6edf3;
+                   font-family: system-ui, sans-serif; }
+      #boot { display: flex; align-items: center; justify-content: center;
+              height: 100%; flex-direction: column; gap: 12px; }
+      .spinner { width: 42px; height: 42px; border: 4px solid #30363d;
+                 border-top-color: #58a6ff; border-radius: 50%;
+                 animation: spin 1s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #err { color: #f85149; max-width: 40em; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <!-- Boot screen shown while the bundled prism-gui daemon starts.
+         On success the Rust side calls window.navigate(wallet-url) and this
+         page is replaced by the real wallet UI (prism/rpc/static bundle). -->
+    <div id="boot">
+      <div class="spinner"></div>
+      <div>Starting your Prism wallet…</div>
+      <div id="err"></div>
+    </div>
+    <script>
+      // Tauri v1 injects window.__TAURI__ when withGlobalTauri is enabled;
+      // we invoke the `start_daemon` command which blocks until the daemon
+      // reports healthy and then navigates this webview to the wallet UI.
+      const t = window.__TAURI__;
+      if (!t) {
+        document.getElementById("err").textContent =
+          "Desktop shell runtime missing — reinstall Prism Wallet.";
+      } else {
+        t.invoke("start_daemon").catch((e) => {
+          document.getElementById("err").textContent = String(e);
+        });
+      }
+    </script>
+  </body>
+</html>
