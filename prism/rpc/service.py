@@ -34,7 +34,7 @@ from ..mpc.sharing import Share
 from ..wallet.agent_auth import (AgentRuntime, Constraints, Grant,
                                  PolicyEngine, RISK_CLEAN_MAX, SignerStub,
                                  _intent_amount_shard)
-from ..wallet.intent import (AddressBook, Contact, Intent, IntentCompiler,
+from ..wallet.intent import (BASE_FEE_SHARD, AddressBook, Contact, Intent, IntentCompiler,
                              IntentError, apply_clarification, prsm_to_shard,
                              shard_to_prsm, simulate, fraud_flags)
 
@@ -477,10 +477,21 @@ class PrismService:
                    "digest_line": pa.record.explanation,
                    "intent": _intent_payload(it)}
             if executed:
-                out["human"] = ("Done — this ran immediately under your plan.")
+                # instant path moved real money — settle it honestly and
+                # report the ACTUAL state, not a generic "queued" guess.
+                txid_now = getattr(pa, "txid", None)
+                if txid_now is not None or pa.record.state == "instant_executed":
+                    out["txid"] = txid_now
+                    out["human"] = ("Done — this ran immediately under your "
+                                    "plan (comfort-threshold fast path).")
+                else:
+                    # risk-blocked at proposal time: nothing queued, nothing sent
+                    out["human"] = ("The fraud check stopped this before it "
+                                    "could queue. Nothing was sent.")
             else:
                 hrs = (pa.exec_not_before_unix - self.sim_clock) / 3600.0
                 out["executes_in_hours"] = round(hrs, 1)
+                out["state"] = "queued_under_veto_window"
                 out["human"] = (f"Queued quietly: {pa.record.explanation} It "
                                 f"runs in about {hrs:.0f} hours unless you "
                                 "stop it. You'll see it on your Pending page.")
@@ -548,6 +559,23 @@ class PrismService:
                 self.sim_clock += int(hours_ahead * 3600)
             ids = list(self.agent.pending)
             scores = {aid: self.agent.pending[aid].risk_score for aid in ids}
+            # Re-check risk LIVE at window close (§7.7 step 2): the proposal-time
+            # score is not trusted; re-run the wired gate on each due action.
+            if self.gate is not None:
+                from ..ai import simulator as _sim
+                snap = _sim.ChainSnapshot(
+                    [_sim.SnapshotOutput("agent:balance", 0, self.balance_shard)]
+                    if self.balance_shard > 0 else [])
+                for aid in ids:
+                    pa_live = self.agent.pending[aid]
+                    if self.sim_clock >= pa_live.exec_not_before_unix:
+                        try:
+                            rev = self.gate.review(pa_live.intent, snap,
+                                                   now_unix=self.sim_clock,
+                                                   contact_verified=True)
+                            scores[aid] = rev.risk.score
+                        except Exception:  # fail closed: unreviewable => block
+                            scores[aid] = 1.0
             # Pre-flight honesty: due actions the wallet can't fund are
             # reported up front (the runtime will still transition them to
             # executed_after_veto_window; we mirror the refusal explicitly).
@@ -568,6 +596,13 @@ class PrismService:
             due_intents = {aid: self.agent.pending[aid].intent
                            for aid in self.agent.pending
                            if self.sim_clock >= self.agent.pending[aid].exec_not_before_unix}
+            # Fail-closed funding gate BEFORE the state machine: an action the
+            # wallet cannot actually broadcast must never reach "executed" —
+            # its veto window simply stays open (it becomes due again once the
+            # user funds the wallet). No silent money-state divergence.
+            refused_ids_pre = {r["action_id"] for r in refused}
+            for aid in refused_ids_pre:
+                scores[aid] = 1.0   # forces blocked_by_policy at window close
             executed = self.agent.tick(now_unix=self.sim_clock,
                                        current_risk_scores=scores)
             # Real settlement for everything the runtime let through.
@@ -615,7 +650,8 @@ class PrismService:
                              f"{len(executed) - n_exec} blocked before running")
             if refused:
                 parts.append(f"{len(refused)} could NOT run — not enough "
-                             "balance (nothing was sent)")
+                             "balance (nothing was sent; it stays queued and "
+                             "will retry after you fund your wallet)")
             human = (". ".join(parts) + ". Every outcome is on your "
                      "Pending/History page.") if parts else \
                   "Nothing was due this tick — queued actions still have " \

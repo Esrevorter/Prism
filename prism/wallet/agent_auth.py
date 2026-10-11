@@ -46,10 +46,16 @@ CAPABILITIES = {
     "report_generate":      "produce local explainability reports (no signing)",
 }
 
-ACTION_TO_CAPABILITY = {          # which Intent action each verb may compile to
-    "transfer": ("transfer.self", "buy_prsm_fiat_drip"),
-    "open_channel": ("channel_topup",),
-    "stake": ("transfer.self",),
+# NOTE: this table is keyed by CAPABILITY (the lookup at check_proposal is
+# ACTION_TO_CAPABILITY.get(g.capability)). The inverse orientation was a
+# latent bug: with capability keys absent, EVERY agent proposal died on
+# "action ... not permitted" regardless of grant. Fail-closed semantics are
+# preserved: capabilities absent from this map allow no actions at all.
+ACTION_TO_CAPABILITY = {          # which Intent action each capability permits
+    "transfer.self":       ("transfer",),
+    "buy_prsm_fiat_drip":  ("transfer",),   # DCA buy compiles to a fiat-quoted transfer; amount-form rule below tightens it
+    "channel_topup":       ("open_channel",),
+    "report_generate":     (),              # never signs — no actions allowed
 }
 
 # Capability → the amount form it MUST carry (§8.4 allowlist closure,
