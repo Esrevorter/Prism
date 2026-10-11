@@ -136,37 +136,39 @@ class InstanceLock:
         """Return (acquired, live_url|None). If not acquired, probe the
         holder's health endpoint so we can reopen its UI instead of failing.
 
-        Cross-platform ordering matters:
-        1. Try to take the lock FIRST. On Windows msvcrt byte-range locks
-           are mandatory — reading while a holder has the range locked
-           raises PermissionError — so reads happen only on handles we
-           hold ourselves, or best-effort after a failed acquisition.
-        2. If we acquired but the payload still describes a HEALTHY daemon,
-           the previous holder died without releasing cleanly yet is
-           somehow reachable: hand back its URL and release our fresh
-           lock (caller reopens that UI instead of starting a duplicate).
-        3. If acquisition fails outright, best-effort-read + probe; then
-           poll briefly for either outcome (holder releases -> stale/clean
-           steal; holder's daemon comes up -> live URL)."""
+        Windows mandatory-lock protocol (msvcrt locks are per-byte-range
+        and enforced against OTHER processes' reads/writes):
+        1. open a+ WITHOUT truncating — an O_TRUNC-style open would wipe a
+           live holder's payload before we even learn it exists;
+        2. try the non-blocking lock. Acquired -> any existing payload is
+           stale by definition (a live holder always locks first), so we
+           truncate + take ownership;
+        3. not acquired -> best-effort read (usually blocked on Windows
+           while the holder locks [0, LOCK_SPAN); fine) then poll: either
+           the holder releases (crash/stale -> we grab it; the OS drops
+           locks with the process anyway) or its daemon answers /health
+           (-> live URL for the caller to reopen)."""
         fh = open(self.path, "a+")
         if self._try_lock(fh):
-            # We hold it now: safe to inspect any stale payload.
+            # We hold the range now: safe to inspect/clear any stale payload.
             try:
                 fh.seek(0)
-                stale = json.loads(fh.read() or "{}")
+                stale = json.loads((fh.read() or "").strip() or "{}")
             except ValueError:
                 stale = {}
             host, port = stale.get("host", "127.0.0.1"), stale.get("port")
             if port and _health_ok(host, int(port)):
+                # Extremely unlikely race: lock free yet something healthy
+                # squats on that port. Don't double-serve; hand back its URL.
                 self.info = stale
                 self._unlock(fh)
                 fh.close()
                 return False, f"http://{host}:{int(port)}/"
             fh.seek(0)
-            fh.truncate()
+            fh.truncate()                     # inside our locked range
             self.fh = fh
             return True, None
-        # Lock is held by someone else right now.
+        # Lock held elsewhere right now.
         info = self.info or self._read_info(self.path)
         host, port = info.get("host", "127.0.0.1"), info.get("port")
         if port and _health_ok(host, int(port)):
@@ -174,7 +176,7 @@ class InstanceLock:
             fh.close()
             return False, f"http://{host}:{int(port)}/"
         # Holder present but not answering (booting) or payload unreadable
-        # (Windows + mandatory lock during contention). Poll briefly.
+        # (Windows mandatory lock during contention). Poll briefly.
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             fh.close()
@@ -200,10 +202,34 @@ class InstanceLock:
     def write_info(self, host: str, port: int, pid: int) -> None:
         assert self.fh is not None
         self.info = {"host": host, "port": port, "pid": pid}
-        self.fh.seek(0)
-        self.fh.truncate()
-        json.dump(self.info, self.fh)
-        self.fh.flush()
+        payload = json.dumps(self.info)
+        if os.name == "nt":
+            # Write THROUGH our existing msvcrt lock — bytes [0, LOCK_SPAN)
+            # are ours, so in-range writes from this handle succeed while
+            # rivals' out-of-handle access is denied. Pad the payload to
+            # LOCK_SPAN so rival a+ handles (which position at EOF = end
+            # of file) collide with the locked range when they seek(0)+
+            # lock, and cannot silently rewrite past a short guarded span.
+            # Re-lock after flushing to extend the guard over the new
+            # bytes (the acquisition-time lock was placed on an empty
+            # file; buffered data only hits disk at flush/fsync).
+            buf = payload.encode("utf-8")
+            buf = buf + b" " * (self.LOCK_SPAN - len(buf)) \
+                if len(buf) < self.LOCK_SPAN else buf[:self.LOCK_SPAN]
+            self.fh.seek(0)
+            self.fh.write(buf.decode("ascii"))
+            self.fh.flush()
+            os.fsync(self.fh.fileno())
+            try:                              # refresh/extend the guard
+                msvcrt.locking(self.fh.fileno(), msvcrt.LK_LOCK,
+                               self.LOCK_SPAN)
+            except OSError:                   # already fully covered
+                pass
+        else:
+            self.fh.seek(0)
+            self.fh.truncate()
+            self.fh.write(payload)
+            self.fh.flush()
 
     def release(self) -> None:
         if self.fh is not None:
