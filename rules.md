@@ -1,5 +1,12 @@
 # Tool Calling and Execution Rules
 
+> **Binding companion files (re-read before every substantive task):** `qwen.md`
+> (anti-burst pacing — one tool call per turn, sequential only, ≥10 s inter-request),
+> `ethics.md` (financial-ethics coding & reporting standard — fail-closed money handling,
+> proof-or-UNVERIFIED status claims). rules.md §4 and ethics.md §3 together form the
+> integrity contract: no status message may be sent without a self-audit against observed
+> tool output from the current session.
+
 ## 1. Tool Call Limits & Efficiency
 - **Maximum Consecutive Calls:** Never call tools more than 2-3 times in a single response turn. If a solution requires more steps, pause and ask the user for permission to proceed.
 - **Batching:** If you need to perform multiple actions (e.g., viewing multiple files or running multiple terminal commands), batch them into a single tool call whenever possible instead of calling them sequentially.
