@@ -497,6 +497,13 @@ def parse_utterance(text: str) -> ParseResult:
     resid = re.sub(r"\b(to|for the|please|now|pls)\b", " ", resid, flags=re.IGNORECASE)
     resid = re.sub(r"\b(send|pay|stake|lock|keep it private|privately)\b", " ",
                    resid, flags=re.IGNORECASE)
+    # open_channel phrasing: 'open (a) channel with' are grammar words, not
+    # recipients. Without this strip, the first token of the remainder is
+    # 'open' and the real recipient ('alex') silently vanishes into a chip
+    # even though it was stated unambiguously (§7.3 single-chip UX).
+    resid = re.sub(r"\bopen\s+(?:an?\s+)?channel(?:\s+with)?\b", " ",
+                   resid, flags=re.IGNORECASE)
+    resid = re.sub(r"\bwith\b", " ", resid, flags=re.IGNORECASE)
     resid = re.sub(r"[,.!?;]+", " ", resid)
     resid = re.sub(r"\s+", " ", resid).strip()
     if resid:
