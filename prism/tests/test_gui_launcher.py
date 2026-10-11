@@ -23,10 +23,13 @@ from prism.rpc.service import PrismService
 # ---------- helpers -----------------------------------------------------------
 
 def _start_server(svc: PrismService, host="127.0.0.1", port=0):
-    httpd = BoundHTTPServer(host, port or 1, svc)   # port arg required
     if port == 0:
-        httpd.server_close()
-        port = L.find_free_port()
+        # Bind an ephemeral OS-assigned port directly (port 0). The previous
+        # probe-then-rebind dance failed on CI sandboxes where unprivileged
+        # processes cannot bind ports < 1024 (EACCES on port 1).
+        httpd = BoundHTTPServer(host, 0, svc)
+        port = httpd.server_address[1]
+    else:
         httpd = BoundHTTPServer(host, port, svc)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
@@ -46,6 +49,11 @@ class TestDataDir:
     def test_make_data_dir_private_and_marked(self, tmp_path):
         d = L.make_data_dir(str(tmp_path / "w"))
         assert os.path.isfile(os.path.join(d, L.MARKER_NAME))
+        if os.name == "nt":
+            # Windows has no POSIX permission bits: st_mode always reports
+            # 0o777 for directories regardless of chmod. Privacy there comes
+            # from NTFS creator-owner ACLs (inherited from the user profile).
+            pytest.skip("POSIX mode bits do not exist on Windows")
         assert os.stat(d).st_mode & 0o777 == 0o700      # private to the user
 
     def test_marker_makes_dir_reopenable(self, wallet_dir):

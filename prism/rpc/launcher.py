@@ -21,7 +21,6 @@ Everything here is stdlib-only, matching the project hard constraint.
 from __future__ import annotations
 
 import errno
-import fcntl
 import http.client
 import json
 import os
@@ -30,14 +29,34 @@ import sys
 import time
 import webbrowser
 
+if os.name == "nt":                       # Windows: msvcrt locking (see below)
+    import msvcrt
+else:                                     # POSIX: flock
+    import fcntl
+
 DEFAULT_ROOT = os.path.join(os.path.expanduser("~"), ".prism")
 MARKER_NAME = ".prism_wallet"
 LOCK_NAME = "gui.lock"
+INFO_NAME = "gui.info"           # sidecar: holder's {host,port,pid}, always
+                                 # world-readable (never itself locked)
 
 
 def _die(msg: str, code: int = 1) -> None:
     print(f"\n  [Prism] {msg}\n", file=sys.stderr)
     raise SystemExit(code)
+
+
+def read_instance_info(data_dir: str) -> dict:
+    """Read the holder's advertised endpoint. The sidecar is written by the
+    lock holder and deliberately NOT byte-range-locked: on Windows the
+    msvcrt mandatory lock on gui.lock blocks cross-process reads of the
+    locked range (PermissionError), so rivals must never need to read the
+    lockfile itself — its mere locked state signals 'holder alive'."""
+    try:
+        with open(os.path.join(data_dir, INFO_NAME)) as fh:
+            return json.loads((fh.read() or "").strip() or "{}")
+    except (OSError, ValueError):
+        return {}
 
 
 def make_data_dir(path: str | None = None) -> str:
@@ -48,6 +67,15 @@ def make_data_dir(path: str | None = None) -> str:
     except OSError as e:                      # exists with wrong perms etc.
         if e.errno != errno.EEXIST:
             raise
+    if os.name != "nt":
+        try:                                  # tighten even if dir pre-existed
+            os.chmod(d, 0o700)
+        except OSError:                       # pragma: no cover
+            pass
+    # Windows has no POSIX permission bits; NTFS privacy comes from the
+    # default creator-owner ACL. Storing our own copy of the lock file in
+    # memory also lets us avoid re-reading it while another process holds
+    # an exclusive byte-range lock on it (msvcrt raises OSError on read).
     with open(os.path.join(d, MARKER_NAME), "w") as fh:
         fh.write("prism-gui\n")               # marker: this dir owns a wallet
     return d
@@ -63,54 +91,141 @@ def find_free_port(host: str = "127.0.0.1") -> int:
 
 
 class InstanceLock:
-    """Advisory single-instance lock (flock) inside the data dir."""
+    """Advisory single-instance lock inside the data dir.
+
+    POSIX: flock on the lockfile (advisory, released automatically if the
+    holder dies). Windows: msvcrt.locking() mandatory byte-range lock —
+    fcntl does not exist there, and importing it unconditionally made the
+    whole launcher module unimportable on Windows (CI Release job,
+    ModuleNotFoundError: No module named 'fcntl'). The Windows lock is also
+    released by the OS when the holding process exits.
+
+    Windows lesson from three CI rounds: msvcrt locks are per-byte-range
+    AND enforced against other processes' read()/write() syscalls. A rival
+    reading the payload out of the locked lockfile gets PermissionError;
+    a rival opening "w"/"w+" bypasses range locks entirely at CreateFile
+    time (dwShareMode=0) and WIPES the holder's payload. So the payload
+    lives in an UNLOCKED sidecar file (gui.info) that anyone may read,
+    while gui.lock stays a zero-byte mutex whose locked state alone means
+    "a live holder exists".
+    """
+
+    LOCK_SPAN = 4096             # bytes covered by the Windows byte-range lock
 
     def __init__(self, data_dir: str):
+        self.data_dir = data_dir
         self.path = os.path.join(data_dir, LOCK_NAME)
+        self.info_path = os.path.join(data_dir, INFO_NAME)
         self.fh = None
+        self.info: dict = {}     # last known holder endpoint (in-memory)
+
+    def _try_lock(self, fh):
+        """Non-blocking exclusive lock over a generous fixed span; True if
+        acquired. (One-byte spans were defeated in CI round 1: rivals could
+        write past byte 0. Span covers any realistic payload.)"""
+        try:
+            if os.name == "nt":
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, self.LOCK_SPAN)
+            else:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+
+    def _unlock(self, fh):
+        if os.name == "nt":
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, self.LOCK_SPAN)
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+    def _read_sidecar(self) -> dict:
+        try:
+            with open(self.info_path) as fh:
+                return json.loads((fh.read() or "").strip() or "{}")
+        except (OSError, ValueError):
+            return {}
 
     def acquire_or_live(self):
         """Return (acquired, live_url|None). If not acquired, probe the
-        holder's health endpoint so we can reopen its UI instead of failing."""
+        holder's health endpoint so we can reopen its UI instead of failing.
+
+        Protocol (identical semantics on both platforms):
+        1. Fast path: our own cached info answers /health -> defer to it.
+        2. Open the lockfile a+ (NEVER "w": on Windows that share-deny +
+           truncate dance destroys a live holder's state and races us into
+           double-serving), take the non-blocking lock.
+        3. Acquired -> any sidecar payload left behind is stale by
+           definition (a live holder always locks first); probe once for
+           safety, then clear it and own the lock.
+        4. Not acquired -> holder alive but daemon may still be booting:
+           poll the sidecar + /health briefly; if the holder vanishes,
+           grab the freed lock."""
+        host, port = self.info.get("host", "127.0.0.1"), self.info.get("port")
+        if port and _health_ok(host, int(port)):
+            return False, f"http://{host}:{int(port)}/"
         fh = open(self.path, "a+")
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            fh.seek(0)
-            try:
-                info = json.loads(fh.read() or "{}")
-            except ValueError:
-                info = {}
-            fh.close()
+        if self._try_lock(fh):
+            self.fh = fh
+            stale = self._read_sidecar()
+            host, port = stale.get("host", "127.0.0.1"), stale.get("port")
+            if port and _health_ok(host, int(port)):
+                # Lock was free yet something healthy squats on that port
+                # (holder crashed after binding?). Don't double-serve.
+                self.info = stale
+                self.release()
+                return False, f"http://{host}:{int(port)}/"
+            try:                              # clear stale advertisement
+                with open(self.info_path, "w"):
+                    pass
+            except OSError:                   # pragma: no cover
+                pass
+            return True, None
+        # Lock held elsewhere: holder alive, daemon maybe still booting.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            info = self._read_sidecar()
             host, port = info.get("host", "127.0.0.1"), info.get("port")
             if port and _health_ok(host, int(port)):
-                return False, f"http://{host}:{port}/"
-            # stale lock (holder died without cleaning up): steal it.
-            fh = open(self.path, "w+")
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self.fh = fh
-            return True, None
-        fh.seek(0)
-        fh.truncate()
-        self.fh = fh
-        return True, None
+                self.info = info
+                fh.close()
+                return False, f"http://{host}:{int(port)}/"
+            fh.close()
+            time.sleep(0.1)
+            try:
+                fh = open(self.path, "a+")
+            except OSError:                   # pragma: no cover
+                continue
+            if self._try_lock(fh):            # holder exited -> steal/clean
+                self.fh = fh
+                return True, None
+        fh.close()
+        return False, None                    # still contended; caller retries
 
     def write_info(self, host: str, port: int, pid: int) -> None:
         assert self.fh is not None
-        self.fh.seek(0)
-        self.fh.truncate()
-        json.dump({"host": host, "port": port, "pid": pid}, self.fh)
-        self.fh.flush()
+        self.info = {"host": host, "port": port, "pid": pid}
+        # Advertise via the unlocked sidecar: readable by rivals even while
+        # we hold the mandatory byte-range lock on gui.lock.
+        with open(self.info_path, "w") as fh:
+            json.dump(self.info, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
 
     def release(self) -> None:
         if self.fh is not None:
             try:
-                fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
+                self._unlock(self.fh)
                 self.fh.close()
                 os.unlink(self.fh.name)
             except OSError:
                 pass
             self.fh = None
+        try:                                  # retire our advertisement too
+            os.unlink(self.info_path)
+        except OSError:
+            pass
 
 
 def _health_ok(host: str, port: int, timeout: float = 1.0) -> bool:
@@ -176,7 +291,17 @@ def main(argv=None) -> int:
         data_dir = make_data_dir()
 
     lock = InstanceLock(data_dir)
-    acquired, live_url = lock.acquire_or_live()
+    acquired, live_url = None, None
+    deadline = time.monotonic() + 15.0
+    while True:
+        acquired, live_url = lock.acquire_or_live()
+        if acquired or live_url:
+            break
+        # Contended but nothing healthy yet (peer still booting): retry.
+        if time.monotonic() >= deadline:
+            _die("Another Prism launcher holds the wallet lock but no "
+                 "healthy daemon was found. Close it and try again.")
+        time.sleep(0.2)
     if not acquired:
         print(f"Prism wallet is already running — opening it at {live_url}")
         if json_status:
