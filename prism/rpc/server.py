@@ -57,6 +57,16 @@ def _dispatch(method: str, params: dict):
         "mpc.ceremony_status":   lambda p: SERVICE.ceremony_status(),
         "mpc.ceremony_reset":    lambda p: SERVICE.ceremony_reset(),
         "mpc.sign_preview":      lambda p: SERVICE.sign_preview(str(p["intent_id"])),
+        "recovery.status":       lambda p: SERVICE.recovery_status(),
+        "recovery.attach_social": lambda p: SERVICE.recovery_attach_social(),
+        "recovery.initiate":     lambda p: SERVICE.recovery_initiate(
+                                           [int(i) for i in p.get("collectors", [])],
+                                           [int(i) for i in p.get("stale_legs", [])]),
+        "recovery.cancel":       lambda p: SERVICE.recovery_cancel(
+                                           int(p["share_index"])),
+        "recovery.finalize":     lambda p: SERVICE.recovery_finalize(),
+        "recovery.advance_window": lambda p: SERVICE.recovery_advance_window(
+                                           float(p.get("hours", 73.0))),
         "agent.grant_create":    lambda p: SERVICE.grant_create(
                                            days=int(p.get("days", 30)),
                                            per_action_prsm=float(p.get(
