@@ -57,6 +57,31 @@ def _dispatch(method: str, params: dict):
         "mpc.ceremony_status":   lambda p: SERVICE.ceremony_status(),
         "mpc.ceremony_reset":    lambda p: SERVICE.ceremony_reset(),
         "mpc.sign_preview":      lambda p: SERVICE.sign_preview(str(p["intent_id"])),
+        "agent.grant_create":    lambda p: SERVICE.grant_create(
+                                           days=int(p.get("days", 30)),
+                                           per_action_prsm=float(p.get(
+                                               "per_action_prsm", 25.0)),
+                                           monthly_prsm=float(p.get(
+                                               "monthly_prsm", 400.0)),
+                                           price_ceiling_usd=(
+                                               float(p["price_ceiling_usd"])
+                                               if p.get("price_ceiling_usd")
+                                               is not None else None),
+                                           veto_hours=float(p.get(
+                                               "veto_hours", 24.0))),
+        "agent.propose":         lambda p: SERVICE.agent_propose(
+                                           str(p["utterance"]),
+                                           p.get("grant_id")),
+        "agent.pending":         lambda p: SERVICE.agent_pending(),
+        "agent.veto":            lambda p: SERVICE.agent_veto(
+                                           str(p["action_id"])),
+        "agent.revoke":          lambda p: SERVICE.agent_revoke(
+                                           p.get("grant_id")),
+        "agent.tick":            lambda p: SERVICE.agent_tick(
+                                           hours_ahead=float(
+                                               p.get("hours_ahead", 0.0))),
+        "agent.report":          lambda p: SERVICE.agent_report(
+                                           p.get("grant_id")),
     }
     fn = table.get(method)
     if fn is None:
