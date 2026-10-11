@@ -80,16 +80,19 @@ def _ensure_prism_importable() -> None:
 
 
 def _sibling(name: str):
-    """Import a sibling subpackage module by absolute name, layout-agnostic.
+    """Import a *package-level* sibling subpackage module by absolute name,
+    layout-agnostic (e.g. ``_sibling('chain.emission')`` -> prism.chain.emission).
 
-    Used by the lazy in-function imports below: relative ``..x`` form only
-    works when this module is ``prism.rpc.service``; under the flat layout
-    (``rpc.service``, e.g. inside the frozen prism.exe CLI bundle) it must
-    go through ``prism.x`` with the package root pushed onto sys.path.
+    NOTE: these targets are siblings of the top-level ``prism`` package's
+    subpackages (chain/, ai/, mpc/, wallet/), NOT siblings of this module
+    (rpc/) — so they must be resolved as ``prism.<name>``, never via a
+    relative import from ``prism.rpc`` (which would wrongly look for the
+    nonexistent ``prism.rpc.chain``).
+
+    Under the flat layout (``rpc.service``, e.g. inside the frozen prism.exe
+    CLI bundle) the same ``prism.<name>`` form works after pushing the
+    package root onto sys.path.
     """
-    if __package__ and __package__ != "rpc":
-        from importlib import import_module
-        return import_module("." + name, __package__)   # normal relative path
     _ensure_prism_importable()
     from importlib import import_module
     return import_module("prism." + name)
