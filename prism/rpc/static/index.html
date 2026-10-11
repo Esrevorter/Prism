@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism — Wallet</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body data-theme="light">
+<header class="topbar">
+  <div class="brand"><span class="prism-mark" aria-hidden="true"></span><strong>Prism</strong></div>
+  <div class="status" id="net-status" role="status" aria-live="polite">connecting…</div>
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">◐</button>
+</header>
+
+<main>
+  <!-- Balance hero: the first thing a nervous first-time user should see -->
+  <section class="card balance-card" aria-labelledby="bal-h">
+    <h2 id="bal-h">Your balance</h2>
+    <p class="big-number" id="balance">—</p>
+    <p class="muted" id="balance-note">Waiting for your node…</p>
+    <div class="row">
+      <button class="btn secondary" id="faucet-btn" title="Devnet only: mine 5 blocks and credit the wallet">
+        Get test PRSM (mine 5 blocks)
+      </button>
+      <button class="btn secondary" id="ceremony-btn">Set up device keys</button>
+    </div>
+    <p class="muted" id="ceremony-status" aria-live="polite"></p>
+  </section>
+
+  <!-- NL intent bar: the key differentiator. Plain words in, plain review out. -->
+  <section class="card" aria-labelledby="nl-h">
+    <h2 id="nl-h">What would you like to do?</h2>
+    <form id="intent-form" autocomplete="off">
+      <input id="utterance" type="text" placeholder="e.g. send 2 PRSM to Alex"
+             aria-label="Describe your payment in plain words" autofocus>
+      <button class="btn primary" type="submit">Review</button>
+    </form>
+    <div id="chips" class="chips" hidden></div>
+  </section>
+
+  <!-- Review / simulation card: server-provided human language only -->
+  <section class="card" id="review" hidden aria-labelledby="rev-h">
+    <h2 id="rev-h">Here's what will happen</h2>
+    <div id="fraud-banner" class="risk-banner" role="alert" hidden></div>
+    <div id="review-body"></div>
+    <div class="row">
+      <button class="btn danger" id="cancel-btn">Cancel</button>
+      <button class="btn secondary" id="sleep-btn" hidden>Sleep on it — I'll come back</button>
+      <button class="btn primary" id="confirm-btn">Looks right — confirm</button>
+    </div>
+  </section>
+
+  <!-- Device keys (MPC ceremony): share-handling UX, plain words only -->
+  <section class="card" id="devices-card" hidden aria-labelledby="dev-h">
+    <h2 id="dev-h">Your device keys</h2>
+    <p class="muted" id="devices-human" aria-live="polite"></p>
+    <ul id="devices" class="device-list"></ul>
+    <details class="share-help">
+      <summary>Why can't I see my key shares?</summary>
+      <p id="share-help-body" class="muted"></p>
+    </details>
+    <div class="row">
+      <button class="btn secondary" id="ceremony-redo-btn">Start over (reshare)</button>
+    </div>
+  </section>
+
+  <!-- Recovery (Phase 3 GA): social recovery status, veto, and restore flow -->
+  <section class="card" id="recovery-card" hidden aria-labelledby="rec-h">
+    <h2 id="rec-h">Recovery &amp; safety</h2>
+    <p class="muted" id="recovery-human" aria-live="polite"></p>
+    <ul id="recovery-facts" class="device-list"></ul>
+    <div class="row" id="recovery-actions"></div>
+  </section>
+
+  <!-- Plans (agent runtime): pending digest, one-tap veto/revoke, plain words only -->
+  <section class="card" id="plans-card" hidden aria-labelledby="plans-h">
+    <h2 id="plans-h">Your standing plans</h2>
+    <p class="muted" id="plans-human" aria-live="polite"></p>
+    <ul id="plans-list" class="plan-list"></ul>
+    <div id="pending-digests"></div>
+    <form id="plan-form" class="row">
+      <input id="plan-utterance" placeholder="e.g. buy $50 of PRSM every week"
+             aria-label="Plan in plain words" required>
+      <button class="btn primary" type="submit">Create plan</button>
+    </form>
+    <details class="plan-help">
+      <summary>How do these plans work?</summary>
+      <p class="muted">A plan is something you allowed once, like "buy a little PRSM each week". Before anything runs, you get 24 hours to change your mind — nothing happens silently. Stopping a plan cancels everything waiting under it, and history keeps a record so nothing disappears.</p>
+    </details>
+  </section>
+
+  <!-- Contacts -->
+  <section class="card" aria-labelledby="ct-h">
+    <h2 id="ct-h">People you can pay</h2>
+    <ul id="contacts" class="contacts"></ul>
+    <form id="contact-form" class="row">
+      <input id="ct-name" placeholder="Name" aria-label="Contact name" required>
+      <input id="ct-addr" placeholder="prsm1…" aria-label="Contact address" required>
+      <button class="btn secondary" type="submit">Add</button>
+    </form>
+  </section>
+
+  <!-- Node panel (collapsible; never front-and-center for non-technical users) -->
+  <details class="node-panel">
+    <summary>Node details (advanced)</summary>
+    <pre id="chain-info"></pre>
+  </details>
+</main>
+
+<footer class="muted">Local devnet · Refraction params · virtual block cadence until wall-clock deployment</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

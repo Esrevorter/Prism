@@ -1,7 +1,4 @@
-__pycache__/
+build/
+dist/
 *.pyc
-*.pyo
-.env
-
-# run logs (transient benchmark output)
-*.log
+__pycache__/

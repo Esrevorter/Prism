@@ -21,53 +21,63 @@ if __package__ in (None, ""):        # allow `python prism/rpc/server.py`
 else:
     from .service import PrismService
 
-GUI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "gui")
+if getattr(sys, "frozen", False):
+    # PyInstaller onefile: the GUI static bundle is unpacked into
+    # sys._MEIPASS/prism/rpc/static by packaging/prism_gui.spec (datas entry).
+    _CANDIDATES = [os.path.join(sys._MEIPASS, "prism", "rpc", "static"),
+                   os.path.join(sys._MEIPASS, "prism", "gui")]
+else:
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _CANDIDATES = [os.path.join(_here, "static"),               # packaged/installed
+                   os.path.join(os.path.dirname(_here), "gui")]  # source tree
+GUI_DIR = next((p for p in _CANDIDATES if os.path.isfile(os.path.join(p, "index.html"))),
+               _CANDIDATES[-1])
 
 SERVICE = PrismService()             # one process-wide devnet instance
 
-# method -> (callable(params-dict) or attr name on SERVICE)
-def _dispatch(method: str, params: dict):
+# method -> (callable(params-dict) or attr name on the PrismService instance)
+def _dispatch(method: str, params: dict, svc: "PrismService | None" = None):
+    S = svc if svc is not None else SERVICE
     if method == "health.ping":
         return {"status": "ok", "version": "0.1.0",
-                "network": SERVICE.params.name,
-                "tip_height": SERVICE.chain.tip.header.height}
+                "network": S.params.name,
+                "tip_height": S.chain.tip.header.height}
     table = {
-        "chain.info":            lambda p: SERVICE.chain_info(),
-        "chain.mine":            lambda p: SERVICE.mine(int(p.get("count", 1))),
-        "chain.blocks":          lambda p: SERVICE.chain_blocks(
+        "chain.info":            lambda p: S.chain_info(),
+        "chain.mine":            lambda p: S.mine(int(p.get("count", 1))),
+        "chain.blocks":          lambda p: S.chain_blocks(
                                            int(p.get("limit", 10))),
-        "wallet.balance":        lambda p: SERVICE.balance(),
-        "contacts.list":         lambda p: {"contacts": SERVICE.contacts_list()},
-        "contacts.add":          lambda p: SERVICE.contact_add(
+        "wallet.balance":        lambda p: S.balance(),
+        "contacts.list":         lambda p: {"contacts": S.contacts_list()},
+        "contacts.add":          lambda p: S.contact_add(
                                            str(p["name"]), str(p["address"])),
-        "intent.compile":        lambda p: SERVICE.intent_compile(str(p["utterance"])),
-        "intent.answer":         lambda p: SERVICE.intent_answer(
+        "intent.compile":        lambda p: S.intent_compile(str(p["utterance"])),
+        "intent.answer":         lambda p: S.intent_answer(
                                            str(p["intent_id"]), str(p["answer"])),
-        "intent.simulate":       lambda p: SERVICE.intent_simulate(str(p["intent_id"])),
-        "intent.review":         lambda p: SERVICE.intent_review(
+        "intent.simulate":       lambda p: S.intent_simulate(str(p["intent_id"])),
+        "intent.review":         lambda p: S.intent_review(
                                            str(p["intent_id"]),
                                            acknowledged_risk=bool(
                                                p.get("acknowledged_risk"))),
-        "intent.confirm":        lambda p: SERVICE.intent_confirm(
+        "intent.confirm":        lambda p: S.intent_confirm(
                                            str(p["intent_id"]),
                                            acknowledged_risk=bool(
                                                p.get("acknowledged_risk"))),
-        "mpc.ceremony_start":    lambda p: SERVICE.ceremony_start(),
-        "mpc.ceremony_status":   lambda p: SERVICE.ceremony_status(),
-        "mpc.ceremony_reset":    lambda p: SERVICE.ceremony_reset(),
-        "mpc.sign_preview":      lambda p: SERVICE.sign_preview(str(p["intent_id"])),
-        "recovery.status":       lambda p: SERVICE.recovery_status(),
-        "recovery.attach_social": lambda p: SERVICE.recovery_attach_social(),
-        "recovery.initiate":     lambda p: SERVICE.recovery_initiate(
+        "mpc.ceremony_start":    lambda p: S.ceremony_start(),
+        "mpc.ceremony_status":   lambda p: S.ceremony_status(),
+        "mpc.ceremony_reset":    lambda p: S.ceremony_reset(),
+        "mpc.sign_preview":      lambda p: S.sign_preview(str(p["intent_id"])),
+        "recovery.status":       lambda p: S.recovery_status(),
+        "recovery.attach_social": lambda p: S.recovery_attach_social(),
+        "recovery.initiate":     lambda p: S.recovery_initiate(
                                            [int(i) for i in p.get("collectors", [])],
                                            [int(i) for i in p.get("stale_legs", [])]),
-        "recovery.cancel":       lambda p: SERVICE.recovery_cancel(
+        "recovery.cancel":       lambda p: S.recovery_cancel(
                                            int(p["share_index"])),
-        "recovery.finalize":     lambda p: SERVICE.recovery_finalize(),
-        "recovery.advance_window": lambda p: SERVICE.recovery_advance_window(
+        "recovery.finalize":     lambda p: S.recovery_finalize(),
+        "recovery.advance_window": lambda p: S.recovery_advance_window(
                                            float(p.get("hours", 73.0))),
-        "agent.grant_create":    lambda p: SERVICE.grant_create(
+        "agent.grant_create":    lambda p: S.grant_create(
                                            days=int(p.get("days", 30)),
                                            per_action_prsm=float(p.get(
                                                "per_action_prsm", 25.0)),
@@ -83,18 +93,18 @@ def _dispatch(method: str, params: dict):
                                                is not None else None),
                                            veto_hours=float(p.get(
                                                "veto_hours", 24.0))),
-        "agent.propose":         lambda p: SERVICE.agent_propose(
+        "agent.propose":         lambda p: S.agent_propose(
                                            str(p["utterance"]),
                                            p.get("grant_id")),
-        "agent.pending":         lambda p: SERVICE.agent_pending(),
-        "agent.veto":            lambda p: SERVICE.agent_veto(
+        "agent.pending":         lambda p: S.agent_pending(),
+        "agent.veto":            lambda p: S.agent_veto(
                                            str(p["action_id"])),
-        "agent.revoke":          lambda p: SERVICE.agent_revoke(
+        "agent.revoke":          lambda p: S.agent_revoke(
                                            p.get("grant_id")),
-        "agent.tick":            lambda p: SERVICE.agent_tick(
+        "agent.tick":            lambda p: S.agent_tick(
                                            hours_ahead=float(
                                                p.get("hours_ahead", 0.0))),
-        "agent.report":          lambda p: SERVICE.agent_report(
+        "agent.report":          lambda p: S.agent_report(
                                            p.get("grant_id")),
     }
     fn = table.get(method)
@@ -105,6 +115,12 @@ def _dispatch(method: str, params: dict):
 
 class RPCRequestHandler(BaseHTTPRequestHandler):
     server_version = "PrismRPC/0.1"
+
+    # Per-server service injected by ThreadingHTTPServer subclasses; falls
+    # back to the module-level singleton for the classic `prism-rpc` path.
+    @property
+    def service(self) -> PrismService:
+        return getattr(self.server, "service", SERVICE)
 
     # ---- plumbing ----
     def _send(self, code: int, body: bytes, ctype: str):
@@ -158,7 +174,7 @@ class RPCRequestHandler(BaseHTTPRequestHandler):
             params = req.get("params") or {}
             if not isinstance(params, dict):
                 raise ValueError("params must be an object")
-            result = _dispatch(method, params)
+            result = _dispatch(method, params, svc=self.service)
             resp = {"jsonrpc": "2.0", "result": result, "id": rid}
         except LookupError as e:
             resp = {"jsonrpc": "2.0", "id": locals().get("rid"),
@@ -172,10 +188,47 @@ class RPCRequestHandler(BaseHTTPRequestHandler):
         self._send(200, json.dumps(resp).encode(), "application/json")
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765):
+def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False):
     httpd = ThreadingHTTPServer((host, port), RPCRequestHandler)
-    print(f"Prism RPC devnet listening on http://{host}:{port} "
+    url = f"http://{host}:{port}/"
+    print(f"Prism RPC devnet listening on {url} "
           f"(network={SERVICE.params.name}, tip={SERVICE.chain.tip.header.height})")
+    if open_browser:
+        # Standalone GUI launch: one command boots daemon + wallet UI.
+        import webbrowser
+        webbrowser.open(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+
+
+class BoundHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer carrying its own PrismService instance so the
+    `prism-gui` launcher can bind a fresh per-user wallet without touching
+    the module-level singleton used by the classic `prism-rpc` path."""
+
+    def __init__(self, host: str, port: int, service: "PrismService"):
+        super().__init__((host, port), RPCRequestHandler)
+        self.service = service
+
+
+def serve_with_callback(host: str = "127.0.0.1", port: int = 8765,
+                        on_ready=None, service: "PrismService | None" = None):
+    """Programmatic serve (used by the zero-argument `prism-gui` launcher).
+
+    `on_ready()` runs in a short-lived thread immediately after the socket is
+    bound — the listener is already accepting before the callback fires, so
+    anything the callback does (health probe + browser open) never races the
+    server. Returns only after serve_forever() exits (Ctrl-C / KeyboardInterrupt).
+    """
+    httpd = BoundHTTPServer(host, port, service if service is not None
+                            else SERVICE)
+    if on_ready is not None:
+        import threading
+        threading.Thread(target=on_ready, daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -185,11 +238,18 @@ def serve(host: str = "127.0.0.1", port: int = 8765):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="prism-rpc")
+    ap = argparse.ArgumentParser(
+        prog="prism-rpc",
+        description="Prism GUI wallet daemon: serves the JSON-RPC API and the "
+                    "zero-build wallet front end on loopback. This single "
+                    "command is the standalone desktop entry point.")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--open", dest="open_browser", action="store_true",
+                    help="open the wallet UI in the default browser once the "
+                         "daemon is listening (standalone GUI mode)")
     ns = ap.parse_args(argv)
-    serve(ns.host, ns.port)
+    serve(ns.host, ns.port, open_browser=ns.open_browser)
 
 
 if __name__ == "__main__":

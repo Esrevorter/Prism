@@ -180,7 +180,19 @@ class Node:
         from .node import _coinbase_commitment, _header_pre_nonce
         with self.lock:
             prev = self.state.tip
-            ts = max(int(time.time()), prev.header.timestamp + 1)
+            # Timestamp derivation mirrors the RPC devnet faucet
+            # (rpc/service.py mine()): clamp to chain-tip cadence growth
+            # instead of raw wall clock. Real time can jump ahead of the
+            # parent by more than the consensus future-tolerance bound
+            # (e.g. when mining rounds are skipped), which would make every
+            # mined block fail validate_header_basic ("timestamp too far in
+            # future") and stall convergence. Wall clock only serves as a
+            # lower bound once it stays within tolerance of the tip.
+            cadence = int(round(self.block_time_s)) or 1
+            ts = min(int(time.time()),
+                     prev.header.timestamp + cadence * 3)
+            if ts <= prev.header.timestamp:
+                ts = prev.header.timestamp + 1
             cb = _coinbase_commitment(prev.header.height + 1, self.params)
             base = make_header_template(prev, self.params, ts, cb)
             pre = _header_pre_nonce(base, base.merkle_root)
