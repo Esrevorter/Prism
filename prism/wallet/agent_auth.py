@@ -324,14 +324,25 @@ class AgentActionLog:
 
     def transition(self, action_id: str, new_state: str, explanation: str,
                    *, now_unix: int) -> ActionRecord:
-        """State changes are NEW appended records (log stays append-only)."""
+        """State changes are NEW appended records (log stays append-only).
+
+        The new record REUSES `action_id`: it is the same logical action, and
+        callers key pending maps / settlement lookups by action id. A fresh
+        uuid per transition would make executed actions untraceable back to
+        their proposal (bug caught by agent_smoke: tick reported
+        executed_after_veto_window under a brand-new id, so the RPC layer's
+        due-intents lookup missed and no money ever settled)."""
         src = next((r for r in self.records if r.action_id == action_id), None)
         if src is None:
             raise KeyError(action_id)
-        return self.append(grant_id=src.grant_id, state=new_state,
+        rec = ActionRecord(grant_id=src.grant_id, state=new_state,
                            explanation=explanation,
                            proposed_intent=src.proposed_intent,
-                           now_unix=now_unix)
+                           action_id=action_id, created_at_unix=now_unix,
+                           hashchain_prev=(self.records[-1].payload_digest()
+                                           if self.records else self.GENESIS))
+        self.records.append(rec)
+        return rec
 
 
 # ---------------------------------------------------------------------------

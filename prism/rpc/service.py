@@ -124,7 +124,13 @@ class PrismService:
         out = []
         with self._lock:
             for _ in range(count):
-                self.sim_clock += self.cadence_s
+                # devnet faucet mining follows chain-tip cadence, NOT the
+                # agent sim clock (which may jump hours ahead for veto-window
+                # testing); consensus rules reject timestamps too far in the
+                # future relative to the parent block.
+                self.sim_clock = max(self.sim_clock + 1,
+                                     self.chain.tip.header.timestamp
+                                     + self.cadence_s)
                 blk = mine_block(self.params, self.chain.tip,
                                  denylist_root=ZERO32,
                                  im_merkle_root=_empty_im_root(),
@@ -458,7 +464,8 @@ class PrismService:
                                        im_merkle_root=_empty_im_root(),
                                        difficulty=self.chain.difficulty,
                                        txids=[txid_i],
-                                       timestamp=self.sim_clock)
+                                       timestamp=self.chain.tip.header.timestamp
+                                                 + self.cadence_s)
                     self.chain.validate_and_apply(blk_i)
                     self.store[blk_i.header.hash()] = blk_i
                     self.height_index.append(blk_i.header.hash())
@@ -561,6 +568,11 @@ class PrismService:
             scores = {aid: self.agent.pending[aid].risk_score for aid in ids}
             # Re-check risk LIVE at window close (§7.7 step 2): the proposal-time
             # score is not trusted; re-run the wired gate on each due action.
+            # The live risk review uses the sim clock (which may be far ahead
+            # of chain tip timestamps), but the CHAIN settlement below must use
+            # a timestamp that satisfies consensus rules (parent.timestamp +
+            # tolerance). We keep two clocks: sim_clock for agent logic, and
+            # advance chain tip timestamp by cadence_s per settlement.
             if self.gate is not None:
                 from ..ai import simulator as _sim
                 snap = _sim.ChainSnapshot(
@@ -613,12 +625,33 @@ class PrismService:
                     continue
                 if r.action_id in refused_ids:
                     continue  # honest non-execution: stays out of the chain
-                it = due_intents.get(r.action_id)
+                pa_src = src_pending.get(r.action_id)
+                it = pa_src.intent if pa_src is not None else due_intents.get(r.action_id)
                 if it is None:
                     continue  # instant-path execs never sat in pending; no chain leg here
                 amt = _intent_amount_shard(it)
                 gid_fee = amt + BASE_FEE_SHARD
+                if gid_fee > self.balance_shard:
+                    # The runtime transitioned to executed but we cannot
+                    # actually broadcast — money-state divergence must be
+                    # LOUD, never silent (§ ethics.md fail-closed rule).
+                    # Re-open the action as a fresh pending entry so it can
+                    # settle once funded, and report the refusal explicitly.
+                    from ..wallet.agent_auth import PendingAction as _PA
+                    self.agent.pending[r.action_id] = _PA(
+                        r, it, self.sim_clock, scores.get(r.action_id, 0.0))
+                    refused.append({"action_id": r.action_id,
+                                    "reason": "wallet balance too small to "
+                                              "broadcast (re-queued)",
+                                    "needed_shard": gid_fee,
+                                    "have_shard": self.balance_shard})
+                    continue
                 self.balance_shard -= gid_fee
+                # Chain timestamps must satisfy consensus rules (monotonic,
+                # not too far in future relative to parent). The agent sim
+                # clock can jump ahead by hours; mine settlement blocks from
+                # tip_timestamp + cadence instead of the raw sim clock.
+                blk_ts = self.chain.tip.header.timestamp + self.cadence_s
                 txid = hashlib.sha3_256(json.dumps(
                     {"action": r.action_id, "to": r.explanation,
                      "amount_shard": amt, "height": self.chain.tip.header.height + 1},
@@ -626,7 +659,7 @@ class PrismService:
                 blk = mine_block(self.params, self.chain.tip,
                                  denylist_root=ZERO32, im_merkle_root=_empty_im_root(),
                                  difficulty=self.chain.difficulty,
-                                 txids=[txid], timestamp=self.sim_clock)
+                                 txids=[txid], timestamp=blk_ts)
                 self.chain.validate_and_apply(blk)
                 bh = blk.header.hash()
                 self.store[bh] = blk
