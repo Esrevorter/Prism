@@ -37,11 +37,26 @@ else:                                     # POSIX: flock
 DEFAULT_ROOT = os.path.join(os.path.expanduser("~"), ".prism")
 MARKER_NAME = ".prism_wallet"
 LOCK_NAME = "gui.lock"
+INFO_NAME = "gui.info"           # sidecar: holder's {host,port,pid}, always
+                                 # world-readable (never itself locked)
 
 
 def _die(msg: str, code: int = 1) -> None:
     print(f"\n  [Prism] {msg}\n", file=sys.stderr)
     raise SystemExit(code)
+
+
+def read_instance_info(data_dir: str) -> dict:
+    """Read the holder's advertised endpoint. The sidecar is written by the
+    lock holder and deliberately NOT byte-range-locked: on Windows the
+    msvcrt mandatory lock on gui.lock blocks cross-process reads of the
+    locked range (PermissionError), so rivals must never need to read the
+    lockfile itself — its mere locked state signals 'holder alive'."""
+    try:
+        with open(os.path.join(data_dir, INFO_NAME)) as fh:
+            return json.loads((fh.read() or "").strip() or "{}")
+    except (OSError, ValueError):
+        return {}
 
 
 def make_data_dir(path: str | None = None) -> str:
@@ -84,35 +99,30 @@ class InstanceLock:
     whole launcher module unimportable on Windows (CI Release job,
     ModuleNotFoundError: No module named 'fcntl'). The Windows lock is also
     released by the OS when the holding process exits.
+
+    Windows lesson from three CI rounds: msvcrt locks are per-byte-range
+    AND enforced against other processes' read()/write() syscalls. A rival
+    reading the payload out of the locked lockfile gets PermissionError;
+    a rival opening "w"/"w+" bypasses range locks entirely at CreateFile
+    time (dwShareMode=0) and WIPES the holder's payload. So the payload
+    lives in an UNLOCKED sidecar file (gui.info) that anyone may read,
+    while gui.lock stays a zero-byte mutex whose locked state alone means
+    "a live holder exists".
     """
 
+    LOCK_SPAN = 4096             # bytes covered by the Windows byte-range lock
+
     def __init__(self, data_dir: str):
+        self.data_dir = data_dir
         self.path = os.path.join(data_dir, LOCK_NAME)
+        self.info_path = os.path.join(data_dir, INFO_NAME)
         self.fh = None
-        self.info: dict = {}     # in-memory mirror of the lockfile payload
-
-    @staticmethod
-    def _read_info(path: str) -> dict:
-        """Best-effort read of a (possibly locked) lockfile.
-
-        On Windows, msvcrt byte-range locks make reads by other processes
-        raise OSError — so we try/except and fall back to {}. On POSIX,
-        flock is advisory and the read succeeds."""
-        try:
-            with open(path) as fh:
-                return json.loads(fh.read() or "{}")
-        except (OSError, ValueError):
-            return {}
+        self.info: dict = {}     # last known holder endpoint (in-memory)
 
     def _try_lock(self, fh):
-        """Non-blocking exclusive lock; True if acquired.
-
-        Windows detail: msvcrt.locking(LK_NBLCK, n) locks *n bytes* only.
-        A one-byte range is defeated when a second process opens the same
-        file for writing — buffered writes outside byte 0 succeed silently
-        (observed in CI: two launchers both "acquired"). We therefore lock
-        a generous fixed span covering any realistic JSON payload.
-        """
+        """Non-blocking exclusive lock over a generous fixed span; True if
+        acquired. (One-byte spans were defeated in CI round 1: rivals could
+        write past byte 0. Span covers any realistic payload.)"""
         try:
             if os.name == "nt":
                 fh.seek(0)
@@ -123,8 +133,6 @@ class InstanceLock:
         except OSError:
             return False
 
-    LOCK_SPAN = 4096             # bytes covered by the Windows byte-range lock
-
     def _unlock(self, fh):
         if os.name == "nt":
             fh.seek(0)
@@ -132,104 +140,78 @@ class InstanceLock:
         else:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
+    def _read_sidecar(self) -> dict:
+        try:
+            with open(self.info_path) as fh:
+                return json.loads((fh.read() or "").strip() or "{}")
+        except (OSError, ValueError):
+            return {}
+
     def acquire_or_live(self):
         """Return (acquired, live_url|None). If not acquired, probe the
         holder's health endpoint so we can reopen its UI instead of failing.
 
-        Windows mandatory-lock protocol (msvcrt locks are per-byte-range
-        and enforced against OTHER processes' reads/writes):
-        1. open a+ WITHOUT truncating — an O_TRUNC-style open would wipe a
-           live holder's payload before we even learn it exists;
-        2. try the non-blocking lock. Acquired -> any existing payload is
-           stale by definition (a live holder always locks first), so we
-           truncate + take ownership;
-        3. not acquired -> best-effort read (usually blocked on Windows
-           while the holder locks [0, LOCK_SPAN); fine) then poll: either
-           the holder releases (crash/stale -> we grab it; the OS drops
-           locks with the process anyway) or its daemon answers /health
-           (-> live URL for the caller to reopen)."""
+        Protocol (identical semantics on both platforms):
+        1. Fast path: our own cached info answers /health -> defer to it.
+        2. Open the lockfile a+ (NEVER "w": on Windows that share-deny +
+           truncate dance destroys a live holder's state and races us into
+           double-serving), take the non-blocking lock.
+        3. Acquired -> any sidecar payload left behind is stale by
+           definition (a live holder always locks first); probe once for
+           safety, then clear it and own the lock.
+        4. Not acquired -> holder alive but daemon may still be booting:
+           poll the sidecar + /health briefly; if the holder vanishes,
+           grab the freed lock."""
+        host, port = self.info.get("host", "127.0.0.1"), self.info.get("port")
+        if port and _health_ok(host, int(port)):
+            return False, f"http://{host}:{int(port)}/"
         fh = open(self.path, "a+")
         if self._try_lock(fh):
-            # We hold the range now: safe to inspect/clear any stale payload.
-            try:
-                fh.seek(0)
-                stale = json.loads((fh.read() or "").strip() or "{}")
-            except ValueError:
-                stale = {}
+            self.fh = fh
+            stale = self._read_sidecar()
             host, port = stale.get("host", "127.0.0.1"), stale.get("port")
             if port and _health_ok(host, int(port)):
-                # Extremely unlikely race: lock free yet something healthy
-                # squats on that port. Don't double-serve; hand back its URL.
+                # Lock was free yet something healthy squats on that port
+                # (holder crashed after binding?). Don't double-serve.
                 self.info = stale
-                self._unlock(fh)
-                fh.close()
+                self.release()
                 return False, f"http://{host}:{int(port)}/"
-            fh.seek(0)
-            fh.truncate()                     # inside our locked range
-            self.fh = fh
+            try:                              # clear stale advertisement
+                with open(self.info_path, "w"):
+                    pass
+            except OSError:                   # pragma: no cover
+                pass
             return True, None
-        # Lock held elsewhere right now.
-        info = self.info or self._read_info(self.path)
-        host, port = info.get("host", "127.0.0.1"), info.get("port")
-        if port and _health_ok(host, int(port)):
-            self.info = info
-            fh.close()
-            return False, f"http://{host}:{int(port)}/"
-        # Holder present but not answering (booting) or payload unreadable
-        # (Windows mandatory lock during contention). Poll briefly.
+        # Lock held elsewhere: holder alive, daemon maybe still booting.
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
+            info = self._read_sidecar()
+            host, port = info.get("host", "127.0.0.1"), info.get("port")
+            if port and _health_ok(host, int(port)):
+                self.info = info
+                fh.close()
+                return False, f"http://{host}:{int(port)}/"
             fh.close()
             time.sleep(0.1)
             try:
                 fh = open(self.path, "a+")
             except OSError:                   # pragma: no cover
                 continue
-            if self._try_lock(fh):            # holder released -> steal/clean
-                fh.seek(0)
-                fh.truncate()
+            if self._try_lock(fh):            # holder exited -> steal/clean
                 self.fh = fh
                 return True, None
-            info = self._read_info(self.path)
-            host, port = info.get("host", "127.0.0.1"), info.get("port")
-            if port and _health_ok(host, int(port)):
-                self.info = info
-                fh.close()
-                return False, f"http://{host}:{int(port)}/"
         fh.close()
         return False, None                    # still contended; caller retries
 
     def write_info(self, host: str, port: int, pid: int) -> None:
         assert self.fh is not None
         self.info = {"host": host, "port": port, "pid": pid}
-        payload = json.dumps(self.info)
-        if os.name == "nt":
-            # Write THROUGH our existing msvcrt lock — bytes [0, LOCK_SPAN)
-            # are ours, so in-range writes from this handle succeed while
-            # rivals' out-of-handle access is denied. Pad the payload to
-            # LOCK_SPAN so rival a+ handles (which position at EOF = end
-            # of file) collide with the locked range when they seek(0)+
-            # lock, and cannot silently rewrite past a short guarded span.
-            # Re-lock after flushing to extend the guard over the new
-            # bytes (the acquisition-time lock was placed on an empty
-            # file; buffered data only hits disk at flush/fsync).
-            buf = payload.encode("utf-8")
-            buf = buf + b" " * (self.LOCK_SPAN - len(buf)) \
-                if len(buf) < self.LOCK_SPAN else buf[:self.LOCK_SPAN]
-            self.fh.seek(0)
-            self.fh.write(buf.decode("ascii"))
-            self.fh.flush()
-            os.fsync(self.fh.fileno())
-            try:                              # refresh/extend the guard
-                msvcrt.locking(self.fh.fileno(), msvcrt.LK_LOCK,
-                               self.LOCK_SPAN)
-            except OSError:                   # already fully covered
-                pass
-        else:
-            self.fh.seek(0)
-            self.fh.truncate()
-            self.fh.write(payload)
-            self.fh.flush()
+        # Advertise via the unlocked sidecar: readable by rivals even while
+        # we hold the mandatory byte-range lock on gui.lock.
+        with open(self.info_path, "w") as fh:
+            json.dump(self.info, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
 
     def release(self) -> None:
         if self.fh is not None:
@@ -240,6 +222,10 @@ class InstanceLock:
             except OSError:
                 pass
             self.fh = None
+        try:                                  # retire our advertisement too
+            os.unlink(self.info_path)
+        except OSError:
+            pass
 
 
 def _health_ok(host: str, port: int, timeout: float = 1.0) -> bool:
