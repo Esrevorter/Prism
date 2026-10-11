@@ -1,0 +1,4 @@
+nohup: ignoring input
+node-sync soak: 3 independent nodes x 8,640 blocks (72 virtual hours @ 30s cadence)
+  [ 72.0 vh] blocks=8,640 diff=1 synced=8,636 supply=284,794.5 PRSM wall=3s rate=3231.1 blk/s ETA=0.0m
+PASSED: 3 independent nodes synced & sustained 72 virtual hours (8,640 blocks @ 30s cadence) in 2.7s wall. 25,920 block applications fully validated across nodes (8,636 via catch-up sync); final tips identical (7853d163830bff17... @ height 8640); 1728 duplicates ignored, 576 siblings rejected, 1152 mutated headers refused, 576 truncated frames rejected, 576 orphans gap-refused; zero invariant violations.
