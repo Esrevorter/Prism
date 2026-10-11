@@ -19,6 +19,11 @@ Layered like the rest of the monorepo:
                ContactRecord.revoked is reserved for deliberate removal
                (remove_contact()), which excludes the leg from the NEXT
                reshare's recipient set.
+  biometric.py Biometric share-gating (spec §9): enclave-wrapped local
+               share with device binding, auth-required unwrap, lockout +
+               passcode re-unlock, and attestation quotes. SimulatedSE is
+               the desktop stand-in for iOS Secure Enclave / Android
+               StrongBox in this reference build.
 
 Trust model (Decision D4): every leg is user-owned — devices or user-
 chosen contacts. Prism operates no recovery leg of any kind.
@@ -30,7 +35,7 @@ interop reference for bridge signers, not a production signer. The FROST
 (Ed25519) path never reconstructs the secret and IS the shipped spend
 path. Test suite: prism/tests/test_mpc.py.
 """
-from . import frost, gg20, recovery, secp256k1, sharing
+from . import biometric, frost, gg20, recovery, secp256k1, sharing
 from .frost import (CeremonyResult, NoncePair, PartialSignature,
                     aggregate_nonces, aggregate_signature, generate_nonce,
                     run_keygen, sign_share, sign_threshold, verify_signature)
@@ -39,6 +44,8 @@ from .gg20 import (GG20KeySet, GG20Signature, ecdsa_verify, gg20_keygen,
 from .recovery import (ContactRecord, PendingRecovery, Phase, RecoveryPolicy,
                        RecoveryState, create_recovery_state,
                        derive_stale_share)
+from .biometric import (AttestationQuote, BiometricError, GatedShare,
+                        SELockError, SecureElement, SimulatedSE)
 from .secp256k1 import BASE as SECP256K1_BASE
 from .secp256k1 import N as SECP256K1_N
 from .secp256k1 import ECPoint
@@ -49,7 +56,7 @@ from .sharing import (ED25519_SCALARS, ScalarField, Share,
 
 __all__ = [
     # submodules
-    "sharing", "frost", "secp256k1", "gg20", "recovery",
+    "sharing", "frost", "secp256k1", "gg20", "recovery", "biometric",
     # sharing
     "ScalarField", "ED25519_SCALARS", "Share", "random_poly", "make_shares",
     "lagrange_coefficients", "reconstruct", "poly_commitments",
@@ -65,6 +72,9 @@ __all__ = [
     # recovery
     "Phase", "RecoveryPolicy", "ContactRecord", "PendingRecovery",
     "RecoveryState", "create_recovery_state", "derive_stale_share",
+    # biometric gating
+    "SecureElement", "SimulatedSE", "GatedShare", "AttestationQuote",
+    "BiometricError", "SELockError",
 ]
 
 # NOTE: RecoveryState.remove_contact() and RecoveryState.is_stale_share()
