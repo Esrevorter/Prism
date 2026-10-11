@@ -52,6 +52,18 @@ ACTION_TO_CAPABILITY = {          # which Intent action each verb may compile to
     "stake": ("transfer.self",),
 }
 
+# Capability → the amount form it MUST carry (§8.4 allowlist closure,
+# enforced in BOTH check_proposal and check_signing so a UI bug can't let a
+# PRSM-denominated "buy" slip past proposal-time checks at signing time).
+CAPABILITY_AMOUNT_FORM = {
+    "buy_prsm_fiat_drip": "fiat_quote",   # DCA = fiat-quoted by definition (§7.7)
+}
+
+
+def _amount_form_ok(intent: Intent, capability: str) -> bool:
+    want = CAPABILITY_AMOUNT_FORM.get(capability)
+    return want is None or want in intent.compiled.amount
+
 VETO_WINDOW_HOURS_DEFAULT = 24    # §7.7 step 2 / §8.4
 RISK_CLEAN_MAX = 0.30             # "risk model clean" == below WATCH band (§7.3)
 
@@ -165,6 +177,13 @@ class PolicyEngine:
         if intent.compiled.action not in allowed_actions:
             reasons.append(f"action {intent.compiled.action!r} not permitted by "
                            f"capability {g.capability!r}")
+        # buy_prsm_fiat_drip is fiat-quoted BY DEFINITION (spec §7.7 DCA
+        # example: "$10 of PRSM daily"): a PRSM-denominated transfer under
+        # this grant means the agent moved an amount it chose itself.
+        if (g.capability == "buy_prsm_fiat_drip"
+                and "fiat_quote" not in intent.compiled.amount):
+            reasons.append("DCA buys must be fiat-quoted ($X of PRSM), not "
+                           "PRSM-denominated — the plan sets cadence, not size")
         # agents may never target third parties unless whitelisted as such
         ref = intent.compiled.recipient_ref or ""
         wl = g.constraints.destinations_whitelist
@@ -464,6 +483,19 @@ class AgentRuntime:
         else:
             self.pending[pa.action_id] = pa
         return pa
+
+    def mark_executed(self, action_id: str, *, now_unix: int,
+                      explanation: Optional[str] = None) -> ActionRecord:
+        """Close out a pending action as executed after an EXTERNAL signer
+        broadcast it (devnet RPC path). The runtime itself never signs —
+        this only keeps ledger/pending/log state consistent with reality.
+        """
+        pa = self.pending.pop(action_id, None)
+        if pa is None:
+            raise PolicyViolation(f"no pending action {action_id!r}")
+        grant = self.grants[pa.record.grant_id]
+        return self._execute(pa, grant, now_unix=now_unix,
+                             state="executed_after_veto_window")
 
     def veto(self, action_id: str, *, now_unix: int) -> None:
         pa = self.pending.pop(action_id, None)

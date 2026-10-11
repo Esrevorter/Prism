@@ -20,6 +20,7 @@ import hashlib
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import Optional
 
 from ..ai.fraud import FraudDetector, TxFeatures
 from ..ai.simulator import (ChainSnapshot, SigningGate, SnapshotOutput,
@@ -28,8 +29,9 @@ from ..chain.node import ChainState, mine_block, make_genesis, Block, ZERO32
 from ..chain.params import REFRACTION_TESTNET
 from ..mpc import frost
 from ..mpc.sharing import Share
-from ..wallet.agent_auth import AgentRuntime, PolicyEngine, SignerStub
-from ..wallet.intent import (AddressBook, Contact, IntentCompiler,
+from ..wallet.agent_auth import (AgentRuntime, Constraints, Grant,
+                                 PolicyEngine, SignerStub)
+from ..wallet.intent import (AddressBook, Contact, Intent, IntentCompiler,
                              IntentError, apply_clarification, prsm_to_shard,
                              shard_to_prsm, simulate, fraud_flags)
 
@@ -42,7 +44,12 @@ DEVICE_LABELS = {1: "Phone", 2: "Laptop", 3: "Backup card"}
 # recipient must be a whitelisted self-subaddress.
 DEFAULT_DCA_CAPABILITY = "buy_prsm_fiat_drip"
 DEFAULT_DCA_AGENT = "auto_dutcher.v1"
-DEFAULT_DCA_DESTINATION = "self_subaddr:dca"
+# Whitelisted destination for the default plan. The compiler only ever
+# produces `addr:<prsm1...>` or `contact:<id>` refs, so a self-subaddress is
+# registered as a (verified) contact and whitelisted by its real ref form —
+# this keeps the digest card honest: what you see is exactly what runs.
+DEFAULT_DCA_SELF_NAME = "My DCA pot"
+DEFAULT_DCA_SELF_ADDRESS = "prsm1selfdcapot0000000000000000000000000000"
 DEFAULT_DCA_VETO_HOURS = 24.0
 
 
@@ -76,6 +83,13 @@ class PrismService:
         self.faucet_outputs: list[SnapshotOutput] = []  # mined coinbase credits
         self.gate = SigningGate(detector=FraudDetector())
         self.ceremony = CeremonyState()
+        # Agent runtime (§7.7/§8.4): policy enforced OUTSIDE the agent loop;
+        # the same SigningGate that reviews human confirmations is wired in,
+        # so advisory risk for agent actions comes from real tx features.
+        self.agent_engine = PolicyEngine()
+        self.gate.engine = self.agent_engine
+        self.agent = AgentRuntime(engine=self.agent_engine, gate=self.gate)
+        self.dca_contact: Optional[Contact] = None   # set by grant_create
         # virtual cadence bookkeeping (mirrors node_sync_soak model)
         self.cadence_s = self.params.target_block_time
         self.started_unix = int(time.time())
@@ -283,6 +297,200 @@ class PrismService:
                 "next_step": "mpc.sign_preview once a ceremony is complete",
             }
             return payload
+
+    # ---------------- agents (§7.7 / §8.4) ----------------
+
+    def grant_create(self, *, days: int = 30,
+                     per_action_prsm: float = 25.0,
+                     monthly_prsm: float = 400.0,
+                     price_ceiling_usd: Optional[float] = None,
+                     veto_hours: float = DEFAULT_DCA_VETO_HOURS) -> dict:
+        """Issue the default conservative DCA grant (§7.7). The self pot is
+        registered as a verified contact so the digest card names exactly the
+        destination the policy engine whitelists — same string end to end."""
+        with self._lock:
+            if self.dca_contact is None:
+                ref = hashlib.sha3_256(
+                    (DEFAULT_DCA_SELF_NAME + DEFAULT_DCA_SELF_ADDRESS)
+                    .encode()).hexdigest()[:8]
+                self.dca_contact = Contact(f"c-{ref}", DEFAULT_DCA_SELF_NAME,
+                                           DEFAULT_DCA_SELF_ADDRESS,
+                                           verified=True,
+                                           verification_method="qr_in_person")
+                self.book.add(self.dca_contact)
+            now = self.sim_clock
+            g = Grant(agent=DEFAULT_DCA_AGENT, capability=DEFAULT_DCA_CAPABILITY,
+                      constraints=Constraints(
+                          max_per_action_shard=prsm_to_shard(per_action_prsm),
+                          max_per_month_shard=prsm_to_shard(monthly_prsm),
+                          price_ceiling_usd=price_ceiling_usd,
+                          destinations_whitelist=(
+                              f"contact:{self.dca_contact.contact_id}",)),
+                      veto_window_hours=veto_hours,
+                      valid_until_unix=now + days * 86400)
+            self.agent.issue_grant(g)
+            return {"grant": g.to_json(),
+                    "human": ("Plan created: your auto-Dutcher may move up to "
+                              f"{per_action_prsm:g} PRSM per action and "
+                              f"{monthly_prsm:g} PRSM per month into "
+                              f"'{DEFAULT_DCA_SELF_NAME}' until day "
+                              f"{days}. Every action waits {veto_hours:g} h "
+                              "before it runs — you can stop any of them in "
+                              "that window, or shut the whole plan with one "
+                              "tap."),
+                    "whitelisted_destination": self.dca_contact.display_name}
+
+    def _grant_or_raise(self, grant_id: Optional[str]) -> Grant:
+        if not self.agent.grants:
+            raise ValueError("no agent plan yet — create one first "
+                             "(agent.grant_create)")
+        gid = grant_id or next(reversed(self.agent.grants))
+        g = self.agent.grants.get(gid)
+        if g is None:
+            raise ValueError(f"unknown grant {gid!r}")
+        return g
+
+    def _agent_utterance(self, utterance: str, g: Grant) -> str:
+        """Map a natural DCA instruction onto the capability it will run
+        under. The grammar only knows 'send/pay' (→ transfer); the policy
+        engine then enforces that a buy_prsm_fiat_drip grant accepts ONLY
+        fiat-quoted intents (§8.4 allowlist closure — this rewrites words,
+        never constraints)."""
+        t = utterance.strip()
+        low = t.lower()
+        if low.startswith("buy ") and g.capability == "buy_prsm_fiat_drip":
+            rest = t[4:].strip()
+            if not rest.lower().startswith(("send ", "pay ")):
+                return f"Send {rest}"
+        return t
+
+    def agent_propose(self, utterance: str,
+                      grant_id: Optional[str] = None) -> dict:
+        """Agent proposal path: compile → PolicyEngine.check_proposal →
+        live risk via the wired SigningGate → quiet-digest pending card.
+        Refusals are returned (never raised past the lock) with ALL violated
+        constraints at once — neuro-inclusive: no peek-a-boo errors."""
+        with self._lock:
+            g = self._grant_or_raise(grant_id)
+            try:
+                it = self.compiler.compile(self._agent_utterance(utterance, g),
+                                           now_unix=self.sim_clock,
+                                           balance_shard=self.balance_shard)
+            except IntentError as e:
+                return {"ok": False, "refused": True,
+                        "reasons": [f"I couldn't understand that: {e}"],
+                        "human": "Nothing was proposed. Rephrase and try again."}
+            if it.needs_clarify:
+                return {"ok": False, "refused": True,
+                        "reasons": [f"unresolved: {it.needs_clarify}"],
+                        "human": "The agent needs a complete instruction "
+                                 "before it can propose anything."}
+            from ..wallet.agent_auth import PolicyViolation
+            try:
+                pa = self.agent.propose(it, g.grant_id, now_unix=self.sim_clock,
+                                        contact_verified=True,
+                                        balance_shard=self.balance_shard)
+            except PolicyViolation as e:
+                return {"ok": False, "refused": True,
+                        "reasons": [str(e)],
+                        "human": ("This action was blocked by YOUR plan limits "
+                                  "— not by the agent deciding for itself."),
+                        "grant_id": g.grant_id}
+            executed = pa.record.state in ("instant_executed",
+                                           "executed_after_veto_window")
+            out = {"ok": True, "action_id": pa.action_id,
+                   "grant_id": g.grant_id,
+                   "state": pa.record.state,
+                   "risk_score": round(pa.risk_score, 4),
+                   "digest_line": pa.record.explanation,
+                   "intent": _intent_payload(it)}
+            if executed:
+                out["human"] = ("Done — this ran immediately under your plan.")
+            else:
+                hrs = (pa.exec_not_before_unix - self.sim_clock) / 3600.0
+                out["executes_in_hours"] = round(hrs, 1)
+                out["human"] = (f"Queued quietly: {pa.record.explanation} It "
+                                f"runs in about {hrs:.0f} hours unless you "
+                                "stop it. You'll see it on your Pending page.")
+            return out
+
+    def agent_pending(self) -> dict:
+        """The quiet digest (§7.7 step 2): plain-language lines only — all
+        math stays server-side (neuro-inclusive: never make the user count)."""
+        with self._lock:
+            lines = self.agent.digest_lines(now_unix=self.sim_clock)
+            cards = []
+            for pa in self.agent.pending.values():
+                cards.append({"action_id": pa.action_id,
+                              "short_id": pa.action_id[:8],
+                              "line": pa.record.explanation,
+                              "risk_score": round(pa.risk_score, 4)})
+            return {"pending": cards, "digest_lines": lines,
+                    "count": len(cards),
+                    "human": (f"{len(cards)} action(s) waiting. Nothing has "
+                              "run yet — you can stop any of them.")}
+
+    def agent_veto(self, action_id: str) -> dict:
+        with self._lock:
+            # accept the 8-char short id shown on the digest card
+            full = self.agent.pending.get(action_id)
+            if full is None:
+                for aid in self.agent.pending:
+                    if aid.startswith(action_id):
+                        action_id = aid
+                        break
+            self.agent.veto(action_id, now_unix=self.sim_clock)
+            return {"ok": True, "action_id": action_id,
+                    "human": "Stopped. This will not run, and it stays in "
+                             "your history so nothing disappears silently."}
+
+    def agent_revoke(self, grant_id: Optional[str] = None) -> dict:
+        """One-tap revoke (§7.7 step 3): immediate, cascades to every queued
+        action under the plan."""
+        with self._lock:
+            g = self._grant_or_raise(grant_id)
+            n = sum(1 for pa in self.agent.pending.values()
+                    if pa.record.grant_id == g.grant_id)
+            self.agent.revoke(g.grant_id, now_unix=self.sim_clock)
+            return {"ok": True, "grant_id": g.grant_id,
+                    "cascaded_vetoes": n,
+                    "human": (f"Plan stopped. {n} queued action(s) were also "
+                              "cancelled. New actions cannot run under this "
+                              "plan ever again.")}
+
+    def agent_tick(self, hours_ahead: float = 0.0) -> dict:
+        """Advance the devnet sim clock (optionally `hours_ahead` virtual
+        hours) and let unvetoed actions whose window closed execute iff the
+        risk model is STILL clean at execution time (§7.7 step 2). Devnet
+        stand-in for the real signer; records state transitions honestly."""
+        with self._lock:
+            if hours_ahead > 0:
+                self.sim_clock += int(hours_ahead * 3600)
+            ids = list(self.agent.pending)
+            scores = {aid: self.agent.pending[aid].risk_score for aid in ids}
+            executed = self.agent.tick(now_unix=self.sim_clock,
+                                       current_risk_scores=scores)
+            return {"advanced_hours": hours_ahead,
+                    "transitions": [{"action_id": r.action_id,
+                                     "state": r.state,
+                                     "explanation": r.explanation}
+                                    for r in executed],
+                    "human": (f"{len(executed)} action(s) reached their "
+                              "window close this tick.") if executed else
+                             "Nothing was due this tick — queued actions "
+                             "still have veto time left."}
+
+    def agent_report(self, grant_id: Optional[str] = None) -> dict:
+        with self._lock:
+            g = self._grant_or_raise(grant_id)
+            rep = self.agent.monthly_report(
+                g.grant_id, since_unix=g.constraints and 0,
+                until_unix=self.sim_clock + 1)
+            rep["human"] = (f"Your plan ran {rep['actions']} action(s); "
+                            f"{shard_to_prsm(rep['spend_note_shard'])} PRSM "
+                            "moved in total. Log integrity check: "
+                            + ("passed" if rep["chain_ok"] else "FAILED"))
+            return rep
 
     def _get_intent(self, intent_id: str):
         it = self.intents.get(intent_id)
