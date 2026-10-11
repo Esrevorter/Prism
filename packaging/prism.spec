@@ -73,18 +73,21 @@ exe = EXE(
 # binary died instantly ("the following arguments are required: cmd") —
 # perceived as "prism-gui.exe crashes". A dedicated Analysis is cheap here
 # because everything lands in one onefile cache anyway.
-# PyInstaller >= 6.0 stores Analysis.datas as a list of 3-element tuples
-# (dest, src, typecode), but a fresh Analysis expects 2-element
-# (src, dest) tuples — passing `a.datas` straight through raised
-# "ValueError: too many values to unpack (expected 2)" and broke the
-# release build. Normalize back to 2-tuples (works on 5.x as well).
-_datas_2tuple = [(e[1], e[0]) for e in a.datas]
+# The GUI binary needs exactly one extra data item: the static web bundle.
+# Do NOT copy `a.datas` wholesale into this second Analysis:
+#  - PyInstaller >= 6.0 stores Analysis.datas as 3-element tuples
+#    (dest, src, typecode); feeding those into a fresh Analysis raised
+#    "ValueError: too many values to unpack (expected 2)".
+#  - On macOS, Analysis.datas also carries framework entries whose source
+#    paths are relative to the *first* spec dir; re-resolving them against
+#    SPECPATH broke with "Unable to find .../packaging/Python.framework/...".
+_static_dir = os.path.join(root, 'prism', 'rpc', 'static')
 
 agui = Analysis(
     [os.path.join(root, 'prism', 'entry_gui.py')],
     pathex=[root],                       # resolves the `prism.*` package tree
     binaries=[],
-    datas=_datas_2tuple,
+    datas=[(_static_dir, os.path.join('prism', 'rpc', 'static'))],
     hiddenimports=[
         'prism.rpc.launcher', 'prism.rpc.server', 'prism.rpc.service',
         'prism.chain.node', 'prism.chain.block', 'prism.chain.params',

@@ -3,7 +3,7 @@
 **Project:** Prism
 **Ticker:** PRSM
 **Tagline:** "Clarity on your terms"
-**Document Version:** 1.0 (Finalized — decision log in §14)
+**Document Version:** 1.1 (Amendment A1-2026-10: Client UX & Multi-Device Signing mandate — see §7.9, §9.1; decision log in §14)
 **Status:** Implementation-ready. All blocking questions resolved by founder decisions D1–D5 (2026-10-08); remaining items tracked as research areas (§15C), not blockers.
 
 ---
@@ -16,9 +16,9 @@
 4. Monetary Policy & Consensus (L1)
 5. Privacy Model & The Prism Protocol (Selective Disclosure)
 6. Data Model
-7. User Flows
+7. User Flows (incl. §7.9 Client UX Baseline & Multi-Device Signing — Amendment A1-2026-10)
 8. AI Integration Layer (L2)
-9. Wallet, Key Management & Recovery (L3)
+9. Wallet, Key Management & Recovery (L3) (incl. §9.1 Key-Management UX Rules)
 10. Fees, Economics & L2 Channels
 11. Edge Cases, Threat Model & Failure Modes
 12. Regulatory & Compliance Posture
@@ -383,6 +383,61 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
 ### 7.8 Inheritance (Dead Man's Switch)
 - Beneficiary holds a share that activates only after N days (default 365) without liveness AND M-of-K attestator confirmation (attestators are contacts or lawyer/oracle service). Grace ping to user every 30 days before activation. Per §14 (Q6): the v1 liveness signal is **signed heartbeat messages** from the user's wallet (privacy-preserving; no on-chain activity inference); on-chain inactivity remains a fallback for users who never send heartbeats.
 
+### 7.9 Client UX Baseline & Multi-Device Signing Experience (**Amendment A1-2026-10 — binding**)
+
+> **Founder review (2026-10-12):** *"I find the clients very meager in UX/UI design, and quite complex to use, there's no context help, the whole multi-device signing is shit, really disappointed in this."* The prior "GUI/MPC product requirement" note (§13 Phase 1) declared UX beauty a hard acceptance requirement, but the shipped client violated it in practice. This amendment converts that aspiration into concrete, testable requirements grounded in published usability research (Nielsen Norman heuristics, NN/g empty-state and wizard research, Material Design progressive disclosure, Apple HIG onboarding guidance, WCAG 2.1 AA, and reference flows from Bitwarden, 1Password, MuJo/Status/Sparrow pairing UX). It applies to **every client surface** (`prism/gui` web bundle, `prism-gui.exe`, the Tauri shell, and the CLI where unavoidable).
+
+#### 7.9.1 Information architecture — one job per screen
+The current single-scroll page mixing balance, NL bar, review, device keys, recovery, plans, and contacts is replaced by a **persistent left navigation rail** (collapsible to icon rail <1024 px; bottom tab bar at mobile widths) with exactly five primary destinations, each with one clear job:
+
+| Destination | Job | Contains |
+|---|---|---|
+| **Wallet** | See money, move money | Balance hero + fiat estimate, recent activity list, Send / Receive buttons |
+| **Devices** | Key custody | Device roster, ceremony wizard, reshares, "why can't I see my shares?" inline |
+| **Recovery** | Safety net | Recovery setup state, pending-recovery alarm, contact leg management |
+| **Plans** | Automation | Agent digest cards, veto/revoke, audit log |
+| **Settings** | Everything else | Theme, notification intensity dials, node details (advanced, collapsed), disclosure registry |
+
+Rules: no more than one primary action button per screen region; destructive actions live under their own confirm step, never adjacent to their benign counterpart; the review card (§7.3) renders as a **modal sheet over the originating screen**, not a section further down the page (users must not scroll to find what they just asked for — NN/g finding: split-attention is the top failure mode of single-page financial forms).
+
+#### 7.9.2 Contextual help — mandatory, three tiers ("no orphan screens")
+Every visible screen/panel MUST carry contextual help at three levels so nobody is ever stuck without an explanation:
+1. **Inline microcopy** — ≤2 sentences under any control whose consequence is non-obvious (fees, timelocks, share handling, privacy effects). Plain language per §5 honest-UX; reads aloud ≈ grade-6 level.
+2. **`?` help popover** — every panel header gets a help affordance (`aria-haspopup="dialog"`) explaining *what this is, why it exists, what happens if I skip it*, with a "Learn more" deep link into the in-app guide. Popovers are focus-trapped, dismissible with Esc, and never block the primary action.
+3. **In-app guide (Help center)** — searchable task-based articles ("How do I pay someone?", "I lost my phone", "What are device keys?"), each written as numbered steps mirroring the actual UI labels. Reachable via persistent Help button (bottom of nav rail) and `?` keyboard shortcut from anywhere. First-run app also drops contextual coach-mark bubbles on first visit to each destination (dismissible forever, restorable in Settings).
+CLI parity: every `prism` command supports `--help` with a worked example line and a "next step" pointer; unknown commands suggest the closest match.
+
+#### 7.9.3 First-run onboarding — guided, resumable, zero jargon
+A 4-step wizard (progress indicator, Back always available, Skip allowed except for custody choice):
+1. **Welcome + what Prism is** in 3 sentences with an illustration; expected-time badge ("≈3 minutes").
+2. **Custody choice (§7.1)** presented as two cards in plain outcome language — "Protect with your devices (recommended if you have 2+)" vs "Protect with people you trust (recommended if you have one)" — each card states in one line what happens when the option is lost. Legacy seed hidden behind "Advanced options".
+3. **Device-key ceremony** (see 7.9.4) runs inside the wizard.
+4. **First money**: faucet drip demo + "Receive" QR shown with a copyable address; ends with a calm summary card ("You're set up. Your key lives on: Phone, Laptop, Backup.").
+Wizard state persists server-side; closing the window mid-ceremony resumes exactly where it stopped (abort-safe per §7.1 step 3). Empty states everywhere ship with illustration + one-line explanation + the primary CTA (e.g., activity list before first payment: "No payments yet — get test PRSM or show your receive QR").
+
+#### 7.9.4 Multi-device signing ceremony — redesigned end-to-end (**the flagship fix**)
+Current failure modes to correct: one-button "Set up device keys" that silently fabricates all three legs in-process (an illusion of security the user can neither verify nor extend); no way to add a second real device; no pairing transport; stage text ("legs 1..3 polynomials") is crypto jargon; nothing tells the user what to physically do with their phone.
+
+Target experience (research baselines: Bitwarden/1Password device pairing, Sparrow/Electrum QR wallet sync, Signal linked-devices liveness):
+1. **Name your devices.** First leg = the current device, auto-detected friendly name ("This laptop · Maya's MacBook Pro"), editable. Subsequent legs are added by **pairing**, never by assumption.
+2. **Pairing transport, same room:** initiating device shows a large QR containing a short-lived invite (EE2EE session URL + 6-char human check code, TTL 5 min, single-use). Second device scans it → both screens show the check code and the peer's device name; user taps "Yes, this is my device" on **both** sides (mutaneous confirmation kills evil-maid QR-swap attacks). Invite link fallback for same-machine browser sessions; NFC tap-to-pair optional later.
+3. **Live ceremony dashboard:** each leg is a card (icon, name, fingerprint, status chip: waiting → committed → verified → done). Feldman-VSS verification results shown as "Share verified ✓ — mathematically checked against the group key, never revealed". Progress = completed legs, not fake percentages. Abort/resume at any commit boundary; "Start over" regenerates everything and explicitly revokes old commitments.
+4. **Liveness model, stated honestly:** signing requires quorum devices to be *online together*. The UI must therefore distinguish, per §5 honesty rules: (a) **demo/simulated mode** — all legs run in-process on this machine; clearly badged "Simulated — all shares on one device right now"; (b) **paired mode** — ≥2 legs on distinct enrolled devices with signed heartbeats ≤60 s old. Sending in paired mode shows "Waiting for Laptop to approve… (it has 5 minutes)" with per-leg status; the signer enforces quorum policy at signing time (§8.4 belt-and-braces) so the UI can never claim more protection than exists.
+5. **Recovery contacts (Social mode)** reuse the same pairing primitive: contact scans invite QR → holds an opaque share, sees only "You hold a recovery share for Maya — no visibility into funds"; approval during recovery is a single yes/no prompt showing the 4-digit match code (§7.4).
+6. **Reshare** is presented as "Rotate keys (recommended yearly)": one click, progress dashboard identical to keygen, completion card explains "Your old devices' shares no longer work".
+
+Acceptance criteria (testable): (i) a first-time user completes Solo setup across two physical devices with no terminal and no external docs, guided only by in-app help — validated in the Phase-3 study; (ii) no ceremony screen contains unexplained jargon (glossary terms always behind a `?`); (iii) simulated-vs-paired custody state is visible on the Wallet home strip at all times ("Key protection: Simulated ⚠ / 2 devices ✓"); (iv) ceremony survives mid-flow process restart and resumes leg-consistently.
+
+#### 7.9.5 Visual & interaction design system (upgrades §2 principle 4, makes it measurable)
+- Design tokens in `theme.css`: 8-pt spacing grid, type scale (≥16 px body, ≥44 px touch targets), semantic color set incl. risk-band colors (calm/caution/pause) that pass WCAG AA contrast in both themes; light/dark/system.
+- Status feedback everywhere: async actions show optimistic-disabled buttons + inline spinners; RPC failures render a human sentence + retry, never raw JSON or stack traces; global toast queue respects notification-intensity dial.
+- Keyboard: Tab order matches visual order, `Enter` submits the focused card, `Esc` closes modals/popovers, `/` focuses the NL bar, `?` opens Help. Full screen-reader labels on every interactive element (existing `aria-live` usage extended to all lists).
+- Motion: ≤200 ms transitions, honors `prefers-reduced-motion`.
+- Neuro-inclusive gates remain: calm defaults, no dark patterns, adjustable notification intensity, undo/veto windows surfaced in UI copy.
+
+#### 7.9.6 Scope discipline for clients
+The GUI is the product; the CLI is a developer tool. Nothing in the end-user flow may require reading documentation to finish a task — if help is needed to proceed, that is a spec bug: fix the flow or the microcopy, not the user.
+
 ---
 
 ## 8. AI Integration Layer (L2)
@@ -419,6 +474,14 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 - **Biometrics:** gate access to the local share only (secure enclave-wrapped share); biometric data never leaves device, never on-chain.
 - **Backups:** encrypted wallet snapshot (shares-independent metadata: address book, disclosure registry) to user-chosen cloud with zero-knowledge envelope; restoring snapshot ≠ restoring spend rights (still needs quorum).
 - **Legacy seed path:** BIP39-compatible 25-word mnemonic; clearly labeled "irreversible-loss risk" tier.
+
+### 9.1 Key-Management UX Rules (**Amendment A1-2026-10 — binding**)
+The custody model above is only as good as what the user can perceive and control in the client. Hard rules for every wallet app (full experience design in §7.9):
+1. **Never simulate multi-device custody silently.** An in-process/demo ceremony must be badged "Simulated" everywhere it appears (ceremony dashboard, wallet home strip, signing previews) until ≥2 legs are enrolled on distinct paired devices via the §7.9.4 pairing flow. Copy must match cryptographic reality (§5 honest-UX extends to custody claims).
+2. **Devices are named entities, not indices.** Users see editable friendly names, fingerprints, last-seen liveness, and per-device role ("signing leg" vs "recovery contact leg"). Raw share indices (`device_id: 0..2`) are internal only.
+3. **Every custody state answers three questions at a glance:** *Where does my key live right now? What happens if I lose each listed device? What can I do about it?* — surfaced as the Devices screen summary card with direct actions (Add device / Rotate keys / Start recovery).
+4. **Ceremonies are resumable and abort-safe** across restarts, with explicit per-leg status and a visible explanation of what each step means in plain words ("Step 2 of 3: your Laptop just confirmed its part of the key. Nothing has been sent anywhere.").
+5. **Contextual help is mandatory on every custody surface** (per §7.9.2 tiers) — share handling, timelocks, and quorum math get inline microcopy + `?` popovers + Help-center articles; no jargon without an explanation affordance.
 
 ---
 
@@ -474,6 +537,11 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 - Notification fatigue → intensity dials (calm/normal/loud) per event class.
 - Panic loops on "pending" states → progress explained in plain words + expected time.
 - Overwhelm from advanced screens → progressive disclosure; advanced panel off by default.
+- **Silent-simulation deception (A1-2026-10):** demo ceremonies that look like real multi-device custody erode trust when discovered → mandatory "Simulated" badging until genuine pairing (§9.1 rule 1).
+- **Help dead-ends (A1-2026-10):** user stuck at any screen with no in-app explanation → §7.9.2 three-tier contextual help is a release blocker for every client surface; QA checklist item: "can a first-time user finish this flow without leaving the app?"
+
+### 11.4 Client UX Acceptance Gate (**Amendment A1-2026-10**)
+No client build (web bundle, `prism-gui.exe`, Tauri installer) may be tagged as a release unless: (a) §7.9 IA + onboarding wizard implemented; (b) contextual help present on 100% of screens (automated check: every `<section>`/panel has a linked help affordance); (c) ceremony dashboard distinguishes Simulated vs Paired custody per §9.1; (d) WCAG 2.1 AA contrast + keyboard walkthrough pass; (e) the Phase-3 neurodiverse usability study re-runs against the redesigned flows before GA. Interim builds may ship with an honest "Pre-release UX — redesign tracked under spec §7.9" banner rather than pretending compliance.
 
 ---
 
@@ -513,6 +581,7 @@ All inference is **on-device**. No transaction content, balances, or raw utteran
 - [ ] ZKP circuits v1: Source Provenance + Balance Solvency (audited by ≥2 external firms).
 
 ### Phase 3 — Accessibility (Months 13–18)
+> **Client UX redesign program (A1-2026-10, added 2026-10-12):** Founder review found the shipped clients "meager in UX/UI", complex, without context help, and the multi-device signing flow fundamentally disappointing. Spec now binds §7.9 (IA, contextual help tiers, onboarding wizard, pairing-based ceremony redesign, design system), §9.1 (custody UX rules incl. mandatory Simulated-vs-Paired badging), §11.4 (release acceptance gate). Work items: [ ] nav-rail IA + modal review sheet; [ ] three-tier contextual help + in-app Help center; [ ] first-run onboarding wizard (resumable); [ ] device pairing transport (QR invite + check code + mutual confirm) replacing in-process fake ceremonies; [ ] live ceremony dashboard with per-leg status; [ ] custody-state strip on Wallet home; [ ] design-token overhaul of `theme.css` to §7.9.5; [ ] WCAG AA pass + keyboard walkthrough; then re-run the n≥20 usability study against the new flows. Prior GUI notes below describe v0 scaffolds and remain as history; where they conflict with §7.9/§9.1, the amendment wins.
 > **GUI/RPC social-recovery surface (2026-10-11):** `recovery.status/initiate/cancel/finalize/attach_social/advance_window` RPC methods wired end-to-end (`prism/rpc/service.py`, `server.py`) with GUI cards; honest-UX copy discloses address change explicitly (§5); devnet-only `advance_window` for timelock testing. Formal pytest coverage added: `TestRecovery` (11 service-level tests: arm-on-ceremony, exact-quorum validation, pending-window veto→cancel→re-arm, unknown-share PermissionError, early-finalize timelock guard, solo flow initiate→finalize→all-legs reshare→generation bump→30-day cooldown, Social upgrade path, contact-veto flow, §7.3 E9 full-quorum-loss refusal) + `TestRecoveryOverHTTP` (every method over the real JSON-RPC wire incl. error-envelope format). Evidence: `pytest prism/tests/test_rpc_gui.py` → 43 passed; full suite **441 passed, 7 skipped in ~63 s**. Commits `865966f`, `d422d26`.
 - [x] Social recovery GA (3-of-5), timelock + cancellation flows. **(RUN EVIDENCE 2026-10-11:** per the note above — quorum-checked initiation, 72 h timelock with cancel-anytime semantics while PENDING, post-finalize proactive reshare of ALL legs, 30-day cooldown enforced fail-closed; 13 new green tests incl. HTTP-wire round-trips.)
 - [x] Biometric share-gating (iOS Secure Enclave / Android StrongBox). **(RUN EVIDENCE 2026-10-11:** `prism/mpc/biometric.py` — device-bound HKDF sealing of the local MPC share behind a `SecureElement` interface (`SimulatedSE` desktop stand-in for Secure Enclave/StrongBox; production swaps the adapter only). Unwrap requires BOTH valid sealed blob AND live biometric-success signal; wrong-device blobs refuse; 5 failures → lockout with platform-passcode re-unlock; attestation quotes verify. §9 honored: no biometric samples stored, nothing on-chain, local share only. Wallet-side `GatedShare` adds a 300 s cached-auth window (calm UX) + explicit re-lock. Evidence: `python -m prism.property.phase3_smoke` → PHASE3 SMOKE PASSED, EXIT=0; `test_l2_fees_channels.py` + full suite **464 passed, 7 skipped in 63.26 s**.)
@@ -543,6 +612,7 @@ All previously blocking questions were resolved by the founder on **2026-10-08**
 | **D3** | Revocable disclosure | **Expire-and-rotate is the binding semantics.** No recall promised anywhere; forward-revocable time-lock encryption descoped from v1 → research area R6. | §5.4 |
 | **D4** | Vendor recovery leg | **Recovery must be purely user-owned.** Prism operates no MPC share/recovery leg of any kind (Solo mode = user devices only; Social mode = user contacts). Trust story: zero vendor custody surface. Business model shifts to services (verifier SDK, merchant tooling, enterprise compliance), not key-holding. | §7.1 |
 | **D5** | Denylist governance | **Elected Prism Compliance Council** (7 seats, staggered 18-month terms, ≥5-of-7 signatures per weekly root) signs the *official* accumulator root; parallel third-party lists remain first-class and verifiable; users/verifiers may pin any list. | §11 E5 |
+| **A1-2026-10** (amendment, 2026-10-12) | Client UX quality bar | Founder review rejected the shipped client UX as "meager", complex, help-less, and the multi-device signing flow as unacceptable ("shit"). Binding amendment: clients must ship a nav-rail IA with one job per screen (§7.9.1), mandatory three-tier contextual help incl. in-app Help center (§7.9.2), resumable first-run onboarding wizard (§7.9.3), real device pairing (QR invite + check code + mutual confirmation) replacing silent in-process fake ceremonies, honest Simulated-vs-Paired custody badging (§9.1), measurable design-system requirements (§7.9.5), and a release acceptance gate (§11.4). Where prior GUI notes conflict, this amendment prevails. | §7.9, §9.1, §11.3–11.4, §13 Phase 3 |
 
 ### Remaining non-blocking items (folded into §15C research areas)
 - Duress alarm aggressiveness (Q5) → default: private in-app + user's own devices only; contact-notification is opt-in per recovery group. To be validated in the Phase-3 neuro-inclusive usability study.
@@ -578,4 +648,4 @@ R1 Post-quantum migration path · R2 Mobile ZKP prover optimization (GPU/NPU del
 
 ---
 
-*This specification is a living document. v1.0 finalized 2026-10-08 with decisions D1–D5 (§14). Future changes follow the RFC/amendment process; the decision log is append-only.*
+*This specification is a living document. v1.0 finalized 2026-10-08 with decisions D1–D5 (§14). v1.1 = Amendment A1-2026-10 (Client UX Baseline & Multi-Device Signing, §7.9/§9.1/§11.4, decision-log row appended 2026-10-12). Future changes follow the RFC/amendment process; the decision log is append-only.*
