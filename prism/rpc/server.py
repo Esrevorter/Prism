@@ -172,10 +172,15 @@ class RPCRequestHandler(BaseHTTPRequestHandler):
         self._send(200, json.dumps(resp).encode(), "application/json")
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765):
+def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False):
     httpd = ThreadingHTTPServer((host, port), RPCRequestHandler)
-    print(f"Prism RPC devnet listening on http://{host}:{port} "
+    url = f"http://{host}:{port}/"
+    print(f"Prism RPC devnet listening on {url} "
           f"(network={SERVICE.params.name}, tip={SERVICE.chain.tip.header.height})")
+    if open_browser:
+        # Standalone GUI launch: one command boots daemon + wallet UI.
+        import webbrowser
+        webbrowser.open(url)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -185,11 +190,18 @@ def serve(host: str = "127.0.0.1", port: int = 8765):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="prism-rpc")
+    ap = argparse.ArgumentParser(
+        prog="prism-rpc",
+        description="Prism GUI wallet daemon: serves the JSON-RPC API and the "
+                    "zero-build wallet front end on loopback. This single "
+                    "command is the standalone desktop entry point.")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--open", dest="open_browser", action="store_true",
+                    help="open the wallet UI in the default browser once the "
+                         "daemon is listening (standalone GUI mode)")
     ns = ap.parse_args(argv)
-    serve(ns.host, ns.port)
+    serve(ns.host, ns.port, open_browser=ns.open_browser)
 
 
 if __name__ == "__main__":
