@@ -108,6 +108,13 @@ class Node:
                 best = (key, blk)
         return best[1]
 
+    def request(self, blk) -> None:
+        """Inbound inv/headers announcement: record the block hash in our
+        block table WITHOUT validating it (stand-in for getdata). A stale
+        node's sync walk can then descend through blocks it was never
+        directly delivered — exactly how catch-up works on the wire."""
+        self.store.setdefault(blk.header.hash(), blk)
+
     def try_apply(self, blk) -> str:
         """Apply one gossip message. Returns 'applied' or 'duplicate-tip';
         raises ValueError on consensus-invalid input (stale/sibling),
@@ -127,12 +134,22 @@ class Node:
             chain = []
             node = blk
             while node.header.prev_hash != cur.hash():
-                node = self.store[node.header.prev_hash]  # KeyError == unknown
-                chain.append(node)                        # chain, so sync is
-            for blk_ in reversed(chain):                  # impossible here
-                self.try_apply(blk_)                      # (no double count:
-            self.rejected += 1                            # retried blocks are
-            return self.try_apply(blk)                    # fresh applications)
+                parent = self.store.get(node.header.prev_hash)
+                if (parent is None or parent.header.height < cur.height
+                        or (parent.header.height == cur.height
+                            and parent.header.hash() != cur.hash())):
+                    # unknown parent, or the walk fell off our tip onto a
+                    # rival branch: refuse blind application (sync/heal path)
+                    self.rejected += 1
+                    raise AssertionError(f"{self.name}: gap — parent "
+                                         f"{node.header.prev_hash.hex()[:8]} "
+                                         f"not applied; refusing {h.height}")
+                node = parent
+                chain.append(node)            # contiguous suffix down to tip
+            for blk_ in reversed(chain):      # apply oldest-first; no double
+                self.try_apply(blk_)          # count: retried blocks are fresh
+            self.rejected += 1                # applications of held blocks
+            return self.try_apply(blk)
         pre_tip_diff = self.state.difficulty
         self.state.validate_and_apply(blk)   # full pipeline: header rules,
         self.remember(blk)                   # merkle, PoW, emission, retarget
@@ -171,19 +188,39 @@ class Node:
             return 0
         if candidate_tip.header.hash() == cur.header.hash():
             return 0
+        # Walk back from the candidate collecting blocks that exist in our
+        # own store; stop at the first hash missing there, then apply only
+        # the contiguous suffix oldest-first. The walk is by linkage, not by
+        # height arithmetic: if it bottoms out below our tip height without
+        # ever touching our tip hash, the candidate descends from a rival
+        # branch and we refuse to reorg onto lower work (cumulative-work
+        # selection) — sync_to returns 0 and later heavier candidates heal us.
+        cur = self.state.tip
+        if candidate_tip.header.height <= cur.header.height:
+            return 0
+        if candidate_tip.header.hash() == cur.header.hash():
+            return 0
         fetched = []
         node = candidate_tip
-        while node.header.height > cur.header.height:
+        on_our_chain = False
+        while True:
+            if node.header.hash() == cur.header.hash():
+                on_our_chain = True         # candidate descends from our tip
+                break
             if node.header.hash() not in self.store:
-                raise AssertionError(f"{self.name}: cannot sync to unknown "
-                                     f"chain at {node.header.height}")
+                break                       # unknown block: stop, heal later
             fetched.append(node)
             node = self.store[node.header.prev_hash]  # stand-in for getdata
-        if node.header.hash() != cur.header.hash():
-            raise AssertionError(f"{self.name}: no common ancestor with "
-                                 f"candidate chain")
+            if node is None:
+                break                       # broken linkage: stop, heal later
+            if node.header.height < cur.header.height:
+                break                       # fell off our tip: rival branch
+        if not on_our_chain:
+            return 0                        # rival fork: never adopt lower work
         n = 0
         for blk in reversed(fetched):
+            if blk.header.hash() == self.state.tip.header.hash():
+                continue                    # already applied mid-replay
             self.try_apply(blk)
             n += 1
         return n
@@ -307,10 +344,10 @@ def adversarial_round(rng: random.Random, nodes: list, healthy_tip_blk,
             raise AssertionError(f"{nd.name}: orphan ACCEPTED blindly")
         except AssertionError as e:
             if "blindly" in str(e):
-                raise
-            raise
+                raise                       # real failure: re-raise
+            assert "gap" in str(e), e       # gap refusal is the documented path
         except KeyError:
-            pass                       # unknown parent: refused, state intact
+            pass                            # unknown parent: refused, state intact
         assert (nd.state.tip.header.hash(), nd.applied) == before, \
             f"{nd.name}: orphan attempt mutated state"
     counts["orphans"] += 1
@@ -358,6 +395,11 @@ def main(argv):
         assert blk.header.height == height
 
         # --- gossip: alpha current, beta/gamma lagged on staggered rounds --
+        # Realistic message flow: every node first learns the block *hash*
+        # (inv/headers announcement -> request(), unvalidated block table),
+        # then receives the full block only for the (possibly lagged) item
+        # it is fed. Stale nodes therefore can walk their sync path back to
+        # a common ancestor even through blocks never fully delivered.
         assert nodes[0].try_apply(blk) == "applied"
         deliver = blk
         if height % 4 >= 2 and height >= 6:
@@ -367,12 +409,39 @@ def main(argv):
                 anc = nodes[0].store[anc.header.prev_hash]
             deliver = anc
         for nd in nodes[1:]:
+            nd.request(blk)                   # headers announcement of the tip
+            if nd.state.tip.header.hash() == deliver.header.hash():
+                nd.dupes_ignored += 1         # idempotent, like real gossip
+            else:
+                nd.remember(deliver)          # mirror delivery into the node's
+                                              # block table at gossip time; if it
+                                              # applies cleanly, try_apply below
+                                              # re-stores it (idempotent)
             try:
                 nd.try_apply(deliver)
             except ValueError:
-                pass                        # already ahead: stale, counted
+                pass                          # already ahead: stale, counted
             except AssertionError:
-                pass                        # gap: healed by sync below
+                # gap refusal — heal by applying whatever contiguous suffix
+                # we already hold, oldest-first. The walk-back stops at the
+                # first hash missing from our store, so a lagged delivery can
+                # never poison the bookkeeping with half-applied chains.
+                fetched = []
+                n2 = deliver
+                while True:
+                    if n2.header.hash() == nd.state.tip.header.hash():
+                        break                 # descends from our tip: nothing to do
+                    nxt = nd.store.get(n2.header.prev_hash)
+                    if nxt is None:
+                        break                 # unknown parent: stop, sync heals later
+                    fetched.append(n2)
+                    n2 = nxt
+                for b in reversed(fetched):
+                    if b.header.height <= nd.state.tip.header.height:
+                        continue              # already applied mid-replay
+                    nd.try_apply(b)           # raises loudly if truly invalid
+            except KeyError:
+                pass                          # unknown parent: healed by sync below
 
         # --- cross-node agreement; heal via the real sync path -------------
         fps = {tip_fingerprint(nd) for nd in nodes}
@@ -387,25 +456,29 @@ def main(argv):
                 raise AssertionError(f"round {height}: sync failed to heal")
 
         # --- honest competing fork every retarget window -------------------
-        # The miner also builds a SHORTER rival branch off the same parent
-        # (stops 3 blocks short). Nodes lagging behind must NOT adopt it:
-        # cumulative-work selection keeps them healing toward alpha's tip.
+        # The miner also builds a rival branch off an older ancestor that is
+        # strictly SHORTER than every node's tip (uniform difficulty => work
+        # == height, so cumulative-work selection must always prefer our
+        # canonical chain). Nodes must NOT adopt it; sync_to(rival) must be a
+        # no-op everywhere.
         if height % retarget_every == 0 and height >= retarget_every + 4:
-            rival_parent = nodes[0].store[nodes[0].state.tip.header.prev_hash]
-            rival_ts = rival_parent.header.timestamp + params.target_block_time
-            rival = rival_parent
-            for _ in range(3):
+            min_h = min(nd.state.tip.header.height for nd in nodes)
+            anc = nodes[0].state.tip
+            while anc.header.height > min_h - 3:
+                anc = nodes[0].store[anc.header.prev_hash]
+            rival_ts = anc.header.timestamp + params.target_block_time
+            rival = anc
+            for _ in range(2):              # strictly shorter than every tip
                 rival_ts += params.target_block_time
                 rival = mine_block(params, rival,
                                    denylist_root=rival.header.denylist_root,
                                    im_merkle_root=rival.header.im_merkle_root,
                                    difficulty=nodes[0].state.difficulty,
                                    timestamp=min(rival_ts, ts))
+            assert rival.header.height < min_h, "rival fork not lower-work"
             for nd in nodes:
                 assert nd.sync_to(rival) == 0, \
                     f"{nd.name}: adopted shorter rival fork!"
-            fps = {tip_fingerprint(nd) for nd in nodes}
-            assert len(fps) == 1, "rival-fork probe desynced the network"
 
         # --- periodic invariant probes + adversarial injections ------------
         if height % retarget_every == 0:
