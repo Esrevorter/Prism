@@ -324,8 +324,12 @@ class TestAgentRuntime:
         svc.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid)
         bal0 = svc.balance()["balance_shard"]; h0 = svc.chain_info()["height"]
         t = svc.agent_tick(hours_ahead=25.0)
-        assert len(t["executed"]) == 1
-        ex = t["executed"][0]
+        # agent_tick schema: transitions (state changes incl. executed_after_veto_window),
+        # broadcast (on-chain settlements), refused_insufficient, human copy.
+        assert len(t["transitions"]) == 1
+        assert t["transitions"][0]["state"] == "executed_after_veto_window"
+        assert len(t["broadcast"]) == 1
+        ex = t["broadcast"][0]
         assert ex["txid"], "executed action must carry a real txid"
         bal1 = svc.balance()["balance_shard"]
         assert bal1 < bal0, "execution must deduct from the wallet"
