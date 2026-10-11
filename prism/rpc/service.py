@@ -22,7 +22,8 @@ import time
 from dataclasses import dataclass, field
 
 from ..ai.fraud import FraudDetector, TxFeatures
-from ..ai.simulator import ChainSnapshot, SigningGate, SnapshotOutput
+from ..ai.simulator import (ChainSnapshot, SigningGate, SnapshotOutput,
+                            render_template)
 from ..chain.node import ChainState, mine_block, make_genesis, Block, ZERO32
 from ..chain.params import REFRACTION_TESTNET
 from ..mpc import frost
@@ -217,6 +218,11 @@ class PrismService:
                 "intent_id": it.intent_id,
                 "ok": rv.sim.ok,
                 "plain_english": rv.sim.plain_english,
+                # band-specific copy from the shipped explanation-template
+                # pack (§8.2) — the front end renders this verbatim and can
+                # never invent reassurance (honest-UX requirement).
+                "explanation": rv.explanation,
+                "template_pack": "sim_explain_v1",
                 "simulation": rv.sim.to_json(),
                 "risk": {"score": risk.score, "band": risk.band,
                          "reasons": list(risk.reasons)},
@@ -228,15 +234,15 @@ class PrismService:
                 "sim_digest": rv.sim.sim_digest,
             }
             if rv.interruption and not acknowledged_risk:
-                out["human"] = ("This one looks unusual for you. Nothing has been "
-                                "sent — take your time. You can cancel safely, or "
-                                "confirm you understand and we'll show the review "
-                                "again without rushing you.")
+                # calm-interruption card copy comes from the shipped template
+                # pack (same string the gate embedded in rv.explanation) —
+                # single source of truth, no ad-hoc reassurance text.
+                out["human"] = render_template("pause")
                 out["offer_sleep_on_it"] = True
             elif not rv.sim.ok:
                 out["human"] = rv.sim.plain_english
             else:
-                out["human"] = rv.sim.plain_english
+                out["human"] = rv.explanation
             return out
 
     def intent_confirm(self, intent_id: str,
