@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .env
+
+# run logs (transient benchmark output)
+*.log
