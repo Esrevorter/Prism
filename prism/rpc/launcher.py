@@ -139,6 +139,15 @@ def main(argv=None) -> int:
 
     Optional hidden conveniences (end users never need them):
       prism-gui [path-to-wallet-folder]   reopen a specific wallet dir
+      prism-gui --no-browser              never open a browser window
+                                          (used by the Tauri desktop shell,
+                                          which renders the UI in its own
+                                          webview instead of a browser tab)
+      prism-gui --json-status             print one JSON line describing the
+                                          live daemon {url, data_dir} right
+                                          before serving, so a supervising
+                                          parent process can discover the
+                                          randomly-chosen loopback port
     A folder containing the .prism_wallet marker is adopted as-is; anything
     else falls back to the default per-user location.  Tests may pass
     data_dir=/tmp-dir explicitly to avoid touching ~/.prism.
@@ -147,6 +156,10 @@ def main(argv=None) -> int:
     kwargs = {}
     if isinstance(args, list) and args and isinstance(args[-1], dict):
         kwargs = args.pop()
+    # Flag scan: only leading dashes are flags; first positional is the folder.
+    no_browser = "--no-browser" in args
+    json_status = "--json-status" in args
+    args = [a for a in args if not str(a).startswith("--")]
     req = args[0] if args else None
     data_dir = kwargs.get("data_dir")
     if data_dir is not None:
@@ -166,7 +179,11 @@ def main(argv=None) -> int:
     acquired, live_url = lock.acquire_or_live()
     if not acquired:
         print(f"Prism wallet is already running — opening it at {live_url}")
-        webbrowser.open(live_url)
+        if json_status:
+            print(json.dumps({"url": live_url, "data_dir": data_dir,
+                              "already_running": True}), flush=True)
+        if not no_browser:
+            webbrowser.open(live_url)
         return 0
 
     from .server import serve_with_callback       # late import: avoids cycles
@@ -181,9 +198,16 @@ def main(argv=None) -> int:
     def _open_when_ready():
         if wait_until_healthy(host, port):
             print(f"Wallet ready: {url}  (data: {data_dir})")
-            print("Keep this window open while you use the wallet; "
-                  "close it (or press Ctrl-C) to stop.")
-            webbrowser.open(url)
+            if json_status:
+                # Machine-readable line for the supervising desktop shell
+                # (packaging/tauri). Emitted only after /health confirms the
+                # daemon is really serving — never a race.
+                print(json.dumps({"url": url, "data_dir": data_dir,
+                                  "already_running": False}), flush=True)
+            if not no_browser:
+                print("Keep this window open while you use the wallet; "
+                      "close it (or press Ctrl-C) to stop.")
+                webbrowser.open(url)
         else:                                   # pragma: no cover
             print(f"Daemon started but health check timed out; try {url}")
 
