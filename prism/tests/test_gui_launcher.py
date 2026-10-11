@@ -23,10 +23,13 @@ from prism.rpc.service import PrismService
 # ---------- helpers -----------------------------------------------------------
 
 def _start_server(svc: PrismService, host="127.0.0.1", port=0):
-    httpd = BoundHTTPServer(host, port or 1, svc)   # port arg required
     if port == 0:
-        httpd.server_close()
-        port = L.find_free_port()
+        # Bind an ephemeral OS-assigned port directly (port 0). The previous
+        # probe-then-rebind dance failed on CI sandboxes where unprivileged
+        # processes cannot bind ports < 1024 (EACCES on port 1).
+        httpd = BoundHTTPServer(host, 0, svc)
+        port = httpd.server_address[1]
+    else:
         httpd = BoundHTTPServer(host, port, svc)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
