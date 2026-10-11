@@ -43,7 +43,30 @@ INFO_NAME = "gui.info"           # sidecar: holder's {host,port,pid}, always
 
 def _die(msg: str, code: int = 1) -> None:
     print(f"\n  [Prism] {msg}\n", file=sys.stderr)
+    # console=False (PyInstaller windowed) builds have no usable stderr:
+    # sys.stderr is None there and writing to it raises AttributeError,
+    # which would kill the process *before* SystemExit — and before any
+    # dialog. Show a GUI error box first so double-click users see why.
+    _gui_error(msg)
     raise SystemExit(code)
+
+
+def _gui_error(msg: str) -> None:
+    """Best-effort native error dialog for frozen windowed binaries.
+
+    No-op in console/dev runs; only fires when stdout/stderr are absent
+    (PyInstaller windowed mode) where the user would otherwise see
+    absolutely nothing.
+    """
+    if sys.stdout is not None or sys.stderr is not None:
+        return
+    try:
+        import ctypes  # stdlib; Windows-only API used below
+        if sys.platform == "win32":
+            ctypes.windll.user32.MessageBoxW(
+                0, msg, "Prism Wallet", 0x10 | 0x40000)  # MB_ICONERROR|MB_TOPMOST
+    except Exception:
+        pass  # never let error reporting mask the original failure
 
 
 def read_instance_info(data_dir: str) -> dict:
