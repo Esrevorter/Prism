@@ -21,7 +21,6 @@ Everything here is stdlib-only, matching the project hard constraint.
 from __future__ import annotations
 
 import errno
-import fcntl
 import http.client
 import json
 import os
@@ -29,6 +28,11 @@ import socket
 import sys
 import time
 import webbrowser
+
+if os.name == "nt":                       # Windows: msvcrt locking (see below)
+    import msvcrt
+else:                                     # POSIX: flock
+    import fcntl
 
 DEFAULT_ROOT = os.path.join(os.path.expanduser("~"), ".prism")
 MARKER_NAME = ".prism_wallet"
@@ -63,19 +67,44 @@ def find_free_port(host: str = "127.0.0.1") -> int:
 
 
 class InstanceLock:
-    """Advisory single-instance lock (flock) inside the data dir."""
+    """Advisory single-instance lock inside the data dir.
+
+    POSIX: flock on the lockfile (advisory, released automatically if the
+    holder dies). Windows: msvcrt.locking() mandatory byte-range lock —
+    fcntl does not exist there, and importing it unconditionally made the
+    whole launcher module unimportable on Windows (CI Release job,
+    ModuleNotFoundError: No module named 'fcntl'). The Windows lock is also
+    released by the OS when the holding process exits.
+    """
 
     def __init__(self, data_dir: str):
         self.path = os.path.join(data_dir, LOCK_NAME)
         self.fh = None
 
+    def _try_lock(self, fh):
+        """Non-blocking exclusive lock; True if acquired."""
+        try:
+            if os.name == "nt":
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+
+    def _unlock(self, fh):
+        if os.name == "nt":
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
     def acquire_or_live(self):
         """Return (acquired, live_url|None). If not acquired, probe the
         holder's health endpoint so we can reopen its UI instead of failing."""
         fh = open(self.path, "a+")
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        if not self._try_lock(fh):
             fh.seek(0)
             try:
                 info = json.loads(fh.read() or "{}")
@@ -87,7 +116,7 @@ class InstanceLock:
                 return False, f"http://{host}:{port}/"
             # stale lock (holder died without cleaning up): steal it.
             fh = open(self.path, "w+")
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._try_lock(fh)               # best-effort on the fresh handle
             self.fh = fh
             return True, None
         fh.seek(0)
@@ -105,7 +134,7 @@ class InstanceLock:
     def release(self) -> None:
         if self.fh is not None:
             try:
-                fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
+                self._unlock(self.fh)
                 self.fh.close()
                 os.unlink(self.fh.name)
             except OSError:
