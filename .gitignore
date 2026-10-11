@@ -43,3 +43,9 @@ Thumbs.db
 *.pem
 *.key
 secrets/
+
+# Build outputs (PyInstaller / setuptools / release artifacts)
+build/
+dist/
+*.egg-info/
+prism-*-*.zip
