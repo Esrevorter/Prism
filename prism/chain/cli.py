@@ -1,10 +1,12 @@
 """Chain CLI — Phase 1 skeleton.
 
 Usage:
-  python3 -m chain.cli genesis   --network refraction
-  python3 -m chain.cli emit      --heights 0,100,315360
-  python3 -m chain.cli mine      --blocks 5            (placeholder PoW)
-  python3 -m chain.cli params
+  prism genesis   --network refraction
+  prism emit      --heights 0,100,315360
+  prism mine      --blocks 5            (placeholder PoW)
+  prism params
+
+(Also runnable as ``python3 -m chain.cli ...`` from inside the ``prism/`` tree.)
 """
 from __future__ import annotations
 
@@ -115,7 +117,12 @@ def cmd_params(a):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="chain.cli", description=__doc__)
+    import os
+    # Show the name the user actually invoked us by ("prism" for the pip script
+    # and PyInstaller binary); fall back to chain.cli for -m runs.
+    default_prog = "prism" if argv is None else None
+    prog = default_prog or os.path.basename(sys.argv[0] or "chain.cli")
+    ap = argparse.ArgumentParser(prog=prog, description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     g = sub.add_parser("genesis"); g.add_argument("--network", default="refraction",
