@@ -32,6 +32,7 @@ test = ["pytest>=7", "pycryptodome>=3.19"]
 [project.scripts]
 prism = "chain.cli:main"
 prism-rpc = "rpc.server:main"
+prism-gui = "rpc.launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["prism"]
