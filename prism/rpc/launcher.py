@@ -212,6 +212,20 @@ class InstanceLock:
             json.dump(self.info, fh)
             fh.flush()
             os.fsync(fh.fileno())
+        # Legacy compatibility: mirror the payload into the lockfile itself.
+        # On POSIX (flock is advisory) a rival can still read gui.lock; some
+        # tests and external tooling discover the endpoint that way. The
+        # Windows mandatory lock may block such reads — that is exactly why
+        # the sidecar above exists — but writing here is always safe because
+        # WE are the lock holder.
+        try:
+            self.fh.seek(0)
+            self.fh.truncate()
+            json.dump(self.info, self.fh)
+            self.fh.flush()
+            os.fsync(self.fh.fileno())
+        except OSError:                       # pragma: no cover
+            pass
 
     def release(self) -> None:
         if self.fh is not None:
