@@ -7,3 +7,17 @@ base_library.zip
 xref-*.html
 __pycache__/
 *.pyc
+
+# Rust/Tauri build artifacts (never belong in git)
+packaging/tauri/**/target/
+target/
+
+# PyInstaller local output
+build/
+dist/
+
+# scratch/evidence dumps from debugging sessions
+buildfix/
+distfix/
+job.html
+macoslogs.zip
