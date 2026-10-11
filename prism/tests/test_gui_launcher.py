@@ -207,12 +207,15 @@ class TestLauncherRun:
                              args=([{"data_dir": wallet_dir}],),
                              daemon=True)
         t.start()
-        # discover the port from the lock file the launcher writes
+        # discover the port from the sidecar the launcher writes.
+        # NOTE: never read gui.lock here — on Windows the holder's msvcrt
+        # mandatory byte-range lock makes rival reads raise PermissionError.
+        # The unlocked gui.info sidecar is the canonical discovery channel.
         info = None
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             try:
-                with open(os.path.join(wallet_dir, L.LOCK_NAME)) as fh:
+                with open(os.path.join(wallet_dir, L.INFO_NAME)) as fh:
                     raw = fh.read().strip()
                 if raw:
                     info = json.loads(raw)
