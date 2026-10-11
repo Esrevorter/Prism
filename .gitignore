@@ -1,0 +1,10 @@
+build/
+dist/
+*.spec.bak
+*.toc
+*.pyz
+*.pkg
+warn-*.txt
+xref-*.html
+__pycache__/
+*.pyc

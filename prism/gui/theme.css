@@ -1,0 +1,118 @@
+/* Prism GUI v0 — Neuro-Inclusive design tokens (spec §UX).
+   System font stack, generous spacing, WCAG-AA contrast in both themes,
+   visible focus rings, reduced-motion respect. Beauty = calm + clarity,
+   not decoration. */
+:root {
+  --bg: #f7f8fb;            --surface: #ffffff;
+  --text: #1c2333;          --muted: #5b6478;
+  --accent: #4f46e5;        --accent-ink: #ffffff;
+  --danger: #b3261e;        --ok: #1a7f37;
+  --border: #d9dee8;        --shadow: 0 2px 12px rgba(28,35,51,.08);
+  --radius: 14px;           --gap: 18px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+[data-theme="dark"] {
+  --bg: #12151f;            --surface: #1c2130;
+  --text: #e8ebf4;          --muted: #9aa3b8;
+  --accent: #8b85ff;        --accent-ink: #12151f;
+  --danger: #ff6b61;        --ok: #56d364;
+  --border: #333b52;        --shadow: 0 2px 14px rgba(0,0,0,.4);
+}
+* { box-sizing: border-box; }
+html { font-size: 17px; }   /* larger base for readability; user zoom still rules */
+body {
+  margin: 0; font-family: var(--font); color: var(--text);
+  background: var(--bg); line-height: 1.55;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .card, .btn { transition: box-shadow .18s ease, transform .18s ease; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+.topbar {
+  display: flex; align-items: center; gap: var(--gap);
+  padding: 14px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 5;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-size: 1.15rem; }
+.prism-mark {
+  width: 22px; height: 22px; display: inline-block;
+  background: conic-gradient(from 210deg, #ff5f7e, #ffb35f, #6cff9e, #5fb4ff, #b45fff, #ff5f7e);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.status { margin-left: auto; color: var(--muted); font-size: .9rem; }
+.theme-toggle {
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  border-radius: 999px; width: 40px; height: 40px; font-size: 1.1rem; cursor: pointer;
+}
+
+main { max-width: 720px; margin: 0 auto; padding: calc(var(--gap)*1.5) var(--gap);
+       display: grid; gap: var(--gap); }
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow);
+}
+h2 { margin: 0 0 10px; font-size: 1.05rem; font-weight: 600; letter-spacing: .01em; }
+.muted { color: var(--muted); font-size: .92rem; }
+.big-number { font-size: 2.6rem; font-weight: 700; margin: 4px 0 2px;
+              font-variant-numeric: tabular-nums; }
+
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+input[type="text"] {
+  flex: 1; min-width: 220px; padding: 13px 16px; font-size: 1rem;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); color: var(--text);
+}
+input:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 2px;
+}
+.btn {
+  padding: 13px 22px; border-radius: 10px; border: 1px solid transparent;
+  font-size: 1rem; font-weight: 600; cursor: pointer;
+}
+.btn.primary { background: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
+.btn.danger { background: var(--surface); color: var(--danger); border-color: var(--danger); }
+
+.chips { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.chip {
+  background: var(--surface); border: 1.5px solid var(--accent); color: var(--accent);
+  border-radius: 999px; padding: 8px 18px; font-size: .95rem; cursor: pointer;
+}
+.warning-card {
+  border-left: 6px solid var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  padding: 12px 16px; border-radius: 8px; margin: 10px 0;
+}
+.effect-list { list-style: none; padding: 0; margin: 8px 0; }
+.effect-list li { padding: 7px 0; border-bottom: 1px dashed var(--border); }
+.contacts { list-style: none; padding: 0; margin: 0; }
+.contacts li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.node-panel pre { overflow-x: auto; font-size: .85rem; }
+footer { text-align: center; padding: 26px; }
+
+/* --- fraud-simulator panel + device-keys polish (v0.1) --- */
+.risk-banner { border-radius: 12px; padding: 12px 16px; margin-bottom: 12px;
+               font-weight: 500; }
+.risk-banner.calm { display: none; }
+.risk-banner.caution { background: color-mix(in srgb, #d97706 15%, transparent);
+                       border: 1px solid #d97706; color: #92400e; }
+.risk-banner.pause { background: color-mix(in srgb, #dc2626 12%, transparent);
+                     border: 1px solid #dc2626; color: #7f1d1d; }
+[data-theme="dark"] .risk-banner.caution { color: #fbbf24; }
+[data-theme="dark"] .risk-banner.pause { color: #fca5a5; }
+.device-list { list-style: none; padding: 0; display: grid; gap: 10px; }
+.device-item { display: grid; grid-template-columns: auto auto 1fr; gap: 10px;
+               align-items: baseline; padding: 10px 14px;
+               border: 1px solid var(--border, #ddd); border-radius: 12px; }
+.device-item .fingerprint { font-family: ui-monospace, monospace; font-size: .85em;
+                            opacity: .8; }
+.share-help summary { cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+
+/* Plans (agent runtime): quiet digest, one-tap stop actions */
+.plan-list { list-style: none; padding: 0; margin: 0 0 .75rem; }
+.digest-card { border: 1px solid var(--line, #d8d4cc); border-radius: 12px; padding: .75rem 1rem; margin: .5rem 0; }
+.digest-card .digest-line { margin: 0 0 .5rem; font-size: 1.05rem; line-height: 1.5; }
+.digest-card .row { gap: .5rem; }
+@media (prefers-reduced-motion: reduce) { .digest-card, .digest-card button { transition: none !important; } }
