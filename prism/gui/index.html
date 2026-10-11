@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism — Wallet</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body data-theme="light">
+<header class="topbar">
+  <div class="brand"><span class="prism-mark" aria-hidden="true"></span><strong>Prism</strong></div>
+  <div class="status" id="net-status" role="status" aria-live="polite">connecting…</div>
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">◐</button>
+</header>
+
+<main>
+  <!-- Balance hero: the first thing a nervous first-time user should see -->
+  <section class="card balance-card" aria-labelledby="bal-h">
+    <h2 id="bal-h">Your balance</h2>
+    <p class="big-number" id="balance">—</p>
+    <p class="muted" id="balance-note">Waiting for your node…</p>
+    <div class="row">
+      <button class="btn secondary" id="faucet-btn" title="Devnet only: mine 5 blocks and credit the wallet">
+        Get test PRSM (mine 5 blocks)
+      </button>
+      <button class="btn secondary" id="ceremony-btn">Set up device keys</button>
+    </div>
+    <p class="muted" id="ceremony-status" aria-live="polite"></p>
+  </section>
+
+  <!-- NL intent bar: the key differentiator. Plain words in, plain review out. -->
+  <section class="card" aria-labelledby="nl-h">
+    <h2 id="nl-h">What would you like to do?</h2>
+    <form id="intent-form" autocomplete="off">
+      <input id="utterance" type="text" placeholder="e.g. send 2 PRSM to Alex"
+             aria-label="Describe your payment in plain words" autofocus>
+      <button class="btn primary" type="submit">Review</button>
+    </form>
+    <div id="chips" class="chips" hidden></div>
+  </section>
+
+  <!-- Review / simulation card: server-provided human language only -->
+  <section class="card" id="review" hidden aria-labelledby="rev-h">
+    <h2 id="rev-h">Here's what will happen</h2>
+    <div id="review-body"></div>
+    <div class="row">
+      <button class="btn danger" id="cancel-btn">Cancel</button>
+      <button class="btn primary" id="confirm-btn">Looks right — confirm</button>
+    </div>
+  </section>
+
+  <!-- Contacts -->
+  <section class="card" aria-labelledby="ct-h">
+    <h2 id="ct-h">People you can pay</h2>
+    <ul id="contacts" class="contacts"></ul>
+    <form id="contact-form" class="row">
+      <input id="ct-name" placeholder="Name" aria-label="Contact name" required>
+      <input id="ct-addr" placeholder="prsm1…" aria-label="Contact address" required>
+      <button class="btn secondary" type="submit">Add</button>
+    </form>
+  </section>
+
+  <!-- Node panel (collapsible; never front-and-center for non-technical users) -->
+  <details class="node-panel">
+    <summary>Node details (advanced)</summary>
+    <pre id="chain-info"></pre>
+  </details>
+</main>
+
+<footer class="muted">Local devnet · Refraction params · virtual block cadence until wall-clock deployment</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
