@@ -28,11 +28,22 @@ from ..chain.node import ChainState, mine_block, make_genesis, Block, ZERO32
 from ..chain.params import REFRACTION_TESTNET
 from ..mpc import frost
 from ..mpc.sharing import Share
+from ..wallet.agent_auth import AgentRuntime, PolicyEngine, SignerStub
 from ..wallet.intent import (AddressBook, Contact, IntentCompiler,
                              IntentError, apply_clarification, prsm_to_shard,
                              shard_to_prsm, simulate, fraud_flags)
 
 DEVICE_LABELS = {1: "Phone", 2: "Laptop", 3: "Backup card"}
+
+# Default agent grant (§7.7 / §8.4): a conservative self-directed DCA plan.
+# Constraints are user-editable through the API; these defaults embody the
+# spec's safety posture — small per-action cap, no instant path (comfort
+# threshold unset ⇒ every action waits out the full veto window), and the
+# recipient must be a whitelisted self-subaddress.
+DEFAULT_DCA_CAPABILITY = "buy_prsm_fiat_drip"
+DEFAULT_DCA_AGENT = "auto_dutcher.v1"
+DEFAULT_DCA_DESTINATION = "self_subaddr:dca"
+DEFAULT_DCA_VETO_HOURS = 24.0
 
 
 @dataclass
