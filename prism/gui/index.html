@@ -42,10 +42,26 @@
   <!-- Review / simulation card: server-provided human language only -->
   <section class="card" id="review" hidden aria-labelledby="rev-h">
     <h2 id="rev-h">Here's what will happen</h2>
+    <div id="fraud-banner" class="risk-banner" role="alert" hidden></div>
     <div id="review-body"></div>
     <div class="row">
       <button class="btn danger" id="cancel-btn">Cancel</button>
+      <button class="btn secondary" id="sleep-btn" hidden>Sleep on it — I'll come back</button>
       <button class="btn primary" id="confirm-btn">Looks right — confirm</button>
+    </div>
+  </section>
+
+  <!-- Device keys (MPC ceremony): share-handling UX, plain words only -->
+  <section class="card" id="devices-card" hidden aria-labelledby="dev-h">
+    <h2 id="dev-h">Your device keys</h2>
+    <p class="muted" id="devices-human" aria-live="polite"></p>
+    <ul id="devices" class="device-list"></ul>
+    <details class="share-help">
+      <summary>Why can't I see my key shares?</summary>
+      <p id="share-help-body" class="muted"></p>
+    </details>
+    <div class="row">
+      <button class="btn secondary" id="ceremony-redo-btn">Start over (reshare)</button>
     </div>
   </section>
 

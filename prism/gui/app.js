@@ -26,6 +26,7 @@ const el = (tag, cls, text) => {
 };
 
 let currentIntent = null;
+let riskAcknowledged = false;
 
 // ---------- boot / status ----------
 async function refreshAll() {
@@ -34,12 +35,22 @@ async function refreshAll() {
     $("#net-status").textContent = `connected · ${ping.network} · block ${ping.tip_height}`;
     const info = await rpc("chain.info");
     $("#chain-info").textContent = JSON.stringify(info, null, 2);
+    // live chain state from the daemon's block store (not fixtures)
+    try {
+      const recent = await rpc("chain.blocks", { limit: 5 });
+      const list = el("ul", "effect-list");
+      recent.blocks.forEach(b => list.appendChild(el("li", null,
+        `#${b.height} · ${b.hash.slice(0, 12)}… · ${b.tx_count} tx`)));
+      $("#chain-info").appendChild(list);
+    } catch { /* older daemon without chain.blocks */ }
     const bal = await rpc("wallet.balance");
     $("#balance").textContent = `${bal.balance_prsm} PRSM`;
     $("#balance-note").textContent = "on your local devnet";
     const ct = await rpc("contacts.list");
     const ul = $("#contacts");
     ul.replaceChildren(...ct.contacts.map(c => el("li", null, c.display_name)));
+    const cer = await rpc("mpc.ceremony_status");
+    if (cer.status === "complete") renderCeremony(cer);
   } catch (e) {
     $("#net-status").textContent = "node unreachable — start: python -m prism.rpc.server";
   }
@@ -58,6 +69,7 @@ $("#intent-form").addEventListener("submit", async (ev) => {
 
 function showIntent(it) {
   currentIntent = it;
+  riskAcknowledged = false;
   const chips = $("#chips");
   const review = $("#review");
   if (it.status === "draft" && it.clarify) {
@@ -78,9 +90,51 @@ function showIntent(it) {
   }
   chips.hidden = true;
   review.hidden = false;
+  // fraud-simulator panel: live SigningGate review against real daemon state.
+  // Banner text + plain-english preview come from the server only (honest UX).
+  renderReviewBody();
+}
+
+async function renderReviewBody() {
+  if (!currentIntent) return;
   const body = $("#review-body");
+  const banner = $("#fraud-banner");
+  let rv = null;
+  try {
+    rv = await rpc("intent.review", {
+      intent_id: currentIntent.intent_id,
+      acknowledged_risk: riskAcknowledged,
+    });
+  } catch (e) { /* fall back to the plain compile payload below */ }
   body.replaceChildren();
-  const sim = it.simulation || {};
+  banner.hidden = true;
+  banner.className = "risk-banner";
+  $("#sleep-btn").hidden = true;
+  $("#confirm-btn").disabled = false;
+
+  if (rv) {
+    if (rv.ui_band !== "calm") {
+      banner.hidden = false;
+      banner.classList.add(rv.ui_band);
+      banner.textContent = rv.interruption && !riskAcknowledged
+        ? `⏸ ${rv.human}`
+        : `⚠ ${rv.risk.reasons.join(" · ")}`;
+    }
+    if (rv.interruption && !riskAcknowledged) {
+      $("#sleep-btn").hidden = false;
+      $("#confirm-btn").disabled = true;   // gate owns proceed; UI mirrors it
+    }
+    body.appendChild(el("p", null, rv.plain_english || rv.human));
+    if (!rv.proceed && !rv.interruption)
+      body.appendChild(el("div", "warning-card",
+        rv.reasons.join(" — ") || "This can't be confirmed yet."));
+    if (rv.sim_digest)
+      body.appendChild(el("p", "muted",
+        `Preview fingerprint: ${rv.sim_digest.slice(0, 12)}… ` +
+        `(what you see is exactly what gets signed)`));
+    return;
+  }
+  const sim = (currentIntent.simulation) || {};
   const effects = sim.predicted_effects || [];
   const list = el("ul", "effect-list");
   effects.forEach(ef => list.appendChild(el("li", null,
@@ -88,12 +142,16 @@ function showIntent(it) {
   body.appendChild(list);
   (sim.warnings || []).forEach(w =>
     body.appendChild(el("div", "warning-card", `⚠ ${w}`)));
-  if ((sim.risk_score ?? 0) > 0.5)
-    body.appendChild(el("div", "warning-card",
-      "This looks unusual for you. Take a breath — you can cancel safely."));
   body.appendChild(el("p", "muted",
-    `Status: ${it.status}. Nothing is sent until you confirm.`));
+    `Status: ${currentIntent.status}. Nothing is sent until you confirm.`));
 }
+
+$("#sleep-btn").addEventListener("click", () => {
+  // calm interruption (§7.3 step 4): never pressure the user onward
+  $("#review").hidden = true;
+  currentIntent = null;
+  $("#net-status").textContent = "paused safely — nothing was sent";
+});
 
 function suggestChips(clarify) {
   // Server never guesses; these are *answers the user might mean*, offered
@@ -133,6 +191,7 @@ $("#cancel-btn").addEventListener("click", () => {
   $("#review").hidden = true;
   $("#chips").hidden = true;
   currentIntent = null;
+  riskAcknowledged = false;
 });
 
 // ---------- faucet + ceremony ----------
@@ -146,8 +205,40 @@ $("#ceremony-btn").addEventListener("click", async () => {
   $("#ceremony-status").textContent = "Setting up your 2-of-3 device keys…";
   try {
     const st = await rpc("mpc.ceremony_start");
-    $("#ceremony-status").textContent =
-      `${st.stage} (${st.percent}%${st.elapsed_s !== undefined ? `, ${st.elapsed_s}s` : ""})`;
+    renderCeremony(st);
+  } catch (e) { $("#ceremony-status").textContent = e.message; }
+});
+
+function renderCeremony(st) {
+  // share-handling UX: show only what's safe + honest — device labels and
+  // short fingerprints, never raw share values; every reassurance line is
+  // server-computed text (this file adds none of its own).
+  $("#ceremony-status").textContent = `${st.stage} (${st.percent}%)`;
+  const card = $("#devices-card");
+  if (st.status !== "complete" || !st.devices) { card.hidden = true; return; }
+  card.hidden = false;
+  $("#devices-human").textContent = st.human || "";
+  const ul = $("#devices");
+  ul.replaceChildren(...st.devices.map(d => {
+    const li = el("li", "device-item");
+    li.appendChild(el("strong", null, d.label));
+    li.appendChild(el("span", "fingerprint", `share ${d.share_fingerprint}`));
+    li.appendChild(el("span", "muted", d.role));
+    return li;
+  }));
+  const help = st.share_handling || {};
+  $("#share-help-body").textContent =
+    [help.never_shown, help.backup_ready, help.what_if_lost]
+      .filter(Boolean).join(" ");
+}
+
+$("#ceremony-redo-btn").addEventListener("click", async () => {
+  try {
+    await rpc("mpc.ceremony_reset");
+    $("#devices-card").hidden = true;
+    $("#ceremony-status").textContent = "";
+    const st = await rpc("mpc.ceremony_start");   // fresh shares via reshare
+    renderCeremony(st);
   } catch (e) { $("#ceremony-status").textContent = e.message; }
 });
 

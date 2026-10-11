@@ -35,6 +35,8 @@ def _dispatch(method: str, params: dict):
     table = {
         "chain.info":            lambda p: SERVICE.chain_info(),
         "chain.mine":            lambda p: SERVICE.mine(int(p.get("count", 1))),
+        "chain.blocks":          lambda p: SERVICE.chain_blocks(
+                                           int(p.get("limit", 10))),
         "wallet.balance":        lambda p: SERVICE.balance(),
         "contacts.list":         lambda p: {"contacts": SERVICE.contacts_list()},
         "contacts.add":          lambda p: SERVICE.contact_add(
@@ -43,9 +45,17 @@ def _dispatch(method: str, params: dict):
         "intent.answer":         lambda p: SERVICE.intent_answer(
                                            str(p["intent_id"]), str(p["answer"])),
         "intent.simulate":       lambda p: SERVICE.intent_simulate(str(p["intent_id"])),
-        "intent.confirm":        lambda p: SERVICE.intent_confirm(str(p["intent_id"])),
+        "intent.review":         lambda p: SERVICE.intent_review(
+                                           str(p["intent_id"]),
+                                           acknowledged_risk=bool(
+                                               p.get("acknowledged_risk"))),
+        "intent.confirm":        lambda p: SERVICE.intent_confirm(
+                                           str(p["intent_id"]),
+                                           acknowledged_risk=bool(
+                                               p.get("acknowledged_risk"))),
         "mpc.ceremony_start":    lambda p: SERVICE.ceremony_start(),
         "mpc.ceremony_status":   lambda p: SERVICE.ceremony_status(),
+        "mpc.ceremony_reset":    lambda p: SERVICE.ceremony_reset(),
         "mpc.sign_preview":      lambda p: SERVICE.sign_preview(str(p["intent_id"])),
     }
     fn = table.get(method)
