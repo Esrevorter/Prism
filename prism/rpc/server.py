@@ -67,6 +67,10 @@ def _dispatch(method: str, params: dict):
                                                float(p["price_ceiling_usd"])
                                                if p.get("price_ceiling_usd")
                                                is not None else None),
+                                           comfort_prsm=(
+                                               float(p["comfort_prsm"])
+                                               if p.get("comfort_prsm")
+                                               is not None else None),
                                            veto_hours=float(p.get(
                                                "veto_hours", 24.0))),
         "agent.propose":         lambda p: SERVICE.agent_propose(

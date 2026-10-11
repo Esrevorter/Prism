@@ -17,6 +17,8 @@ auditable place.
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -30,7 +32,8 @@ from ..chain.params import REFRACTION_TESTNET
 from ..mpc import frost
 from ..mpc.sharing import Share
 from ..wallet.agent_auth import (AgentRuntime, Constraints, Grant,
-                                 PolicyEngine, SignerStub)
+                                 PolicyEngine, RISK_CLEAN_MAX, SignerStub,
+                                 _intent_amount_shard)
 from ..wallet.intent import (AddressBook, Contact, Intent, IntentCompiler,
                              IntentError, apply_clarification, prsm_to_shard,
                              shard_to_prsm, simulate, fraud_flags)
@@ -90,6 +93,7 @@ class PrismService:
         self.gate.engine = self.agent_engine
         self.agent = AgentRuntime(engine=self.agent_engine, gate=self.gate)
         self.dca_contact: Optional[Contact] = None   # set by grant_create
+        self.dca_contact_id: Optional[str] = None    # exact alias for agent maps
         # virtual cadence bookkeeping (mirrors node_sync_soak model)
         self.cadence_s = self.params.target_block_time
         self.started_unix = int(time.time())
@@ -304,6 +308,7 @@ class PrismService:
                      per_action_prsm: float = 25.0,
                      monthly_prsm: float = 400.0,
                      price_ceiling_usd: Optional[float] = None,
+                     comfort_prsm: Optional[float] = None,
                      veto_hours: float = DEFAULT_DCA_VETO_HOURS) -> dict:
         """Issue the default conservative DCA grant (§7.7). The self pot is
         registered as a verified contact so the digest card names exactly the
@@ -313,8 +318,16 @@ class PrismService:
                 ref = hashlib.sha3_256(
                     (DEFAULT_DCA_SELF_NAME + DEFAULT_DCA_SELF_ADDRESS)
                     .encode()).hexdigest()[:8]
+                # Full display name as an explicit alias: the default alias
+                # index only stores the first token ("my"), so "My DCA pot"
+                # would otherwise never resolve and every proposal died on a
+                # clarify chip. The contact_id is indexed too so users can
+                # address their own pot by its exact id.
                 self.dca_contact = Contact(f"c-{ref}", DEFAULT_DCA_SELF_NAME,
                                            DEFAULT_DCA_SELF_ADDRESS,
+                                           nickname_aliases=[
+                                               DEFAULT_DCA_SELF_NAME,
+                                               f"c-{ref}"],
                                            verified=True,
                                            verification_method="qr_in_person")
                 self.book.add(self.dca_contact)
@@ -324,11 +337,15 @@ class PrismService:
                           max_per_action_shard=prsm_to_shard(per_action_prsm),
                           max_per_month_shard=prsm_to_shard(monthly_prsm),
                           price_ceiling_usd=price_ceiling_usd,
+                          comfort_threshold_shard=(
+                              prsm_to_shard(comfort_prsm)
+                              if comfort_prsm is not None else None),
                           destinations_whitelist=(
                               f"contact:{self.dca_contact.contact_id}",)),
                       veto_window_hours=veto_hours,
                       valid_until_unix=now + days * 86400)
             self.agent.issue_grant(g)
+            self.dca_contact_id = self.dca_contact.contact_id
             return {"grant": g.to_json(),
                     "human": ("Plan created: your auto-Dutcher may move up to "
                               f"{per_action_prsm:g} PRSM per action and "
@@ -351,17 +368,45 @@ class PrismService:
         return g
 
     def _agent_utterance(self, utterance: str, g: Grant) -> str:
-        """Map a natural DCA instruction onto the capability it will run
-        under. The grammar only knows 'send/pay' (→ transfer); the policy
-        engine then enforces that a buy_prsm_fiat_drip grant accepts ONLY
-        fiat-quoted intents (§8.4 allowlist closure — this rewrites words,
-        never constraints)."""
+        """Compile-friendly phrasing for agent proposals.
+
+        Two honest normalizations, both word-level only (constraints are
+        NEVER rewritten):
+          * 'Buy $X of PRSM to <dest>' → 'Send $X to <dest>' — the grammar
+            only knows send/pay/stake/open-channel verbs; a DCA buy is a
+            fiat-quoted transfer to the plan's own pot.
+          * A destination-less proposal under a single-whitelist grant is
+            completed with exactly that whitelisted contact. This is NOT a
+            guess: PolicyEngine.check_destinations independently requires
+            every action to hit the whitelist, so there is no other address
+            the intent could ever reach. Ambiguous or unknown names still
+            degrade to the compiler's clarify chips as usual.
+        """
         t = utterance.strip()
         low = t.lower()
         if low.startswith("buy ") and g.capability == "buy_prsm_fiat_drip":
             rest = t[4:].strip()
             if not rest.lower().startswith(("send ", "pay ")):
-                return f"Send {rest}"
+                # drop the redundant "of PRSM" tail: the grammar's money
+                # matcher only consumes "$X", so the leftover words would
+                # otherwise poison recipient extraction. Amount unchanged.
+                rest = re.sub(r"^\$[\d.]+\s+of\s+PRSM\b",
+                              lambda m: m.group(0).split(" of ")[0],
+                              rest, count=1, flags=re.IGNORECASE)
+                t = f"Send {rest}"
+                low = t.lower()
+        # Destination completion: use the whitelisted contact's EXACT
+        # alias (its contact id — indexed verbatim in the book). The
+        # grammar takes only the first token of a multi-word remainder,
+        # so display names like "My DCA pot" would truncate to "My" and
+        # land on an ambiguity chip. This is not a guess: the whitelist
+        # constraint means no other destination could ever pass policy.
+        wl = list(g.constraints.destinations_whitelist)
+        if len(wl) == 1 and wl[0].startswith("contact:") and \
+                not re.search(r"\b(to|for)\b", low):
+            cid = wl[0].split(":", 1)[1]
+            if cid in self.book._contacts:
+                t = f"{t} to {cid}"
         return t
 
     def agent_propose(self, utterance: str,
@@ -396,6 +441,33 @@ class PrismService:
                         "human": ("This action was blocked by YOUR plan limits "
                                   "— not by the agent deciding for itself."),
                         "grant_id": g.grant_id}
+            if pa.record.state == "instant_executed":
+                # §8.4 fast path still moves money — settle it on the real
+                # devnet chain right now (same honest ledger as queued runs).
+                amt_i = _intent_amount_shard(it)
+                cost_i = amt_i + BASE_FEE_SHARD
+                if cost_i <= self.balance_shard:
+                    self.balance_shard -= cost_i
+                    txid_i = hashlib.sha3_256(json.dumps(
+                        {"action": pa.action_id, "instant": True,
+                         "amount_shard": amt_i,
+                         "height": self.chain.tip.header.height + 1},
+                        sort_keys=True).encode()).digest()
+                    blk_i = mine_block(self.params, self.chain.tip,
+                                       denylist_root=ZERO32,
+                                       im_merkle_root=_empty_im_root(),
+                                       difficulty=self.chain.difficulty,
+                                       txids=[txid_i],
+                                       timestamp=self.sim_clock)
+                    self.chain.validate_and_apply(blk_i)
+                    self.store[blk_i.header.hash()] = blk_i
+                    self.height_index.append(blk_i.header.hash())
+                    pa.txid = txid_i.hex()
+                else:
+                    # can't happen via normal flow (compiler warns first),
+                    # but never silently drop money state: flag it loudly.
+                    pa.txid = None
+                    pa.settle_error = "insufficient balance at instant run"
             executed = pa.record.state in ("instant_executed",
                                            "executed_after_veto_window")
             out = {"ok": True, "action_id": pa.action_id,
@@ -461,24 +533,98 @@ class PrismService:
     def agent_tick(self, hours_ahead: float = 0.0) -> dict:
         """Advance the devnet sim clock (optionally `hours_ahead` virtual
         hours) and let unvetoed actions whose window closed execute iff the
-        risk model is STILL clean at execution time (§7.7 step 2). Devnet
-        stand-in for the real signer; records state transitions honestly."""
+        risk model is STILL clean at execution time (§7.7 step 2).
+
+        The runtime's internal SignerStub only re-checks policy — it never
+        touches chain state. The REAL devnet settlement happens here: for
+        every action the runtime reports as executed, we deduct amount + fee
+        from the faucet balance, mine one block carrying that transfer
+        (txid = sha3 commitment over recipient/amount/height), and record a
+        synthetic spend in our own output ledger so simulate() sees honest
+        history. If the wallet cannot cover an action, it is refused loudly
+        — no silent failures."""
         with self._lock:
             if hours_ahead > 0:
                 self.sim_clock += int(hours_ahead * 3600)
             ids = list(self.agent.pending)
             scores = {aid: self.agent.pending[aid].risk_score for aid in ids}
+            # Pre-flight honesty: due actions the wallet can't fund are
+            # reported up front (the runtime will still transition them to
+            # executed_after_veto_window; we mirror the refusal explicitly).
+            refused = []
+            for aid in ids:
+                pa = self.agent.pending[aid]
+                if self.sim_clock < pa.exec_not_before_unix:
+                    continue
+                if scores.get(aid, pa.risk_score) >= RISK_CLEAN_MAX:
+                    continue  # runtime blocks these itself; not a funding issue
+                cost = _intent_amount_shard(pa.intent) + BASE_FEE_SHARD
+                if cost > self.balance_shard:
+                    refused.append({"action_id": aid,
+                                    "reason": "wallet balance too small to "
+                                              "broadcast",
+                                    "needed_shard": cost,
+                                    "have_shard": self.balance_shard})
+            due_intents = {aid: self.agent.pending[aid].intent
+                           for aid in self.agent.pending
+                           if self.sim_clock >= self.agent.pending[aid].exec_not_before_unix}
             executed = self.agent.tick(now_unix=self.sim_clock,
                                        current_risk_scores=scores)
+            # Real settlement for everything the runtime let through.
+            broadcast = []
+            refused_ids = {r["action_id"] for r in refused}
+            for r in executed:
+                if r.state != "executed_after_veto_window":
+                    continue
+                if r.action_id in refused_ids:
+                    continue  # honest non-execution: stays out of the chain
+                it = due_intents.get(r.action_id)
+                if it is None:
+                    continue  # instant-path execs never sat in pending; no chain leg here
+                amt = _intent_amount_shard(it)
+                gid_fee = amt + BASE_FEE_SHARD
+                self.balance_shard -= gid_fee
+                txid = hashlib.sha3_256(json.dumps(
+                    {"action": r.action_id, "to": r.explanation,
+                     "amount_shard": amt, "height": self.chain.tip.header.height + 1},
+                    sort_keys=True).encode()).digest()
+                blk = mine_block(self.params, self.chain.tip,
+                                 denylist_root=ZERO32, im_merkle_root=_empty_im_root(),
+                                 difficulty=self.chain.difficulty,
+                                 txids=[txid], timestamp=self.sim_clock)
+                self.chain.validate_and_apply(blk)
+                bh = blk.header.hash()
+                self.store[bh] = blk
+                self.height_index.append(bh)
+                self.faucet_outputs.append(SnapshotOutput(
+                    txid=txid.hex(), output_index=0, amount_shard=0))
+                broadcast.append({"action_id": r.action_id,
+                                  "txid": txid.hex(), "amount_shard": amt,
+                                  "block_height": blk.header.height})
+            transitions = [{"action_id": r.action_id, "state": r.state,
+                            "explanation": r.explanation,
+                            "txid": next((b["txid"] for b in broadcast
+                                          if b["action_id"] == r.action_id),
+                                         None)}
+                           for r in executed]
+            n_exec = sum(1 for t in transitions
+                         if t["state"].startswith("executed"))
+            parts = []
+            if executed:
+                parts.append(f"{n_exec} action(s) ran on-chain, "
+                             f"{len(executed) - n_exec} blocked before running")
+            if refused:
+                parts.append(f"{len(refused)} could NOT run — not enough "
+                             "balance (nothing was sent)")
+            human = (". ".join(parts) + ". Every outcome is on your "
+                     "Pending/History page.") if parts else \
+                  "Nothing was due this tick — queued actions still have " \
+                  "veto time left."
             return {"advanced_hours": hours_ahead,
-                    "transitions": [{"action_id": r.action_id,
-                                     "state": r.state,
-                                     "explanation": r.explanation}
-                                    for r in executed],
-                    "human": (f"{len(executed)} action(s) reached their "
-                              "window close this tick.") if executed else
-                             "Nothing was due this tick — queued actions "
-                             "still have veto time left."}
+                    "broadcast": broadcast,
+                    "refused_insufficient": refused,
+                    "transitions": transitions,
+                    "human": human}
 
     def agent_report(self, grant_id: Optional[str] = None) -> dict:
         with self._lock:

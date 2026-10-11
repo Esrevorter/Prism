@@ -341,6 +341,8 @@ class PendingAction:
     risk_score: float
     vetoed: bool = False
     executed: bool = False
+    txid: Optional[str] = None        # devnet settlement proof (§7.7)
+    settle_error: Optional[str] = None
 
     @property
     def action_id(self) -> str:
