@@ -186,13 +186,15 @@ class TestCheatingCloseAndWatchtower(unittest.TestCase):
         self.assertEqual(po["winner"], "b")
         self.assertEqual(po["credit_b"], 1_000_000)
         self.assertEqual(po["credit_a"], 0)
-        # mirrored case: B cheats
-        cheat2 = SignedState(ch.channel_id, 1, 500_000, 600_000, b"", b"")
-        # cheat2 claims more for B than truth? truth=(100k? ) compute:
-        # after 400k A->B: bal_a=100_000, bal_b=900_000; cheat2.b=600k < 900k
-        # so A is the one claiming more relative to truth -> winner a
-        po2 = penalty_outcome(truth, cheat2)
+        # mirrored case: B broadcasts an old state claiming MORE for B
+        # than the jointly-signed truth does (truth here has bal_b lower
+        # than the stale state's bal_b).
+        truth2 = channel_pay(ch, self.a, self.b, 200_000, from_a=False)  # B->A
+        cheat2 = SignedState(ch.channel_id, 1, 100_000, 900_000, b"", b"")
+        po2 = penalty_outcome(truth2, cheat2)
         self.assertEqual(po2["winner"], "a")
+        self.assertEqual(po2["credit_a"], 1_000_000)
+        self.assertEqual(po2["credit_b"], 0)
 
     def test_evidence_pair_must_be_stale(self):
         s_new = SignedState("c", 5, 1, 1, b"", b"")
@@ -230,10 +232,9 @@ class TestCheatingCloseAndWatchtower(unittest.TestCase):
 
 def _tag(secret: bytes, ch: Channel) -> bytes:
     # must mirror channels.seal_blob's index derivation exactly
-    from prism.crypto.hashing import keccak_256
     import hashlib
     return hashlib.sha256(b"|".join([b"tag", secret,
-                                     ch.channel_id.encode()]))[:16]
+                                     ch.channel_id.encode()])).digest()[:16]
 
 
 # --------------------------------------------------- schnorr sanity -------
