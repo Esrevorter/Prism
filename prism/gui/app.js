@@ -51,6 +51,7 @@ async function refreshAll() {
     ul.replaceChildren(...ct.contacts.map(c => el("li", null, c.display_name)));
     const cer = await rpc("mpc.ceremony_status");
     if (cer.status === "complete") renderCeremony(cer);
+    refreshPlans();
   } catch (e) {
     $("#net-status").textContent = "node unreachable — start: python -m prism.rpc.server";
   }
@@ -252,6 +253,61 @@ $("#contact-form").addEventListener("submit", async (ev) => {
     $("#ct-name").value = ""; $("#ct-addr").value = "";
     refreshAll();
   } catch (e) { alert(e.message); }
+});
+
+// ---------- plans (agent runtime): pending digest, one-tap veto/revoke ----------
+let _activeGrant = null;   // grant id from the last plan we created this session
+
+async function refreshPlans() {
+  const pend = await rpc("agent.pending");
+  const card = $("#plans-card");
+  if (!_activeGrant && pend.count === 0) { card.hidden = true; return; }
+  card.hidden = false;
+  $("#plans-human").textContent = pend.human || "";
+  const box = $("#pending-digests");
+  box.replaceChildren(...pend.pending.map(p => {
+    const c = el("div", "digest-card");
+    c.appendChild(el("p", "digest-line", p.line));
+    const row = el("div", "row");
+    const vBtn = el("button", "btn secondary", "Stop this one");
+    vBtn.addEventListener("click", async () => {
+      try {
+        const r = await rpc("agent.veto", { action_id: p.short_id });
+        c.querySelector(".digest-line").textContent = r.human || "Stopped.";
+        refreshAll();
+      } catch (e) { alert(e.message); }
+    });
+    const rBtn = el("button", "btn danger", "Stop the whole plan");
+    rBtn.addEventListener("click", async () => {
+      try {
+        const r = await rpc("agent.revoke", {});
+        $("#plans-human").textContent = r.human || "Plan stopped.";
+        refreshAll();
+      } catch (e) { alert(e.message); }
+    });
+    row.append(vBtn, rBtn);
+    c.appendChild(row);
+    return c;
+  }));
+}
+
+$("#plan-form")?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    if (!_activeGrant) {
+      const g = await rpc("agent.grant_create", {});
+      _activeGrant = g.grant_id;
+    }
+    const r = await rpc("agent.propose",
+                        { utterance: $("#plan-utterance").value,
+                          grant_id: _activeGrant });
+    $("#plans-card").hidden = false;
+    $("#plans-human").textContent = r.ok !== false
+      ? (r.human || "Queued. You have 24 hours to change your mind.")
+      : (r.human || "Nothing was proposed.");
+    $("#plan-utterance").value = "";
+    refreshAll();
+  } catch (e) { $("#plans-human").textContent = e.message; }
 });
 
 // ---------- theme ----------

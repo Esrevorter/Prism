@@ -454,6 +454,11 @@ class AgentRuntime:
                 pa.vetoed = True
                 self.log.transition(pa.action_id, "vetoed",
                                     "cascade: grant revoked", now_unix=now_unix)
+                # §7.7 step 3 honesty: a cascade must actually REMOVE the
+                # action from the pending digest — otherwise the user stops
+                # the plan and still sees the action waiting ("cancelled"
+                # while visible is a lie). Bug caught by TestAgentRuntime.
+                self.pending.pop(pa.action_id, None)
         self.log.append(grant_id=grant_id, state="blocked_by_policy",
                         explanation="grant revoked (one-tap)", proposed_intent={},
                         now_unix=now_unix)

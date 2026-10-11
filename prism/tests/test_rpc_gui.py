@@ -291,3 +291,76 @@ class TestExplanationTemplatePack:
             "send 1 PRSM to Alex memo urgent transfer customer support")
         rp = svc.intent_review(scam["intent_id"])
         assert rp["template_pack"] == "sim_explain_v1"
+
+
+class TestAgentRuntime:
+    """Policy enforcement + neuro-inclusive UX constraints (spec §7.7)."""
+
+    def test_proposal_queues_under_veto_window(self, svc):
+        g = svc.grant_create(days=30, per_action_prsm=25.0, monthly_prsm=400.0,
+                             veto_hours=24.0)
+        gid = g["grant"]["grant_id"]
+        p = svc.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid)
+        assert p.get("ok") is True, p.get("reasons")
+        assert p["state"] == "queued_under_veto_window"
+        pend = svc.agent_pending()
+        assert pend["count"] == 1
+        # UX constraint: digest is plain-language only — no raw numbers the
+        # user must interpret, and honest "nothing has run yet" copy.
+        line = pend["pending"][0]["line"]
+        assert "Bought" in line or "buy" in line.lower()
+        assert "nothing has run yet" in pend["human"].lower()
+
+    def test_prsm_denominated_dca_refused_with_all_reasons(self, svc):
+        g = svc.grant_create(); gid = g["grant"]["grant_id"]
+        bad = svc.agent_propose("Buy 5 PRSM to My DCA pot", grant_id=gid)
+        assert bad.get("refused") is True
+        assert any("fiat-quoted" in r for r in bad["reasons"])
+        assert svc.agent_pending()["count"] == 0  # refusal never queues
+
+    def test_executed_settles_money_state(self, svc):
+        svc.mine(2)  # faucet funding: unfunded actions stay queued (fail-closed)
+        g = svc.grant_create(); gid = g["grant"]["grant_id"]
+        svc.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid)
+        bal0 = svc.balance()["balance_shard"]; h0 = svc.chain_info()["height"]
+        t = svc.agent_tick(hours_ahead=25.0)
+        assert len(t["executed"]) == 1
+        ex = t["executed"][0]
+        assert ex["txid"], "executed action must carry a real txid"
+        bal1 = svc.balance()["balance_shard"]
+        assert bal1 < bal0, "execution must deduct from the wallet"
+        assert svc.chain_info()["height"] == h0 + 1
+
+    def test_unfunded_action_stays_queued_and_settles_after_funding(self, svc):
+        g = svc.grant_create(); gid = g["grant"]["grant_id"]
+        svc.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid)
+        svc.balance_shard = 0  # simulate drained wallet
+        t = svc.agent_tick(hours_ahead=25.0)
+        assert t["broadcast"] == []
+        assert len(t["refused_insufficient"]) == 1
+        assert svc.agent_pending()["count"] == 1, \
+            "fail-closed: unfunded action keeps its veto window open"
+        svc.faucet_outputs = []; svc.balance_shard = 0
+        svc.mine(3)  # fund the wallet again
+        t2 = svc.agent_tick(hours_ahead=25.0)
+        assert len(t2["broadcast"]) == 1
+        assert svc.agent_pending()["count"] == 0
+
+    def test_veto_one_tap_blocks_execution(self, svc):
+        g = svc.grant_create(); gid = g["grant"]["grant_id"]
+        p = svc.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid)
+        v = svc.agent_veto(p["action_id"][:8])   # short id from the card
+        assert v.get("ok") is True
+        assert "not run" in v["human"].lower()   # honest confirmation copy
+        t = svc.agent_tick(hours_ahead=25.0)
+        assert t["broadcast"] == []              # vetoed means never executed
+
+    def test_revoke_cascades_and_is_permanent(self, svc):
+        g = svc.grant_create(); gid = g["grant"]["grant_id"]
+        svc.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid)
+        r = svc.agent_revoke(gid)
+        assert r.get("ok") is True
+        assert "cancelled" in r["human"].lower()
+        assert svc.agent_pending()["count"] == 0
+        after = svc.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid)
+        assert after.get("refused") is True      # revoked plan never resumes

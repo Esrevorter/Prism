@@ -65,6 +65,23 @@
     </div>
   </section>
 
+  <!-- Plans (agent runtime): pending digest, one-tap veto/revoke, plain words only -->
+  <section class="card" id="plans-card" hidden aria-labelledby="plans-h">
+    <h2 id="plans-h">Your standing plans</h2>
+    <p class="muted" id="plans-human" aria-live="polite"></p>
+    <ul id="plans-list" class="plan-list"></ul>
+    <div id="pending-digests"></div>
+    <form id="plan-form" class="row">
+      <input id="plan-utterance" placeholder="e.g. buy $50 of PRSM every week"
+             aria-label="Plan in plain words" required>
+      <button class="btn primary" type="submit">Create plan</button>
+    </form>
+    <details class="plan-help">
+      <summary>How do these plans work?</summary>
+      <p class="muted">A plan is something you allowed once, like "buy a little PRSM each week". Before anything runs, you get 24 hours to change your mind — nothing happens silently. Stopping a plan cancels everything waiting under it, and history keeps a record so nothing disappears.</p>
+    </details>
+  </section>
+
   <!-- Contacts -->
   <section class="card" aria-labelledby="ct-h">
     <h2 id="ct-h">People you can pay</h2>
