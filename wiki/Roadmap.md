@@ -34,13 +34,13 @@ Phase 4 ░░░░░░░░░░░░░░░░░░░░░░░░
 - ZKP circuits v1 (Source Provenance + Balance Solvency) audited by ≥2 external firms.
 - Bug bounty program opens.
 
-## Phase 3 — Accessibility (Months 13–18) 🗓️
+## Phase 3 — Accessibility (Months 13–18) 🚧 in progress
 
-- Social recovery GA (3-of-5): timelock + cancellation flows hardened.
-- Biometric share-gating: iOS Secure Enclave / Android StrongBox.
-- Neuro-inclusive design system shipped; usability study n≥20 neurodiverse participants.
-- Payment channels + watchtower beta (`prism/l2/`).
-- Fee-predictability hardening: priority-cap enforcement, block-packing policy.
+- ✅ Social recovery GA (3-of-5): timelock + cancellation flows hardened — implemented & formally tested (`tests/test_rpc_gui.py::TestRecovery`, spec §13).
+- 🧪 Biometric share-gating: iOS Secure Enclave / Android StrongBox — beta: `prism/mpc/biometric.py` (SE interface, device-bound sealing, lockout + attestation) with desktop simulated SE; native attestation lands with device builds.
+- ⏳ Neuro-inclusive design system shipped; usability study n≥20 neurodiverse participants — open external human-subjects task (cannot close in code).
+- 🧪 Payment channels + watchtower beta (`prism/l2/`) — beta: `channels.py` implemented & tested (`test_l2_fees_channels.py`, `phase3_smoke.py`); pending node-mempool CLTV wiring.
+- ✅ Fee-predictability hardening: priority-cap enforcement, block-packing policy — `prism/l2/fees.py` (lattice N·BASE, 1≤N≤10; deterministic quotes; fee-density packing), tested.
 
 ## Phase 4 — Ecosystem (Months 19–24) 🗓️
 

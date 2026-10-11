@@ -108,17 +108,22 @@ Five numbers worth remembering:
 
 ## Where the project stands today
 
-> **Status: Phase 1 — Foundation (reference implementation).** This repository contains working, tested code for the cryptographic core, chain rules, wallet logic, and AI-assistant components — **not yet a live public network**. Think "engine on the test bench," not "car in the showroom." Do not expect to buy, sell, or mine PRSM yet; any coin claiming to be PRSM today is a scam.
+> **Status: Phase 3 — Accessibility (in progress).** This repository contains working, tested code for the cryptographic core, chain rules, wallet logic, AI-assistant components, and now the Phase-3 accessibility layer (social-recovery GA flows, fee-policy hardening, payment-channel beta, biometric share-gating) — **not yet a live public network**. Think "engine on the test bench," not "car in the showroom." Do not expect to buy, sell, or mine PRSM yet; any coin claiming to be PRSM today is a scam.
 
 | Milestone | Status |
 |---|---|
 | Cryptographic core (commitments, ring signatures, range proofs, stealth addresses) | ✅ Implemented & property-tested |
 | Chain rules (emission curve, adaptive difficulty, block format, PoW interface) | ✅ Implemented |
 | Forgiving custody (MPC key splitting + social recovery logic) | ✅ Implemented |
+| Social recovery GA (3-of-5): timelock + cancellation flows | ✅ Implemented & formally tested (spec §13) |
 | Selective-disclosure circuits (provenance, solvency, income proofs) | ✅ Circuits & verifier implemented |
 | Wallet intent compiler + agent permissions | ✅ Implemented |
 | On-device fraud detection & transaction simulator | ✅ Prototypes implemented |
-| Live testnet ("Refraction"), networking daemon, GUI wallet | 🚧 Next |
+| Fee-predictability hardening (`prism/l2/fees.py`: priority lattice ≤10×, deterministic quotes & packing) | ✅ Implemented & tested (beta) |
+| Payment channels + watchtower (`prism/l2/channels.py`) | 🧪 Beta — protocol-level model, pending node-mempool wiring |
+| Biometric share-gating (`prism/mpc/biometric.py`: Secure Enclave / StrongBox interface) | 🧪 Beta — desktop simulated SE shipped; native attestation on device builds |
+| Neuro-inclusive usability study (n≥20) | 🧪 Open — external human-subjects task (cannot close in code) |
+| Live testnet ("Refraction"), networking daemon, GUI wallet | 🚧 In progress |
 | Independent audits & mainnet | 🗓️ Planned (Phase 4) |
 
 Full roadmap: [Wiki → Roadmap](wiki/Roadmap.md) · Technical truth source: [`spec.md`](spec.md)
@@ -162,7 +167,7 @@ We'd rather tell you the truth than oversell. Full list in [Wiki → FAQ](wiki/F
 
 ## For developers, auditors & researchers
 
-- **Code map:** `prism/crypto` primitives · `prism/chain` consensus rules & CLI · `prism/mpc` threshold keys & recovery · `prism/zk` disclosure circuits · `prism/wallet` intents & agents · `prism/ai` fraud/simulator/federated-learning clients · `prism/l2` payment channels
+- **Code map:** `prism/crypto` primitives · `prism/chain` consensus rules & CLI · `prism/mpc` threshold keys, social recovery & biometric share-gating · `prism/zk` disclosure circuits · `prism/wallet` intents & agents · `prism/ai` fraud/simulator/federated-learning clients · `prism/l2` fee policy & payment channels (beta)
 - **Quality gates:** property tests + parsing fuzzers run on every release build — [Wiki → Testing & Quality](wiki/Testing-&-Quality.md)
 - **Design rationale:** every binding decision (D1–D5) is recorded in [`spec.md` §14](spec.md)
 - **License:** MIT — read it, fork it, ship it ([LICENSE](LICENSE))

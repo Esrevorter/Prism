@@ -1,1 +1,7 @@
-(empty
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# run logs (transient benchmark output)
+*.log

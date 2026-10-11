@@ -45,7 +45,7 @@ on-chain                     off-chain (instant, ~free)              on-chain
 
 **When channels shine for the target user:** recurring collaborator payouts (a contractor you pay weekly), platform micropayments (fractions of a cent that would be silly on-chain), point-of-sale tips, subscription metering. One-time large transfers can just go on-chain — the base fee makes that cheap enough already.
 
-Status: L2 channel logic is scaffolded (`prism/l2/`) and lands in Phase 3 ([Roadmap](Roadmap.md)); fee-policy code paths are implemented and tested today (`chain/params.py`, node acceptance rules).
+Status: **beta (Phase 3)** — channel + watchtower logic is implemented and tested in `prism/l2/channels.py` (Schnorr-signed state versions, cooperative close at exactly 2 base fees lifetime, stale-close penalty sweep, encrypted penalty blobs; see `tests/test_l2_fees_channels.py` and `property/phase3_smoke.py`). Fee-predictability hardening (`prism/l2/fees.py`: priority lattice N·BASE with 1 ≤ N ≤ 10, deterministic quotes, fee-density block packing) is enforced alongside the existing code paths in `chain/params.py` and node acceptance rules. Remaining before GA: real CLTV adapter transactions on the node mempool and GUI wiring on Refraction ([Roadmap](Roadmap.md)).
 
 ## Merchant corner: `prsmr:` invoices
 
