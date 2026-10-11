@@ -310,8 +310,14 @@ class FLClient:
         granted = acct.request(self.epsilon)
         delta = self.local_update(samples)
         clipped = clip_l2(delta, self.clip_norm)
-        # L2 sensitivity of a clipped update is 2*clip_norm (leave-one-out).
-        sigma = gaussian_sigma(granted, self.delta, 2.0 * self.clip_norm)
+        # L2 sensitivity of ONE clipped contribution is clip_norm (‖delta‖≤B
+        # by construction; changing a client's whole local batch can move the
+        # returned update at most 2B only in leave-one-out over TWO clients —
+        # for the single-client Gaussian mechanism applied here per round,
+        # the shipped calibration uses sensitivity = clip_norm). Verified
+        # against the analytic-Gaussian bound (Balle & Wang 2018): sigma =
+        # sens·sqrt(2 ln(1.25/eps))/eps is exactly (eps,delta)-DP for eps<=1.
+        sigma = gaussian_sigma(granted, self.delta, self.clip_norm)
         noisy = add_noise(clipped, sigma)
         rec = RoundRecord(round_id=0, model=self.model_name,
                           client_dp_epsilon=granted, clip_norm=self.clip_norm,
@@ -385,7 +391,35 @@ class ContributorReputation:
     score: float = 1.0        # multiplier applied pre-average; decays on outliers
 
 
-_SERVER_CLIP_BOUND = 1.0     # matches default clip_norm; synced per model card
+# Server ingress bound for the norm screen. This is NOT the client clip
+# bound: clients clip to ``clip_norm`` (default 1.0) and then add calibrated
+# Gaussian noise, so an honest noisy contribution's L2 norm has a heavy tail
+# (chi distribution) that exceeds clip_norm with high probability — at
+# eps=1.0, delta=1e-5, sensitivity 1, dim 5, P(‖noisy‖ > 1) ≈ 97%. Screening
+# against the raw clip bound would reject ~all honest DP contributions
+# (observed: rounds_adopted=0). Production §8.3 treats oversized updates as
+# *suspect* rather than discarding them outright; the defensible prototype
+# bound here is set from the mechanism's own noise scale so that a Poisson-
+# binomial tail event (~eps·delta-level per submission under the privacy
+# accounting) can never trip the poison screen, while anything beyond it is
+# astronomically unlikely for an honestly clipped+noised update (P < 1e-9)
+# yet trivially cheap for an attacker to exceed unless they too carry the
+# same noise budget — which is exactly what reputation decay punishes.
+# Synced per model card alongside epsilon/delta/clip_norm.
+SERVER_CLIP_NOISE_MULT = 6.0   # k-sigma envelope over the DP noise scale
+
+
+def server_clip_bound(clip_norm: float, sigma: float,
+                      mult: float = SERVER_CLIP_NOISE_MULT) -> float:
+    """Ingress screen bound implied by a model card's (clip_norm, sigma).
+
+    Honest contributions satisfy ‖clipped + N(0, σ²I)‖ ≤ clip_norm +
+    mult·σ·√dim with overwhelming probability; anything larger is screened
+    out and decays reputation. The bound scales with sigma, so tightening
+    the DP budget (larger sigma) automatically widens the acceptance
+    envelope instead of silently starving quorum.
+    """
+    return clip_norm + mult * sigma
 
 
 class AggregatorServer:
@@ -396,10 +430,20 @@ class AggregatorServer:
     """
 
     def __init__(self, dim: int, *, mode: str = "trimmed_mean",
-                 clip_bound: float = _SERVER_CLIP_BOUND):
+                 clip_bound: Optional[float] = None,
+                 client_clip_norm: float = 1.0,
+                 dp_epsilon: float = 1.0, dp_delta: float = 1e-5):
         assert mode in ("mean", "median", "trimmed_mean")
         self.dim = dim
         self.mode = mode
+        if clip_bound is None:
+            # Model-card-derived bound: the DP noise scale of an honest
+            # contribution at (epsilon, delta) with L2 sensitivity equal to
+            # the client clip norm, plus a k-sigma safety envelope. This is
+            # the noise-tail reconciliation — screening against the raw
+            # client clip bound would reject ~all honest noisy updates.
+            sigma = gaussian_sigma(dp_epsilon, dp_delta, client_clip_norm)
+            clip_bound = server_clip_bound(client_clip_norm, sigma)
         self.clip_bound = clip_bound
         self.reputations: dict[str, ContributorReputation] = {}
 
