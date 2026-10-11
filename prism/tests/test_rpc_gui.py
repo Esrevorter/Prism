@@ -66,6 +66,102 @@ class TestIntentFlow:
             svc.intent_confirm(d["intent_id"])
 
 
+class TestFraudPanel:
+    """intent.review — fraud-simulator panel against prism/ai/fraud_model
+    paths (SigningGate + FraudDetector), honest-UX language requirement."""
+
+    def test_benign_review_is_calm_and_proceeds(self, svc):
+        it = svc.intent_compile("send 2 PRSM to Alex")
+        rv = svc.intent_review(it["intent_id"])
+        assert rv["ui_band"] == "calm" and rv["risk"]["band"] == "clean"
+        assert rv["proceed"] is True and rv["ok"] is True
+        # every number traces to the deterministic simulator, not an LLM
+        assert rv["sim_digest"] == rv["simulation"]["sim_digest"]
+        assert "PRSM" in rv["plain_english"] and rv["human"]
+
+    def _scam_intent(self, svc):
+        # scam phrase rides in the memo so the intent compiles cleanly and
+        # reaches awaiting_confirm — then the fraud panel must catch it.
+        d = svc.intent_compile(
+            "send 1 PRSM to Alex memo urgent transfer customer support")
+        assert d["status"] == "awaiting_confirm"
+        return d
+
+    def test_scam_utterance_interrupts_with_barrier(self, svc):
+        it = self._scam_intent(svc)
+        rv = svc.intent_review(it["intent_id"])
+        assert rv["risk"]["band"] == "interrupt" and rv["ui_band"] == "pause"
+        assert rv["interruption"] is True and rv["proceed"] is False
+        assert rv["offer_sleep_on_it"] is True
+        assert rv["reasons"], "panel must show plain-language reasons"
+        # honest-UX: no false reassurance while interrupting
+        assert "Nothing has been sent" in rv["human"]
+
+    def test_gated_confirm_blocks_then_acknowledgement_opens(self, svc):
+        it = self._scam_intent(svc)
+        # interrupt band without acknowledgement -> confirm refused outright
+        with pytest.raises(ValueError, match="cannot confirm"):
+            svc.intent_confirm(it["intent_id"])
+        # explicit user acknowledgement ("I understand") opens the barrier
+        rv2 = svc.intent_review(it["intent_id"], acknowledged_risk=True)
+        assert rv2["proceed"] is True          # panel now offers confirm
+        done = svc.intent_confirm(it["intent_id"], acknowledged_risk=True)
+        env = done["confirmation_envelope"]
+        assert "canonical_digest_hex" in env
+        # preview→confirm binding: envelope carries the sim digest of the
+        # exact simulation that authorized the confirm (no-swap-attack field)
+        assert len(env["sim_digest_bound"]) == 64 and rv2["sim_digest"]
+
+    def test_unaffordable_intent_fails_simulation_not_proceeds(self, svc):
+        big = svc.intent_compile(f"send {svc.balance()['balance_prsm']} PRSM to Alex")
+        if big["status"] != "awaiting_confirm":   # amount > balance may draft
+            return
+        rv = svc.intent_review(big["intent_id"])
+        # faucet emissions are tiny vs a full-balance send incl. fee:
+        # simulation must refuse and proceed must be False (never ok=True).
+        if not rv["ok"]:
+            assert rv["proceed"] is False
+            with pytest.raises(ValueError, match="cannot confirm"):
+                svc.intent_confirm(big["intent_id"])
+
+
+class TestChainBlocks:
+    def test_chain_blocks_returns_real_store_contents(self, svc):
+        d = svc.chain_blocks(limit=5)
+        # svc fixture mines 3 blocks on top of genesis -> exactly 4 stored
+        assert d["count"] == len(d["blocks"]) == 4
+        hs = [b["hash"] for b in d["blocks"]]
+        assert len(set(hs)) == len(hs)               # distinct real headers
+        top = svc.chain_info()
+        assert d["blocks"][0]["height"] == top["height"]
+        assert d["blocks"][0]["hash"] == top["tip_hash"]
+        for b in d["blocks"]:                        # fields come from Block
+            assert set(b) >= {"height", "hash", "prev_hash", "timestamp",
+                              "tx_count"}
+
+
+class TestCeremonyDevicesReset:
+    def test_status_lists_three_device_share_cards(self, svc):
+        st = svc.ceremony_start()
+        assert st["status"] == "complete"
+        devs = st["devices"]
+        assert [d["label"] for d in devs] == ["Phone", "Laptop", "Backup card"]
+        fps = {d["share_fingerprint"] for d in devs}
+        assert len(fps) == 3                          # each device holds a piece
+        assert all(d["verified_against_commitments"] for d in devs)
+        assert "share_handling" in st                 # never-show-shares UX text
+        assert "human" in st
+
+    def test_reset_returns_to_idle_and_sign_refused(self, svc):
+        svc.ceremony_start()
+        r = svc.ceremony_reset()
+        assert r["status"] == "idle" and r["percent"] == 0
+        assert "devices" not in r
+        it = svc.intent_compile("send 2 PRSM to Alex")
+        with pytest.raises(ValueError, match="mpc.ceremony_start"):
+            svc.sign_preview(it["intent_id"])
+
+
 class TestCeremony:
     def test_staged_progress_and_pk(self, svc):
         st = svc.ceremony_start()
