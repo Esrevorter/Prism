@@ -14,12 +14,14 @@
 
 use std::sync::Mutex;
 
-use tauri::api::process::CommandEvent;
+use tauri::api::process::{CommandChild, CommandEvent};
 use tauri::{Manager, State};
 
 /// Shared handle to the running daemon so we can kill it on app exit
 /// (acceptance criterion (c): quit/uninstall leaves no orphan daemons).
-struct Daemon(Mutex<Option<tauri::api::process::Child>>);
+/// `Command::spawn` hands back a `CommandChild` (Tauri's wrapper around the
+/// OS child process) — not a `std::process::Child`.
+struct Daemon(Mutex<Option<CommandChild>>);
 
 /// Wallet endpoint discovered from the sidecar's --json-status line.
 /// Empty until the daemon reports healthy.
@@ -50,8 +52,9 @@ fn start_daemon(
 
     // Consume stdout until the JSON status line arrives (cold onefile unpack
     // can take ~15s; give it generous patience via the event stream).
+    // `rx` is a tokio mpsc Receiver, so `recv()` is async — block_on it.
     let mut url = String::new();
-    while let Some(event) = rx.recv() {
+    while let Some(event) = tauri::async_runtime::block_on(rx.recv()) {
         match event {
             CommandEvent::Stdout(line) => {
                 let trimmed = line.trim_start();
@@ -82,15 +85,23 @@ fn start_daemon(
     *wallet.0.lock().unwrap() = url.clone();
     *daemon.0.lock().unwrap() = Some(child);
 
-    // Point the main window at the live wallet UI.
+    // Point the main window at the live wallet UI. Tauri v1 has no
+    // `Window::navigate` (that's a v2 API), so drive location.replace from
+    // inside the webview via an injected script on the window itself
+    // (`AppHandle` has no `eval`; `Window` does).
     if let Some(w) = app.get_window("main") {
-        let parsed: url::Url = url.parse().map_err(|e| format!("bad url: {e}"))?;
-        w.navigate(parsed).map_err(|e| e.to_string())?;
+        let js = format!(
+            "window.location.replace({});",
+            serde_json::to_string(&url).map_err(|e| e.to_string())?
+        );
+        let _ = w.eval(&js);
     }
     Ok(url)
 }
 
 /// Frontend helper: current wallet endpoint (empty string until ready).
+/// Also used by the boot page as a polling fallback in case the injected
+/// navigation script races the page load.
 #[tauri::command]
 fn wallet_url(wallet: State<WalletUrl>) -> String {
     wallet.0.lock().unwrap().clone()

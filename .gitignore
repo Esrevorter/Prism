@@ -1,1 +1,9 @@
-node_modules/
+buildtest/
+disttest/
+*.toc
+*.pkg
+*.pyz
+base_library.zip
+xref-*.html
+__pycache__/
+*.pyc
