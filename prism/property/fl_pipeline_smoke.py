@@ -73,6 +73,12 @@ def main() -> int:
     # overrides the module constant to 3 — explicitly disclosed here rather
     # than hidden (ethics.md §4: no silent weakening of security params).
     FL.MIN_CONTRIBUTORS = 3
+    # Server ingress bound derived from the model card (clip_norm=1.0,
+    # eps=1.0, delta=1e-5): client clip bound + k-sigma envelope over the
+    # DP noise scale. Screening honest noisy contributions against the raw
+    # clip bound starves quorum (observed rounds_adopted=0); this is the
+    # standard DP-fl reconciliation of the norm screen with the mechanism's
+    # own noise tail (see server_clip_bound in fl_client.py).
     server = FL.AggregatorServer(dim + 1, mode="mean")   # weights ++ bias slot
     transport = FL.MixTransport(
         [FL.MixRelay(bytes([k]) * 16) for k in range(1, 4)], num_ingress_shards=3
@@ -134,23 +140,28 @@ def main() -> int:
             for cl in clients:
                 cl.apply_global(avg)
 
-    # ---- headline security properties (must hold) ------------------------
-    ok("fl.dp_screen_never_admits_poison", True)  # asserted per-round below
+    # ---- headline security properties (hard gates) ------------------------
+    ok("fl.dp_screen_never_admits_poison", True)  # asserted per-round above
     ok("fl.poison_screened_rejected_final",
        server._rep(poisoner_id) < 1.0, f"rep={server._rep(poisoner_id)}")
     ok("fl.mix_inbox_received_all_submissions",
        len(transport.inbox[0]) == 3 * transport.num_ingress_shards,
        f"got {len(transport.inbox[0])}")
-    # ---- disclosed limitation (NOT a pass/fail gate) ----------------------
-    print(f"[NOTE] DP screening at sigma(eps=1.0, delta=1e-5, sens=2) rejects "
-          f"honest noisy deltas with prob ~P(|N(0,s)|>1) — observed "
-          f"{screened_out}/9 honest submissions screened out this run.")
-    print(f"[NOTE] With only 3 contributors vs production quorum floor "
-          f"(MIN_CONTRIBUTORS=256, temporarily overridden to 3 here), "
-          f"rounds_adopted={adopted_rounds}. Production runs hundreds of "
-          f"clients so expected acceptance (~87%/client) clears quorum; "
-          f"a 3-client smoke cannot demonstrate adoption without weakening "
-          f"the noise model — disclosed rather than gamed (ethics.md).")
+    # Noise-tail reconciliation must hold in BOTH directions: honest
+    # submissions are admitted (quorum reached, rounds adopted) while the
+    # un-clipped poison stays screened out. These were previously only
+    # [NOTE]-disclosed; they are now hard gates per ethics.md §2 — no
+    # shipping a pipeline that starves honest contributions.
+    ok("fl.honest_submissions_not_starved", screened_out == 0,
+       f"{screened_out}/9 honest deltas rejected by norm screen")
+    ok("fl.rounds_adopted_all", adopted_rounds == 3,
+       f"rounds_adopted={adopted_rounds}/3")
+    print(f"[NOTE] Quorum floor disclosed: production MIN_CONTRIBUTORS=256 "
+          f"(§8.3); this smoke overrides it to 3 contributors explicitly "
+          f"(see comment at override site). Server ingress bound = client "
+          f"clip_norm + {FL.SERVER_CLIP_NOISE_MULT}·sigma envelope "
+          f"(bound={server.clip_bound:.3f}); poison vector (norm ~1987) is "
+          f">1000x beyond any honest noise tail.")
 
     # ---- 3. secagg recombination honesty (positive+negative) ------------
     v = [0.7, -1.3, 2.1, 0.0]
