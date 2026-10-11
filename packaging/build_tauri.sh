@@ -55,10 +55,22 @@ cp "$GUI_BIN" "$BIN_DIR/prism-gui-$TRIPLE$EXT"
 chmod +x "$BIN_DIR/prism-gui-$TRIPLE$EXT" 2>/dev/null || true
 echo "    sidecar: binaries/prism-gui-$TRIPLE$EXT"
 
-echo "==> [4/5] Ensure app icons exist"
+echo "==> [4/5] npm install (frontend tooling incl. @tauri-apps/cli)"
+( cd "$TAURI_DIR" && npm install --no-audit --no-fund )
+
+echo "==> [5/5] Generate icons + Tauri build (installers)"
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "ERROR: Rust toolchain (cargo) not found. Install it or run this on CI." >&2
+  echo "       The rest of the pipeline (steps 1-4) completed successfully." >&2
+  exit 127
+fi
 ICONS="$SRC_TAURI/icons"
 mkdir -p "$ICONS"
-if [ ! -f "$ICONS/icon.png" ]; then
+# Source art lives OUTSIDE icons/ because `tauri icon` writes its outputs into
+# icons/ and refuses to overwrite an existing icons/icon.png (its default
+# output name collides with the input if we keep them together).
+SRC_ICON="$TAURI_DIR/icon-source.png"
+if [ ! -f "$SRC_ICON" ]; then
   python - <<'PY'
 # 256x256 solid-color placeholder PNG, stdlib-only (no Pillow dependency).
 import struct, zlib
@@ -70,23 +82,14 @@ ihdr = struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0)   # RGB8
 raw = b"".join(b"\x00" + bytes((13, 17, 23)) * W for _ in range(H))  # #0d1117
 png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
        + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
-open("packaging/tauri/prism-gui/src-tauri/icons/icon.png", "wb").write(png)
-print("    wrote placeholder icons/icon.png")
+open("packaging/tauri/prism-gui/icon-source.png", "wb").write(png)
+print("    wrote placeholder icon-source.png")
 PY
 fi
-# tauri-build consumes icon.ico / icon.icns / 32x32.png / 128x128.png.
-# `tauri icon` regenerates all formats properly when npm is available.
-# tauri v1 CLI is provided by the shell's devDependency (@tauri-apps/cli);
-# invoke it via npm exec so we never pull a mismatched v2 CLI from the void.
-( cd "$TAURI_DIR" && npm exec -- tauri icon "$ICONS/icon.png" >/dev/null 2>&1 ) \
+# tauri-build consumes icon.ico / icon.icns / 32x32.png / 128x128.png;
+# `tauri icon` regenerates all formats from the source PNG into icons/.
+( cd "$TAURI_DIR" && npx tauri icon icon-source.png ) \
   || { echo "ERROR: 'tauri icon' generation failed (icons are mandatory for bundling)" >&2; exit 1; }
-
-echo "==> [5/5] Tauri build (installers)"
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "ERROR: Rust toolchain (cargo) not found. Install it or run this on CI." >&2
-  echo "       The rest of the pipeline (steps 1-4) completed successfully." >&2
-  exit 127
-fi
-( cd "$TAURI_DIR" && npm install --no-audit --no-fund && npm run build )
+( cd "$TAURI_DIR" && npm run build )
 
 echo "==> Installers under: $SRC_TAURI/target/release/bundle/"
