@@ -51,6 +51,7 @@ async function refreshAll() {
     ul.replaceChildren(...ct.contacts.map(c => el("li", null, c.display_name)));
     const cer = await rpc("mpc.ceremony_status");
     if (cer.status === "complete") renderCeremony(cer);
+    refreshRecovery();
     refreshPlans();
   } catch (e) {
     $("#net-status").textContent = "node unreachable — start: python -m prism.rpc.server";
@@ -254,6 +255,60 @@ $("#contact-form").addEventListener("submit", async (ev) => {
     refreshAll();
   } catch (e) { alert(e.message); }
 });
+
+// ---------- recovery (Phase 3 GA): status, veto, restore — server copy only ----------
+async function refreshRecovery() {
+  const card = $("#recovery-card");
+  let st;
+  try { st = await rpc("recovery.status"); }
+  catch { card.hidden = true; return; }   // no ceremony yet — stay calm/hidden
+  card.hidden = false;
+  $("#recovery-human").textContent = st.human || "";
+  const facts = [
+    `Scheme: any ${st.quorum} of ${st.legs} helpers can restore access`,
+    `Waiting period before anything unlocks: ${st.timelock_hours} hours`,
+    `Break between recoveries: ${st.cooldown_days} days`,
+  ];
+  if (st.phase === "pending" && st.window_remaining_s > 0) {
+    facts.unshift(`Unlocking in ${Math.ceil(st.window_remaining_s / 3600)} hour(s) · ` +
+                  `${st.veto_legs_armed} device(s) can still stop it`);
+  }
+  $("#recovery-facts").replaceChildren(...facts.map(t => el("li", null, t)));
+  const actions = $("#recovery-actions");
+  actions.replaceChildren();
+  if (st.phase === "pending") {
+    const cancel = el("button", "btn danger", "Cancel this recovery");
+    cancel.onclick = async () => {
+      try { const r = await rpc("recovery.cancel", { share_index: 1 });
+            $("#recovery-human").textContent = r.human; refreshRecovery(); }
+      catch (e) { $("#recovery-human").textContent = e.message; }
+    };
+    const fin = el("button", "btn primary", "Finish recovery now");
+    fin.onclick = async () => {
+      try { await rpc("recovery.finalize"); refreshRecovery(); }
+      catch (e) { $("#recovery-human").textContent = e.message; }
+    };
+    actions.append(cancel, fin);
+  } else {
+    const demo = el("button", "btn secondary", "Practice a recovery (devnet)");
+    demo.title = "Runs the full 72-hour flow on your local devnet only";
+    demo.onclick = async () => {
+      try {
+        await rpc("recovery.initiate", { collectors: [1, 2], stale_legs: [3] });
+        await rpc("recovery.advance_window", { hours: 73 });
+        await rpc("recovery.finalize");
+        refreshRecovery();
+      } catch (e) { $("#recovery-human").textContent = e.message; }
+    };
+    const social = el("button", "btn secondary", "Add trusted contacts (3-of-5)");
+    social.onclick = async () => {
+      try { const r = await rpc("recovery.attach_social");
+            $("#recovery-human").textContent = r.human; refreshRecovery(); }
+      catch (e) { $("#recovery-human").textContent = e.message; }
+    };
+    actions.append(demo, social);
+  }
+}
 
 // ---------- plans (agent runtime): pending digest, one-tap veto/revoke ----------
 let _activeGrant = null;   // grant id from the last plan we created this session

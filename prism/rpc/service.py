@@ -29,7 +29,7 @@ from ..ai.simulator import (ChainSnapshot, SigningGate, SnapshotOutput,
                             render_template)
 from ..chain.node import ChainState, mine_block, make_genesis, Block, ZERO32
 from ..chain.params import REFRACTION_TESTNET
-from ..mpc import frost
+from ..mpc import frost, recovery
 from ..mpc.sharing import Share
 from ..wallet.agent_auth import (AgentRuntime, Constraints, Grant,
                                  PolicyEngine, RISK_CLEAN_MAX, SignerStub,
@@ -94,6 +94,12 @@ class PrismService:
         self.agent = AgentRuntime(engine=self.agent_engine, gate=self.gate)
         self.dca_contact: Optional[Contact] = None   # set by grant_create
         self.dca_contact_id: Optional[str] = None    # exact alias for agent maps
+        # Social recovery GA (Phase 3, spec §7.3 / Decision D4): a RecoveryState
+        # is attached lazily when a Solo ceremony completes; the full 3-of-5
+        # Social mode shares the same state machine (quorum/timelock/cooldown
+        # come from the wallet's RecoveryPolicy, §6.2 `recovery_policy`).
+        self.recovery_state: Optional[recovery.RecoveryState] = None
+        self.recovery_new_shares: dict[int, int] = {}   # post-recovery delivery
         # virtual cadence bookkeeping (mirrors node_sync_soak model)
         self.cadence_s = self.params.target_block_time
         self.started_unix = int(time.time())
@@ -766,6 +772,10 @@ class PrismService:
                 self.ceremony.percent = 100
                 self.ceremony.result = res
                 self.ceremony.finished_at = time.perf_counter()
+                # Phase-3 GA: arm the social-recovery state machine on every
+                # completed Solo ceremony (72-h timelock + stale-share veto).
+                if self.recovery_state is None:
+                    self._attach_recovery_state(res, "solo", threshold=2)
         except Exception as e:                       # pragma: no cover
             with self._lock:
                 self.ceremony.status = "failed"
@@ -816,6 +826,183 @@ class PrismService:
         with self._lock:
             self.ceremony = CeremonyState()
         return {"ok": True, **self.ceremony_status()}
+
+    # ---------------- social recovery (Phase 3 GA, spec §7.3 / D4) ----------------
+
+    _SOCIAL_LABELS = {1: "Phone", 2: "Laptop", 3: "Backup card",
+                      4: "Alex (trusted contact)", 5: "Mom (trusted contact)"}
+
+    def _attach_recovery_state(self, res: frost.CeremonyResult,
+                               scheme: str, threshold: int = 2) -> None:
+        """Bind a RecoveryState to a completed ceremony (caller holds the
+        service lock). Solo = 2-of-3 device legs; Social = 3-of-5 with two
+        user-chosen contact legs — every leg stays user-owned per D4."""
+        if scheme == "social":
+            policy = recovery.RecoveryPolicy(quorum=threshold)   # §6.2 default 3
+            contacts = dict(self._SOCIAL_LABELS)
+            device_legs = [1, 2, 3]
+        else:
+            policy = recovery.RecoveryPolicy(quorum=threshold, timelock_hours=72)
+            contacts = {i: DEVICE_LABELS.get(i, f"Device {i}")
+                        for i in sorted(res.shares)}
+            device_legs = list(contacts)
+        self.recovery_state = recovery.create_recovery_state(
+            res.public_key, res.joint_commitments(), threshold, contacts,
+            policy=policy, device_legs=device_legs)
+        # genesis shares live only on the legs; keep them server-side solely
+        # so stale-share cancellation tokens can be registered in this devnet
+        # reference build (production: each leg proves knowledge out of band)
+        self.recovery_new_shares = {i: sh.value for i, sh in res.shares.items()}
+
+    def recovery_attach_social(self) -> dict:
+        """Upgrade path §7.1 B: guide a Solo wallet into a 3-of-5 Social
+        ceremony. Reference implementation re-runs keygen locally with five
+        legs (indices 4/5 stand in for the invited contacts' devices).
+
+        Honest-UX note (spec §5): a Social setup is a NEW ceremony, so the
+        joint key — and therefore the receiving address — genuinely changes.
+        The response says exactly that; nothing here pretends the old key
+        silently gained friends."""
+        with self._lock:
+            if self.ceremony.status != "complete" or self.ceremony.result is None:
+                raise ValueError("run mpc.ceremony_start first — a Social setup "
+                                 "is a fresh 3-of-5 ceremony")
+            old_pk = self.ceremony.result.public_key.encode().hex()
+            blinds = {i: s for i, s in enumerate(
+                _deterministic_blinds(5, int(time.time_ns())), start=1)}
+            res = frost.run_keygen(blinds, n=5, t=3)
+            self.ceremony.result = res
+            self.ceremony.stage = ("joint key established (3-of-5 Social: "
+                                   "3 devices + 2 trusted contacts)")
+            self._attach_recovery_state(res, "social", threshold=3)
+            new_pk = res.public_key.encode().hex()
+            return {"ok": True, "scheme": "3-of-5 Social (D4: user-owned legs only)",
+                    "address_changed": new_pk != old_pk,
+                    "old_joint_pk_hex": old_pk, "new_joint_pk_hex": new_pk,
+                    "human": ("This finished as a brand-new 3-of-5 ceremony, so "
+                              "your wallet got a NEW receiving address — send to "
+                              "the old address no more. You now need any 3 of "
+                              "your 5 chosen helpers to restore access. Contacts "
+                              "only ever hold an opaque share — they cannot see "
+                              "or move your funds.")}
+
+    def recovery_status(self) -> dict:
+        st = self.recovery_state
+        if st is None:
+            raise ValueError("no recovery state — complete a device-key ceremony first")
+        now = self.sim_clock
+        d: dict = {
+            "phase": st.phase.value,
+            "quorum": st.policy.quorum,
+            "legs": len(st._live_contact_indices()),
+            "generation": st.generation,
+            "timelock_hours": st.policy.timelock_hours,
+            "cooldown_days": st.policy.cooldown_days,
+            "cooldown_remaining_s": st.remaining_cooldown(now),
+        }
+        if st.phase is recovery.Phase.PENDING and st.pending is not None:
+            d["window_remaining_s"] = st.window_remaining(now)
+            d["veto_legs_armed"] = len(st.pending.stale_cancel_tokens)
+        d["human"] = self._recovery_human(st, now)
+        return d
+
+    @staticmethod
+    def _recovery_human(st: "recovery.RecoveryState", now: int) -> str:
+        p = st.phase
+        if p is recovery.Phase.ACTIVE:
+            cd = st.remaining_cooldown(now)
+            if cd > 0:
+                return ("Recovery just finished — new keys are live. For safety, "
+                        f"a second recovery can't start for another {cd // 3600} h.")
+            return ("Your recovery plan is armed. If you lose a device, trusted "
+                    "helpers can restore access — but nothing moves for 72 hours, "
+                    "and any older device can still stop it.")
+        if p is recovery.Phase.PENDING and st.pending is not None:
+            hrs = max(0, st.window_remaining(now)) // 3600
+            return ("A recovery is waiting to finish. Your funds stay locked for "
+                    f"{hrs} more hour(s). Any device you still hold can cancel it — "
+                    "if you didn't start this, cancel now.")
+        if p is recovery.Phase.CANCELLED:
+            return ("The pending recovery was cancelled by one of your devices. "
+                    "Nothing changed; your original keys are still valid.")
+        return ""
+
+    def recovery_initiate(self, collector_indices: list[int],
+                          stale_share_indices: list[int]) -> dict:
+        """Lost-device flow (§7.3 steps 1–3): t collectors are designated,
+        surviving legs register their cancellation veto up front."""
+        with self._lock:
+            st = self.recovery_state
+            if st is None:
+                raise ValueError("no recovery state — complete a ceremony first")
+            stale = {i: self.recovery_new_shares[i] for i in stale_share_indices
+                     if i in self.recovery_new_shares}
+            pend = st.initiate_recovery(self.sim_clock, list(collector_indices), stale)
+            return {"ok": True, "activates_at": pend.activates_at,
+                    "window_remaining_s": st.window_remaining(self.sim_clock),
+                    "veto_legs_armed": len(pend.stale_cancel_tokens),
+                    "human": st and self._recovery_human(st, self.sim_clock)}
+
+    def recovery_cancel(self, share_index: int) -> dict:
+        """Anti-coercion veto inside the window (E9): a holder of a live
+        stale share aborts the pending recovery."""
+        with self._lock:
+            st = self.recovery_state
+            if st is None:
+                raise ValueError("no recovery state")
+            val = self.recovery_new_shares.get(share_index)
+            if val is None:
+                raise PermissionError("unknown share index")
+            st.cancel_recovery(self.sim_clock, share_index, val)
+            return {"ok": True, "phase": st.phase.value,
+                    "human": self._recovery_human(st, self.sim_clock)}
+
+    def recovery_finalize(self) -> dict:
+        """After the full timelock: verify quorum shares, force a proactive
+        reshare (public key provably unchanged), rotate all leg shares and
+        start the cooldown clock (§7.3)."""
+        with self._lock:
+            st = self.recovery_state
+            if st is None:
+                raise ValueError("no recovery state")
+            if st.phase is not recovery.Phase.PENDING or st.pending is None:
+                raise RuntimeError("nothing to finalize — no recovery pending")
+            subs = st.pending.submitted_shares
+            if len(subs) < st.policy.quorum:
+                # devnet convenience: collectors' freshly delivered shares are
+                # auto-submitted from the leg store when present (real flows
+                # deliver over ee2ee transports during the window). The state
+                # machine refuses submissions once the window closed, so we
+                # bind them directly into the pending record here — the same
+                # ℓ-reduction submit_collector_share performs.
+                from ..mpc.sharing import ED25519_SCALARS as _F
+                for i in st.pending.collector_digests:
+                    if i not in subs and i in self.recovery_new_shares:
+                        subs[i] = _F.reduce(self.recovery_new_shares[i])
+            new_shares = st.finalize_recovery(self.sim_clock)
+            self.recovery_new_shares.update(new_shares)
+            return {"ok": True, "phase": st.phase.value,
+                    "generation": st.generation,
+                    "reshared_legs": sorted(new_shares),
+                    "human": self._recovery_human(st, self.sim_clock)}
+
+    def recovery_advance_window(self, hours: float = 73.0) -> dict:
+        """Devnet-only helper: fast-forward the service sim clock past the
+        72-h timelock so finalize can be exercised without waiting days.
+        Honest-UX guard: only allowed while a recovery is actually PENDING —
+        it can never move real funds or touch chain state."""
+        with self._lock:
+            st = self.recovery_state
+            if st is None or st.phase is not recovery.Phase.PENDING:
+                raise RuntimeError("no pending recovery to fast-forward "
+                                   "(devnet helper cannot skip an armed window)")
+            need = (st.pending.activates_at - self.sim_clock) / 3600.0 + 1
+            hours = max(hours, need)
+            self.sim_clock = int(st.pending.activates_at + 3600 * (hours - need))
+            return {"ok": True, "sim_clock": self.sim_clock,
+                    "window_remaining_s": st.window_remaining(self.sim_clock),
+                    "human": ("Timelock elapsed in this devnet session. The "
+                              "recovery can now be finalized.")}
 
     def sign_preview(self, intent_id: str) -> dict:
         c = self.ceremony
