@@ -18,8 +18,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 if __package__ in (None, ""):        # allow `python prism/rpc/server.py`
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from rpc.service import PrismService
+    from chain import __version__
 else:
     from .service import PrismService
+    from prism.chain import __version__
 
 if getattr(sys, "frozen", False):
     # PyInstaller onefile: the GUI static bundle is unpacked into
@@ -39,7 +41,7 @@ SERVICE = PrismService()             # one process-wide devnet instance
 def _dispatch(method: str, params: dict, svc: "PrismService | None" = None):
     S = svc if svc is not None else SERVICE
     if method == "health.ping":
-        return {"status": "ok", "version": "0.1.0",
+        return {"status": "ok", "version": __version__,
                 "network": S.params.name,
                 "tip_height": S.chain.tip.header.height}
     table = {
