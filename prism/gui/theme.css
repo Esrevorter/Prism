@@ -109,3 +109,10 @@ footer { text-align: center; padding: 26px; }
                             opacity: .8; }
 .share-help summary { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+
+/* Plans (agent runtime): quiet digest, one-tap stop actions */
+.plan-list { list-style: none; padding: 0; margin: 0 0 .75rem; }
+.digest-card { border: 1px solid var(--line, #d8d4cc); border-radius: 12px; padding: .75rem 1rem; margin: .5rem 0; }
+.digest-card .digest-line { margin: 0 0 .5rem; font-size: 1.05rem; line-height: 1.5; }
+.digest-card .row { gap: .5rem; }
+@media (prefers-reduced-motion: reduce) { .digest-card, .digest-card button { transition: none !important; } }
