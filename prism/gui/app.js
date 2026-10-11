@@ -124,7 +124,9 @@ async function renderReviewBody() {
       $("#sleep-btn").hidden = false;
       $("#confirm-btn").disabled = true;   // gate owns proceed; UI mirrors it
     }
-    body.appendChild(el("p", null, rv.plain_english || rv.human));
+    // Template-pack copy (sim_explain_v1): band-specific plain-language
+    // rendered verbatim from the server — honest-UX, nothing invented here.
+    body.appendChild(el("p", null, rv.explanation || rv.plain_english || rv.human));
     if (!rv.proceed && !rv.interruption)
       body.appendChild(el("div", "warning-card",
         rv.reasons.join(" — ") || "This can't be confirmed yet."));

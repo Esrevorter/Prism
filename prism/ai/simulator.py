@@ -100,6 +100,12 @@ class SimResult:
         return d
 
 
+# ---------------------------------------------------------------------------
+# Explanation templates (§8.2) — the shipped template pack. Each template is
+# keyed by (band, situation); every number interpolated into one traces to
+# the deterministic executor or the rule/model pipeline, never an LLM.
+# ---------------------------------------------------------------------------
+
 _PRIVACY_LINES = {
     "default_max": "It will appear private to everyone except {who} and you.",
     "disclosed_to_recipient": "Private on-chain; {who} also gets a copyable disclosure ID.",
@@ -108,6 +114,37 @@ _PRIVACY_LINES = {
 
 _ACTION_VERBS = {"transfer": "sends", "stake": "stakes",
                  "open_channel": "opens a payment channel funded with"}
+
+TEMPLATES = {
+    # calm band — plain effect summary (rendered by explain())
+    "calm_default": ("This {verb} {amount}. Fee: {fee}. {privacy} "
+                     "{change}{balance}Confirm?"),
+    # watch/caution band — honest, non-alarming explanation of the flags
+    "caution": ("Before you confirm: {reasons}. Nothing has been sent yet — "
+                "read the numbers below at your own pace."),
+    # interrupt/pause band — calm-interruption card (§7.3 step 4)
+    "pause": ("This one looks unusual for you. Nothing has been sent — take "
+              "your time. You can cancel safely, or confirm you understand "
+              "and we'll show the review again without rushing you."),
+    # post-acknowledgement pause — same facts, no pressure either way
+    "pause_acknowledged": ("You said you understand the warning. Here are "
+                           "the exact numbers again — you can still cancel "
+                           "safely."),
+    # failed simulation — plain-language refusal, no codes
+    "insufficient": ("You don't have enough to cover this plus the fee. "
+                     "You'd need {need} PRSM (you have {have})."),
+    "not_previewable": "I can't preview this yet: {error}",
+    # privacy-mode wording (kept as data so tests + UI can enumerate them)
+    "privacy_default_max": "It will appear private to everyone except {who} and you.",
+    "privacy_disclosed_to_recipient": "Private on-chain; {who} also gets a copyable disclosure ID.",
+    "privacy_public_audit": "WARNING: this transfer opts into audit-visible disclosure.",
+}
+
+
+def render_template(key: str, **fields) -> str:
+    """Fill a shipped template; raises KeyError on unknown keys so callers
+    can never silently invent reassurance text (§8 honest-UX)."""
+    return TEMPLATES[key].format(**fields)
 
 
 def _usd(shard: int) -> str:
@@ -126,10 +163,12 @@ def explain(sim: SimResult, intent: Intent, *, recipient_name: str) -> str:
     priv = _PRIVACY_LINES[c.privacy_mode].format(who=who)
     if c.action == "stake":
         priv = "It will appear private to everyone except you."
-    lines = [f"This {_ACTION_VERBS[c.action]} {amt_txt}. Fee: {_usd(sim.fee_shard)}. {priv}"]
-    if sim.change_shard:
-        lines.append(f"Change of {shard_to_prsm(sim.change_shard)} PRSM returns to your wallet.")
-    lines.append(f"Balance after: {shard_to_prsm(sim.balance_after_shard)} PRSM.")
+    change_line = (f"Change of {shard_to_prsm(sim.change_shard)} PRSM "
+                   f"returns to your wallet. " if sim.change_shard else "")
+    lines = [render_template(
+        "calm_default", verb=_ACTION_VERBS[c.action], amount=amt_txt,
+        fee=_usd(sim.fee_shard), privacy=priv, change=change_line,
+        balance=f"Balance after: {shard_to_prsm(sim.balance_after_shard)} PRSM. ")]
     if sim.quote_refreshed:
         lines.append("Note: your rate window had expired, so the price was re-locked just now.")
     if c.memo:
@@ -178,7 +217,8 @@ def simulate_intent(intent: Intent, snapshot: ChainSnapshot, *, now_unix: int,
         return SimResult(ok=False, amount_shard=0, fee_shard=0, change_shard=0,
                          total_out_shard=0, balance_before_shard=snapshot.balance_shard,
                          balance_after_shard=snapshot.balance_shard,
-                         errors=[str(e)], plain_english=f"I can't preview this yet: {e}")
+                         errors=[str(e)],
+                         plain_english=render_template("not_previewable", error=e))
 
     try:
         amount, refreshed = _resolved_amount_shard(intent, now_unix=now_unix,
@@ -189,7 +229,7 @@ def simulate_intent(intent: Intent, snapshot: ChainSnapshot, *, now_unix: int,
                          balance_before_shard=snapshot.balance_shard,
                          balance_after_shard=snapshot.balance_shard,
                          errors=[str(e)],
-                         plain_english=f"I can't preview this yet: {e}")
+                         plain_english=render_template("not_previewable", error=e))
     fee = BASE_FEE_SHARD + PRIORITY_STEPS[intent.compiled.fee] * BASE_FEE_SHARD
     need = amount + fee
     before = snapshot.balance_shard
@@ -200,9 +240,8 @@ def simulate_intent(intent: Intent, snapshot: ChainSnapshot, *, now_unix: int,
                         balance_after_shard=before, quote_refreshed=refreshed,
                         errors=[f"insufficient funds: need {shard_to_prsm(need)} PRSM, "
                                 f"have {shard_to_prsm(before)}"])
-        sim.plain_english = ("You don't have enough to cover this plus the fee. "
-                             f"You'd need {shard_to_prsm(need)} PRSM "
-                             f"(you have {shard_to_prsm(before)}).")
+        sim.plain_english = render_template(
+            "insufficient", need=shard_to_prsm(need), have=shard_to_prsm(before))
         return sim
     change = sum(c.amount_shard for c in coins) - need
     sim = SimResult(ok=True, amount_shard=amount, fee_shard=fee, change_shard=change,
@@ -226,6 +265,7 @@ class Review:
     proceed: bool                     # UI may show confirm button iff True
     interruption: bool                # calm card + sleep-on-it offered (§7.3 step 4)
     reasons: list[str] = field(default_factory=list)
+    explanation: str = ""             # template-pack plain-language copy (§8.2)
     policy_refusals: list[str] = field(default_factory=list)  # agent grants only (§8.4)
 
 
@@ -287,8 +327,21 @@ class SigningGate:
                     spent_this_month_shard=spent_this_month_shard,
                     contact_verified=contact_verified)
         interruption = risk.band == "interrupt"
+        # Explanation-template binding (§8.2): band-specific plain-language
+        # copy comes from the shipped TEMPLATES pack, never ad-hoc strings —
+        # so UI and server can't invent reassurance (honest-UX requirement).
+        if not sim.ok or risk.band == "clean":
+            explanation = sim.plain_english
+        elif risk.band == "watch":
+            explanation = render_template(
+                "caution", reasons=" · ".join(risk.reasons)
+                or "the behavioral model raised a soft warning") + " " + sim.plain_english
+        else:  # interrupt — calm-interruption card, no pressure either way
+            explanation = render_template(
+                "pause_acknowledged" if acknowledged_risk else "pause") + " " + sim.plain_english
         proceed = (sim.ok and not policy_refusals
                    and (not interruption or acknowledged_risk))
         return Review(sim=sim, risk=risk, proceed=proceed,
                       interruption=interruption, reasons=reasons,
+                      explanation=explanation,
                       policy_refusals=policy_refusals)
