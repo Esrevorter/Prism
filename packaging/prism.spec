@@ -66,14 +66,46 @@ exe = EXE(
 # --- prism-gui: same bundle, zero-argument GUI launcher entry (entry.gui).
 # Ships inside the prism archive so double-clicking prism-gui(.exe) opens
 # the wallet UI in a browser (spec §13 "Double-click installer mandate").
-pyz2 = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+# NOTE: this EXE must freeze the *GUI script* (prism/entry_gui.py ->
+# rpc.launcher.main), NOT entry.gui via a bare reference to `a.scripts`:
+# reusing the CLI's analysis scripts made prism-gui.exe run chain.cli.main
+# with argv[0]="prism-gui", so argparse demanded a subcommand and the
+# binary died instantly ("the following arguments are required: cmd") —
+# perceived as "prism-gui.exe crashes". A dedicated Analysis is cheap here
+# because everything lands in one onefile cache anyway.
+agui = Analysis(
+    [os.path.join(root, 'prism', 'entry_gui.py')],
+    pathex=[root],                       # resolves the `prism.*` package tree
+    binaries=[],
+    datas=a.datas,
+    hiddenimports=[
+        'prism.rpc.launcher', 'prism.rpc.server', 'prism.rpc.service',
+        'prism.chain.node', 'prism.chain.block', 'prism.chain.params',
+        'prism.chain.emission', 'prism.chain.pow', 'prism.chain.difficulty',
+        'prism.chain.denylist',
+        'prism.crypto.hashing', 'prism.crypto.edwards', 'prism.crypto.field',
+        'prism.mpc.frost', 'prism.mpc.recovery', 'prism.mpc.sharing',
+        'prism.wallet.agent_auth', 'prism.wallet.intent',
+        'prism.wallet.disclosure',
+        'prism.ai.fraud', 'prism.ai.simulator',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=['pytest', 'setuptools'],
+    win_no_prefer_redirects=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz2 = PYZ(agui.pure, agui.zipped_data, cipher=block_cipher)
 
 exe_gui = EXE(
     pyz2,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    agui.scripts,
+    agui.binaries,
+    agui.zipfiles,
+    agui.datas,
     [],
     name='prism-gui',
     debug=False,

@@ -19,24 +19,115 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
-from ..ai.fraud import FraudDetector, TxFeatures
-from ..ai.simulator import (ChainSnapshot, SigningGate, SnapshotOutput,
-                            render_template)
-from ..chain.node import ChainState, mine_block, make_genesis, Block, ZERO32
-from ..chain.params import REFRACTION_TESTNET
-from ..mpc import frost, recovery
-from ..mpc.sharing import Share
-from ..wallet.agent_auth import (AgentRuntime, Constraints, Grant,
-                                 PolicyEngine, RISK_CLEAN_MAX, SignerStub,
-                                 _intent_amount_shard)
-from ..wallet.intent import (BASE_FEE_SHARD, AddressBook, Contact, Intent, IntentCompiler,
-                             IntentError, apply_clarification, prsm_to_shard,
-                             shard_to_prsm, simulate, fraud_flags)
+
+# The directory holding the ``prism`` package (its parent), so we can search
+# upward for it regardless of where/how this file lives.
+_HERE = Path(__file__).resolve().parent
+
+
+def _find_prism_pkg_parent() -> str | None:
+    """Walk up from this file looking for a ``prism`` package dir; return the
+    directory to prepend to sys.path so ``import prism.<sub>`` works, or None.
+
+    Handles every supported layout:
+      * source tree run from inside prism/  (.../prism/rpc/x.py, parent
+        .../prism contains no prism/, but .../ contains prism/)
+      * repo root / pytest                  (.../prism/rpc/x.py, same)
+      * pip-installed under a ``prism`` namespace (found at step 1)
+    """
+    for base in [_HERE.parent.parent] + list(_HERE.parents):
+        cand = base / "prism"
+        if (cand / "rpc").is_dir():
+            return str(base)
+    return None
+
+
+def _ensure_prism_importable() -> None:
+    """Guarantee ``import prism.ai`` etc. resolve, whatever the launch layout.
+
+    Why this exists: rpc.service imports sibling subpackages via relative
+    ``..`` imports (``from ..ai...``), which require the parent package to
+    be importable. Depending on how the code was launched, this module's
+    fully-qualified name may legitimately be either ``prism.rpc.service``
+    (repo-root layout) or just ``rpc.service`` (running from inside the
+    prism/ tree, e.g. ``python -m rpc.server``, or the flat PyInstaller CLI
+    bundle). In the latter case ``..ai`` climbs past the top-level package
+    and raises "ImportError: attempted relative import beyond top-level
+    package" — which crashed prism-gui.exe on double-click. Pushing the
+    right root onto sys.path and importing through absolute ``prism.*``
+    names fixes all layouts.
+    """
+    try:
+        import prism                    # noqa: F401  (already importable?)
+        return
+    except ImportError:
+        pass
+    if getattr(sys, "frozen", False):   # PyInstaller onefile: _MEIPASS/prism
+        meipass = str(getattr(sys, "_MEIPASS", ""))
+        if meipass and meipass not in sys.path:
+            sys.path.insert(0, meipass)
+        return
+    parent = _find_prism_pkg_parent()
+    if parent and parent not in sys.path:
+        sys.path.insert(0, parent)
+
+
+def _sibling(name: str):
+    """Import a sibling subpackage module by absolute name, layout-agnostic.
+
+    Used by the lazy in-function imports below: relative ``..x`` form only
+    works when this module is ``prism.rpc.service``; under the flat layout
+    (``rpc.service``, e.g. inside the frozen prism.exe CLI bundle) it must
+    go through ``prism.x`` with the package root pushed onto sys.path.
+    """
+    if __package__ and __package__ != "rpc":
+        from importlib import import_module
+        return import_module("." + name, __package__)   # normal relative path
+    _ensure_prism_importable()
+    from importlib import import_module
+    return import_module("prism." + name)
+
+
+if __package__ in (None, "", "rpc"):
+    # Loaded as top-level ``rpc.*`` (or directly as a script): the relative
+    # ``..`` form cannot work; go through the ``prism`` namespace instead.
+    _ensure_prism_importable()
+    from prism.ai.fraud import FraudDetector, TxFeatures
+    from prism.ai.simulator import (ChainSnapshot, SigningGate, SnapshotOutput,
+                                    render_template)
+    from prism.chain.node import (ChainState, mine_block, make_genesis, Block,
+                                  ZERO32)
+    from prism.chain.params import REFRACTION_TESTNET
+    from prism.mpc import frost, recovery
+    from prism.mpc.sharing import Share
+    from prism.wallet.agent_auth import (AgentRuntime, Constraints, Grant,
+                                         PolicyEngine, RISK_CLEAN_MAX,
+                                         SignerStub, _intent_amount_shard)
+    from prism.wallet.intent import (BASE_FEE_SHARD, AddressBook, Contact,
+                                     Intent, IntentCompiler, IntentError,
+                                     apply_clarification, prsm_to_shard,
+                                     shard_to_prsm, simulate, fraud_flags)
+else:
+    from ..ai.fraud import FraudDetector, TxFeatures
+    from ..ai.simulator import (ChainSnapshot, SigningGate, SnapshotOutput,
+                                render_template)
+    from ..chain.node import ChainState, mine_block, make_genesis, Block, ZERO32
+    from ..chain.params import REFRACTION_TESTNET
+    from ..mpc import frost, recovery
+    from ..mpc.sharing import Share
+    from ..wallet.agent_auth import (AgentRuntime, Constraints, Grant,
+                                     PolicyEngine, RISK_CLEAN_MAX, SignerStub,
+                                     _intent_amount_shard)
+    from ..wallet.intent import (BASE_FEE_SHARD, AddressBook, Contact, Intent, IntentCompiler,
+                                 IntentError, apply_clarification, prsm_to_shard,
+                                 shard_to_prsm, simulate, fraud_flags)
 
 DEVICE_LABELS = {1: "Phone", 2: "Laptop", 3: "Backup card"}
 
@@ -124,7 +215,7 @@ class PrismService:
     def mine(self, count: int = 1) -> dict:
         """Devnet faucet: CPU-mine `count` blocks, credit coinbase emission
         to the local wallet balance so the intent flow is exercisable."""
-        from ..chain.emission import emission_at
+        emission_at = _sibling('chain.emission').emission_at
         if not 1 <= count <= 50:
             raise ValueError("mine count must be 1..50")
         out = []
@@ -444,7 +535,7 @@ class PrismService:
                         "reasons": [f"unresolved: {it.needs_clarify}"],
                         "human": "The agent needs a complete instruction "
                                  "before it can propose anything."}
-            from ..wallet.agent_auth import PolicyViolation
+            PolicyViolation = _sibling('wallet.agent_auth').PolicyViolation
             try:
                 pa = self.agent.propose(it, g.grant_id, now_unix=self.sim_clock,
                                         contact_verified=True,
@@ -600,7 +691,7 @@ class PrismService:
             # tolerance). We keep two clocks: sim_clock for agent logic, and
             # advance chain tip timestamp by cadence_s per settlement.
             if self.gate is not None:
-                from ..ai import simulator as _sim
+                _sim = _sibling('ai.simulator')
                 snap = _sim.ChainSnapshot(
                     [_sim.SnapshotOutput("agent:balance", 0, self.balance_shard)]
                     if self.balance_shard > 0 else [])
@@ -975,7 +1066,7 @@ class PrismService:
                 # machine refuses submissions once the window closed, so we
                 # bind them directly into the pending record here — the same
                 # ℓ-reduction submit_collector_share performs.
-                from ..mpc.sharing import ED25519_SCALARS as _F
+                _F = _sibling('mpc.sharing').ED25519_SCALARS
                 for i in st.pending.collector_digests:
                     if i not in subs and i in self.recovery_new_shares:
                         subs[i] = _F.reduce(self.recovery_new_shares[i])
@@ -1026,12 +1117,12 @@ class PrismService:
 def _deterministic_blinds(n: int, seed: int) -> list[int]:
     import random
     rng = random.Random(seed)
-    from ..mpc.sharing import ED25519_SCALARS as F
+    F = _sibling('mpc.sharing').ED25519_SCALARS
     return [rng.randrange(1, F.order) for _ in range(n)]
 
 
 def _empty_im_root() -> bytes:
-    from ..chain.node import merkle_root
+    merkle_root = _sibling('chain.node').merkle_root
     return merkle_root([])
 
 
