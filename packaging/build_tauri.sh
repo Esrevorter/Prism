@@ -76,10 +76,10 @@ PY
 fi
 # tauri-build consumes icon.ico / icon.icns / 32x32.png / 128x128.png.
 # `tauri icon` regenerates all formats properly when npm is available.
-if command -v npx >/dev/null 2>&1 && [ -f "$ICONS/icon.png" ]; then
-  ( cd "$TAURI_DIR" && npx --yes @tauri-apps/cli@^1.5.14 icon "$ICONS/icon.png" >/dev/null 2>&1 ) \
-    || echo "    WARN: 'tauri icon' generation skipped (will be generated on CI)"
-fi
+# tauri v1 CLI is provided by the shell's devDependency (@tauri-apps/cli);
+# invoke it via npm exec so we never pull a mismatched v2 CLI from the void.
+( cd "$TAURI_DIR" && npm exec -- tauri icon "$ICONS/icon.png" >/dev/null 2>&1 ) \
+  || { echo "ERROR: 'tauri icon' generation failed (icons are mandatory for bundling)" >&2; exit 1; }
 
 echo "==> [5/5] Tauri build (installers)"
 if ! command -v cargo >/dev/null 2>&1; then
