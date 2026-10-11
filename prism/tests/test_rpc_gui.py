@@ -368,3 +368,160 @@ class TestAgentRuntime:
         assert svc.agent_pending()["count"] == 0
         after = svc.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid)
         assert after.get("refused") is True      # revoked plan never resumes
+
+
+class TestRecovery:
+    """Phase-3 GA social-recovery RPC surface (spec §7.3 / E9 / D4).
+
+    State-machine internals are pinned in test_mpc.py; here we pin the
+    service-level flows the GUI drives: arm-on-ceremony, initiate/veto/
+    finalize/cancel, cooldown enforcement, honest-UX copy, and the JSON-RPC
+    wire contract for every recovery.* method.
+    """
+
+    def _solo(self, svc):
+        svc.ceremony_start()
+        return svc.recovery_status()
+
+    def test_solo_ceremony_arms_recovery_state(self, svc):
+        st = self._solo(svc)
+        assert st["phase"] == "active"
+        assert st["quorum"] == 2                    # 2-of-3 device legs
+        assert st["timelock_hours"] == 72           # E9 window
+        assert st["cooldown_days"] == 30
+
+    def test_status_without_ceremony_refused(self, svc):
+        with pytest.raises(ValueError):
+            svc.recovery_status()
+
+    def test_initiate_requires_exact_quorum(self, svc):
+        self._solo(svc)
+        with pytest.raises(ValueError):
+            svc.recovery_initiate([1, 2, 3], [3])   # solo quorum is 2
+
+    def test_pending_window_veto_then_restart(self, svc):
+        self._solo(svc)
+        r = svc.recovery_initiate([1, 2], [3])
+        assert r["ok"] and r["veto_legs_armed"] == 1
+        assert svc.recovery_status()["phase"] == "pending"
+        c = svc.recovery_cancel(3)                  # stale leg exercises veto
+        assert c["phase"] == "cancelled"
+        assert "cancelled by one of your devices" in c["human"]
+        # a cancelled machine can be re-armed (no cooldown from cancellation)
+        r2 = svc.recovery_initiate([1, 2], [3])
+        assert r2["ok"]
+
+    def test_cancel_with_unknown_share_refused(self, svc):
+        self._solo(svc)
+        svc.recovery_initiate([1, 2], [3])
+        with pytest.raises(PermissionError):
+            svc.recovery_cancel(99)
+
+    def test_finalize_blocked_until_timelock_elapsed(self, svc):
+        self._solo(svc)
+        svc.recovery_initiate([1, 2], [3])
+        with pytest.raises(RuntimeError, match="timelock not expired"):
+            svc.recovery_finalize()
+
+    def test_advance_window_guarded(self, svc):
+        self._solo(svc)
+        # devnet helper refuses to fast-forward when nothing is pending
+        with pytest.raises(RuntimeError):
+            svc.recovery_advance_window()
+        svc.recovery_initiate([1, 2], [3])
+        a = svc.recovery_advance_window(hours=1)    # under-window request
+        assert a["window_remaining_s"] == 0         # clamped to full 72 h + 1
+
+    def test_full_flow_finalize_reshares_and_cooldown(self, svc):
+        self._solo(svc)
+        old_pk = svc.recovery_status()              # sanity: readable
+        assert old_pk["phase"] == "active"
+        svc.recovery_initiate([1, 2], [3])
+        svc.recovery_advance_window()
+        f = svc.recovery_finalize()
+        assert f["phase"] == "active" and f["generation"] == 1
+        assert sorted(f["reshared_legs"]) == [1, 2, 3]  # ALL live legs rotated
+        st = svc.recovery_status()
+        assert st["cooldown_remaining_s"] > 0
+        # post-recovery cooldown blocks a second recovery (E9 anti-harassment)
+        with pytest.raises(RuntimeError, match="cooldown"):
+            svc.recovery_initiate([1, 2], [3])
+
+    def test_attach_social_upgrade_changes_address_honestly(self, svc):
+        self._solo(svc)
+        up = svc.recovery_attach_social()
+        assert up["scheme"].startswith("3-of-5 Social")
+        # honest-UX: a fresh ceremony means a NEW receiving address — the
+        # response must say so rather than pretend the old key gained friends
+        assert up["address_changed"] is True
+        assert up["old_joint_pk_hex"] != up["new_joint_pk_hex"]
+        assert "NEW receiving address" in up["human"]
+        st = svc.recovery_status()
+        assert st["quorum"] == 3 and st["legs"] == 5
+
+    def test_social_flow_contact_veto_and_finalize(self, svc):
+        self._solo(svc)
+        svc.recovery_attach_social()
+        svc.recovery_initiate([2, 3, 4], [5])       # collectors incl. contacts
+        assert svc.recovery_status()["veto_legs_armed"] == 1
+        svc.recovery_advance_window()
+        f = svc.recovery_finalize()
+        assert f["phase"] == "active"
+        assert sorted(f["reshared_legs"]) == [1, 2, 3, 4, 5]
+
+    def test_full_quorum_loss_refused_out_of_scope(self, svc):
+        self._solo(svc)
+        with pytest.raises(ValueError, match="out of scope"):
+            svc.recovery_initiate([1, 2], [])       # no live leg => no veto
+
+
+class TestRecoveryOverHTTP:
+    """recovery.* methods through the real JSON-RPC wire contract."""
+
+    @pytest.fixture()
+    def live(self, monkeypatch):
+        monkeypatch.setattr(rpc_server, "SERVICE", PrismService())
+        httpd = rpc_server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                               rpc_server.RPCRequestHandler)
+        th = threading.Thread(target=httpd.serve_forever, daemon=True)
+        th.start()
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+        httpd.shutdown()
+        th.join(timeout=2)
+
+    def _call(self, base, method, params=None):
+        req = urllib.request.Request(
+            base + "/jsonrpc",
+            data=json.dumps({"jsonrpc": "2.0", "method": method,
+                             "params": params or {}, "id": 1}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+
+    def test_recovery_wire_contract_end_to_end(self, live):
+        assert self._call(live, "mpc.ceremony_start")["result"]["status"] \
+            == "complete"
+        st = self._call(live, "recovery.status")["result"]
+        assert st["phase"] == "active" and st["quorum"] == 2
+        ini = self._call(live, "recovery.initiate",
+                         {"collectors": [1, 2], "stale_legs": [3]})["result"]
+        assert ini["ok"] and ini["window_remaining_s"] > 0
+        assert self._call(live, "recovery.status")["result"][
+            "phase"] == "pending"
+        # early finalize must surface as a JSON-RPC error, never a result
+        early = self._call(live, "recovery.finalize")
+        assert "error" in early and "timelock" in early["error"]["message"]
+        adv = self._call(live, "recovery.advance_window",
+                         {"hours": 73.0})["result"]
+        assert adv["window_remaining_s"] == 0
+        fin = self._call(live, "recovery.finalize")["result"]
+        assert fin["phase"] == "active" and fin["generation"] == 1
+        cd = self._call(live, "recovery.status")["result"]
+        assert cd["cooldown_remaining_s"] > 0
+
+    def test_recovery_cancel_wire(self, live):
+        self._call(live, "mpc.ceremony_start")
+        self._call(live, "recovery.initiate",
+                   {"collectors": [1, 2], "stale_legs": [3]})
+        c = self._call(live, "recovery.cancel", {"share_index": 3})["result"]
+        assert c["phase"] == "cancelled"
