@@ -73,11 +73,18 @@ exe = EXE(
 # binary died instantly ("the following arguments are required: cmd") —
 # perceived as "prism-gui.exe crashes". A dedicated Analysis is cheap here
 # because everything lands in one onefile cache anyway.
+# PyInstaller >= 6.0 stores Analysis.datas as a list of 3-element tuples
+# (dest, src, typecode), but a fresh Analysis expects 2-element
+# (src, dest) tuples — passing `a.datas` straight through raised
+# "ValueError: too many values to unpack (expected 2)" and broke the
+# release build. Normalize back to 2-tuples (works on 5.x as well).
+_datas_2tuple = [(e[1], e[0]) for e in a.datas]
+
 agui = Analysis(
     [os.path.join(root, 'prism', 'entry_gui.py')],
     pathex=[root],                       # resolves the `prism.*` package tree
     binaries=[],
-    datas=a.datas,
+    datas=_datas_2tuple,
     hiddenimports=[
         'prism.rpc.launcher', 'prism.rpc.server', 'prism.rpc.service',
         'prism.chain.node', 'prism.chain.block', 'prism.chain.params',
