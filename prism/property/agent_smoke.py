@@ -93,6 +93,37 @@ def main() -> int:
     rep = svc.agent_report(grant_id=gid)
     check("report produced", rep.get("ok") is not False and rep.get("human"), str(rep)[:120])
 
+    # 8. NEGATIVE: unfunded wallet must refuse, stay queued, settle after funding
+    #    (§ ethics.md fail-closed rule — no silent money-state divergence).
+    svc2 = PrismService()          # fresh service: balance_shard == 0
+    r2 = svc2.grant_create(days=30, per_action_prsm=25.0, monthly_prsm=400.0,
+                           comfort_prsm=None, veto_hours=24.0)
+    gid2 = r2["grant"]["grant_id"]
+    p4 = svc2.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid2)
+    aid4 = p4.get("action_id", "")
+    t4 = svc2.agent_tick(hours_ahead=25.0)   # window closed, but wallet empty
+    refused4 = t4.get("refused_insufficient", [])
+    check("unfunded tick refuses non-empty", len(refused4) == 1
+          and refused4[0]["action_id"] == aid4, refused4)
+    check("unfunded tick broadcast empty", t4.get("broadcast") == [], t4.get("broadcast"))
+    pend4 = svc2.agent_pending()
+    check("unfunded action stays queued (no terminal state)",
+          any(c["action_id"] == aid4 for c in pend4["pending"]), f"count={pend4['count']}")
+    states4 = [x["state"] for x in t4.get("transitions", [])]
+    check("unfunded action never marked executed/blocked terminally",
+          "executed_after_veto_window" not in states4
+          and "blocked_by_risk_model" not in states4, states4)
+    # fund the wallet -> deferred action settles on the next tick
+    svc2.mine(2)
+    t5 = svc2.agent_tick(hours_ahead=0.0)
+    bcast5 = [b for b in t5.get("broadcast", []) if b.get("action_id") == aid4]
+    check("settles after funding", len(bcast5) == 1 and bool(bcast5[0].get("txid")),
+          t5.get("broadcast"))
+    bal_after = svc2.balance_shard
+    check("post-funding balance deducted by the spend",
+          0 < bal_after < 6_592_465_754 and svc2.chain.tip.header.height >= 3,
+          f"bal={bal_after} h={svc2.chain.tip.header.height}")
+
     print("=" * 60)
     if failures:
         print(f"SMOKE FAILED ({len(failures)}): {failures}")

@@ -127,8 +127,10 @@ class PrismService:
                 # devnet faucet mining follows chain-tip cadence, NOT the
                 # agent sim clock (which may jump hours ahead for veto-window
                 # testing); consensus rules reject timestamps too far in the
-                # future relative to the parent block.
-                self.sim_clock = max(self.sim_clock + 1,
+                # future relative to the parent block. Clamp the sim clock
+                # back to tip+cadence when it ran ahead — agent logic keeps
+                # its own hold timestamps, so nothing is re-armed silently.
+                self.sim_clock = min(self.sim_clock + 1,
                                      self.chain.tip.header.timestamp
                                      + self.cadence_s)
                 blk = mine_block(self.params, self.chain.tip,
@@ -564,6 +566,24 @@ class PrismService:
         with self._lock:
             if hours_ahead > 0:
                 self.sim_clock += int(hours_ahead * 3600)
+            # Funding-hold release: deferred (unfunded) actions carry a
+            # far-future exec_not_before set by the fail-closed gate below.
+            # Once the wallet can cover them, clear the hold so their ORIGINAL
+            # veto window governs again — no silent re-arming, and if the
+            # window already elapsed while unfunded the action executes only
+            # after passing the live risk re-check at tick time.
+            for pa in self.agent.pending.values():
+                if getattr(pa, "_funding_hold", False):
+                    need = _intent_amount_shard(pa.intent) + BASE_FEE_SHARD
+                    if need <= self.balance_shard:
+                        # Re-arm so it is due on THIS tick: the funding hold
+                        # means the user was already waiting; the original
+                        # veto window closed before funds arrived, and mining
+                        # cannot fast-forward a far-future hold timestamp.
+                        # The live risk re-check below still gates execution
+                        # (§7.7 step 2) — nothing bypasses review.
+                        pa.exec_not_before_unix = self.sim_clock
+                        pa._funding_hold = False
             ids = list(self.agent.pending)
             scores = {aid: self.agent.pending[aid].risk_score for aid in ids}
             # Re-check risk LIVE at window close (§7.7 step 2): the proposal-time
@@ -605,16 +625,35 @@ class PrismService:
                                               "broadcast",
                                     "needed_shard": cost,
                                     "have_shard": self.balance_shard})
-            due_intents = {aid: self.agent.pending[aid].intent
-                           for aid in self.agent.pending
-                           if self.sim_clock >= self.agent.pending[aid].exec_not_before_unix}
+            # Snapshot pending BEFORE tick(): the runtime removes entries from
+            # self.agent.pending as it transitions them to executed, so any
+            # post-tick lookup of an executed action's intent must come from
+            # this snapshot (src_pending), not the live dict.
+            src_pending = dict(self.agent.pending)
+            due_intents = {aid: src_pending[aid].intent
+                           for aid in src_pending
+                           if self.sim_clock >= src_pending[aid].exec_not_before_unix}
             # Fail-closed funding gate BEFORE the state machine: an action the
             # wallet cannot actually broadcast must never reach "executed" —
             # its veto window simply stays open (it becomes due again once the
             # user funds the wallet). No silent money-state divergence.
-            refused_ids_pre = {r["action_id"] for r in refused}
-            for aid in refused_ids_pre:
-                scores[aid] = 1.0   # forces blocked_by_policy at window close
+            # Fail-closed ordering fix (caught by the unfunded negative in
+            # agent_smoke): an unfunded action must NEVER reach a terminal
+            # state. tick() deletes from pending before signing, so any
+            # funding-refused id has to be restored to pending BEFORE tick
+            # runs — otherwise the runtime transitions it to
+            # blocked_by_risk_model and it dies silently instead of waiting
+            # to be funded. Restoring with a far-future exec_not_before keeps
+            # it queued (veto/revoke still work) until the wallet funds up,
+            # at which point the RPC clears the hold via requeue_deferred().
+            deferred_ids = {r["action_id"] for r in refused}
+            FAR_FUTURE_S = 10 * 365 * 24 * 3600  # ~10 years; cleared on funding
+            for aid in [a for a in list(self.agent.pending)
+                        if a in deferred_ids]:
+                pa_held = self.agent.pending[aid]
+                pa_held._hold_orig_exec_not_before = pa_held.exec_not_before_unix
+                pa_held.exec_not_before_unix = self.sim_clock + FAR_FUTURE_S
+                pa_held._funding_hold = True
             executed = self.agent.tick(now_unix=self.sim_clock,
                                        current_risk_scores=scores)
             # Real settlement for everything the runtime let through.
@@ -632,20 +671,14 @@ class PrismService:
                 amt = _intent_amount_shard(it)
                 gid_fee = amt + BASE_FEE_SHARD
                 if gid_fee > self.balance_shard:
-                    # The runtime transitioned to executed but we cannot
-                    # actually broadcast — money-state divergence must be
+                    # Defensive double-check (the pre-tick hold above should
+                    # make this unreachable): money-state divergence must be
                     # LOUD, never silent (§ ethics.md fail-closed rule).
-                    # Re-open the action as a fresh pending entry so it can
-                    # settle once funded, and report the refusal explicitly.
-                    from ..wallet.agent_auth import PendingAction as _PA
-                    self.agent.pending[r.action_id] = _PA(
-                        r, it, self.sim_clock, scores.get(r.action_id, 0.0))
-                    refused.append({"action_id": r.action_id,
-                                    "reason": "wallet balance too small to "
-                                              "broadcast (re-queued)",
-                                    "needed_shard": gid_fee,
-                                    "have_shard": self.balance_shard})
-                    continue
+                    self.agent.pending[r.action_id] = src_pending[r.action_id] \
+                        if r.action_id in src_pending else None
+                    raise RuntimeError(
+                        f"agent settlement reached broadcast for unfunded "
+                        f"action {r.action_id} — fail-closed invariant broken")
                 self.balance_shard -= gid_fee
                 # Chain timestamps must satisfy consensus rules (monotonic,
                 # not too far in future relative to parent). The agent sim
