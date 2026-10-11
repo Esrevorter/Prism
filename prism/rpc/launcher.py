@@ -52,6 +52,15 @@ def make_data_dir(path: str | None = None) -> str:
     except OSError as e:                      # exists with wrong perms etc.
         if e.errno != errno.EEXIST:
             raise
+    if os.name != "nt":
+        try:                                  # tighten even if dir pre-existed
+            os.chmod(d, 0o700)
+        except OSError:                       # pragma: no cover
+            pass
+    # Windows has no POSIX permission bits; NTFS privacy comes from the
+    # default creator-owner ACL. Storing our own copy of the lock file in
+    # memory also lets us avoid re-reading it while another process holds
+    # an exclusive byte-range lock on it (msvcrt raises OSError on read).
     with open(os.path.join(d, MARKER_NAME), "w") as fh:
         fh.write("prism-gui\n")               # marker: this dir owns a wallet
     return d
@@ -80,55 +89,120 @@ class InstanceLock:
     def __init__(self, data_dir: str):
         self.path = os.path.join(data_dir, LOCK_NAME)
         self.fh = None
+        self.info: dict = {}     # in-memory mirror of the lockfile payload
+
+    @staticmethod
+    def _read_info(path: str) -> dict:
+        """Best-effort read of a (possibly locked) lockfile.
+
+        On Windows, msvcrt byte-range locks make reads by other processes
+        raise OSError — so we try/except and fall back to {}. On POSIX,
+        flock is advisory and the read succeeds."""
+        try:
+            with open(path) as fh:
+                return json.loads(fh.read() or "{}")
+        except (OSError, ValueError):
+            return {}
 
     def _try_lock(self, fh):
-        """Non-blocking exclusive lock; True if acquired."""
+        """Non-blocking exclusive lock; True if acquired.
+
+        Windows detail: msvcrt.locking(LK_NBLCK, n) locks *n bytes* only.
+        A one-byte range is defeated when a second process opens the same
+        file for writing — buffered writes outside byte 0 succeed silently
+        (observed in CI: two launchers both "acquired"). We therefore lock
+        a generous fixed span covering any realistic JSON payload.
+        """
         try:
             if os.name == "nt":
                 fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, self.LOCK_SPAN)
             else:
                 fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
         except OSError:
             return False
 
+    LOCK_SPAN = 4096             # bytes covered by the Windows byte-range lock
+
     def _unlock(self, fh):
         if os.name == "nt":
             fh.seek(0)
-            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, self.LOCK_SPAN)
         else:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
     def acquire_or_live(self):
         """Return (acquired, live_url|None). If not acquired, probe the
-        holder's health endpoint so we can reopen its UI instead of failing."""
+        holder's health endpoint so we can reopen its UI instead of failing.
+
+        Cross-platform ordering matters:
+        1. Try to take the lock FIRST. On Windows msvcrt byte-range locks
+           are mandatory — reading while a holder has the range locked
+           raises PermissionError — so reads happen only on handles we
+           hold ourselves, or best-effort after a failed acquisition.
+        2. If we acquired but the payload still describes a HEALTHY daemon,
+           the previous holder died without releasing cleanly yet is
+           somehow reachable: hand back its URL and release our fresh
+           lock (caller reopens that UI instead of starting a duplicate).
+        3. If acquisition fails outright, best-effort-read + probe; then
+           poll briefly for either outcome (holder releases -> stale/clean
+           steal; holder's daemon comes up -> live URL)."""
         fh = open(self.path, "a+")
-        if not self._try_lock(fh):
-            fh.seek(0)
+        if self._try_lock(fh):
+            # We hold it now: safe to inspect any stale payload.
             try:
-                info = json.loads(fh.read() or "{}")
+                fh.seek(0)
+                stale = json.loads(fh.read() or "{}")
             except ValueError:
-                info = {}
-            fh.close()
-            host, port = info.get("host", "127.0.0.1"), info.get("port")
+                stale = {}
+            host, port = stale.get("host", "127.0.0.1"), stale.get("port")
             if port and _health_ok(host, int(port)):
-                return False, f"http://{host}:{port}/"
-            # stale lock (holder died without cleaning up): steal it.
-            fh = open(self.path, "w+")
-            self._try_lock(fh)               # best-effort on the fresh handle
+                self.info = stale
+                self._unlock(fh)
+                fh.close()
+                return False, f"http://{host}:{int(port)}/"
+            fh.seek(0)
+            fh.truncate()
             self.fh = fh
             return True, None
-        fh.seek(0)
-        fh.truncate()
-        self.fh = fh
-        return True, None
+        # Lock is held by someone else right now.
+        info = self.info or self._read_info(self.path)
+        host, port = info.get("host", "127.0.0.1"), info.get("port")
+        if port and _health_ok(host, int(port)):
+            self.info = info
+            fh.close()
+            return False, f"http://{host}:{int(port)}/"
+        # Holder present but not answering (booting) or payload unreadable
+        # (Windows + mandatory lock during contention). Poll briefly.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            fh.close()
+            time.sleep(0.1)
+            try:
+                fh = open(self.path, "a+")
+            except OSError:                   # pragma: no cover
+                continue
+            if self._try_lock(fh):            # holder released -> steal/clean
+                fh.seek(0)
+                fh.truncate()
+                self.fh = fh
+                return True, None
+            info = self._read_info(self.path)
+            host, port = info.get("host", "127.0.0.1"), info.get("port")
+            if port and _health_ok(host, int(port)):
+                self.info = info
+                fh.close()
+                return False, f"http://{host}:{int(port)}/"
+        fh.close()
+        return False, None                    # still contended; caller retries
 
     def write_info(self, host: str, port: int, pid: int) -> None:
         assert self.fh is not None
+        self.info = {"host": host, "port": port, "pid": pid}
         self.fh.seek(0)
         self.fh.truncate()
-        json.dump({"host": host, "port": port, "pid": pid}, self.fh)
+        json.dump(self.info, self.fh)
         self.fh.flush()
 
     def release(self) -> None:
@@ -205,7 +279,17 @@ def main(argv=None) -> int:
         data_dir = make_data_dir()
 
     lock = InstanceLock(data_dir)
-    acquired, live_url = lock.acquire_or_live()
+    acquired, live_url = None, None
+    deadline = time.monotonic() + 15.0
+    while True:
+        acquired, live_url = lock.acquire_or_live()
+        if acquired or live_url:
+            break
+        # Contended but nothing healthy yet (peer still booting): retry.
+        if time.monotonic() >= deadline:
+            _die("Another Prism launcher holds the wallet lock but no "
+                 "healthy daemon was found. Close it and try again.")
+        time.sleep(0.2)
     if not acquired:
         print(f"Prism wallet is already running — opening it at {live_url}")
         if json_status:
