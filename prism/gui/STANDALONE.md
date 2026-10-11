@@ -52,13 +52,19 @@ isolation, full bare-run end-to-end incl. auto-open).
 ## What "standalone" does and does not mean here
 - **Standalone = one command, one process, zero external services.** True now.
   Loopback-only (127.0.0.1), devnet posture; CORS restricted to localhost origins.
-- **Not yet a double-click native binary.** The Tauri/Electron shell that wraps
-  these exact files into a platform installer is planned Phase-2 work per
-  spec §13 ("native shell will wrap exactly these files"), and PyInstaller is
-  not installed in this environment, so the packaged `prism-gui` binary has
-  NOT been built or tested here. Do not claim it exists until someone runs
-  `packaging/build_release.sh` on a machine with PyInstaller and verifies the
-  output.
+- **Not yet a double-click native binary — and this is now a MANDATORY
+  acceptance requirement, not optional Phase-2 scope.** Per the spec §13
+  "Double-click installer mandate" (2026-10-11): the shipped product must be a
+  pre-built packaged download (Tauri shell chosen; Electron fallback) whose
+  bundled resources include a PyInstaller-frozen `prism-gui` launcher with an
+  embedded Python runtime, so users never see a terminal at all ("install and
+  run", doofus-proof). PyInstaller and the Rust/Tauri toolchain are not
+  installed in this development environment, so no installer artifact has been
+  built or verified here. Do not claim one exists until someone runs
+  `packaging/build_release.sh` on a machine with PyInstaller, wires the frozen
+  GUI build into the Tauri bundler, and tests the resulting `.msi`/`.dmg`/
+  `.AppImage` on a fresh machine without Python. Until then `prism-gui` is the
+  interim path and the ONLY command any user is ever asked to type.
 - Honest caveat for headless boxes: `--open` uses stdlib `webbrowser`; if no
   browser is registered it silently skips and you can open the URL manually.
 

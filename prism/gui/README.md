@@ -5,9 +5,13 @@ Zero-build front end served by the RPC daemon itself:
     python -m prism.rpc.server            # http://127.0.0.1:8765
 
 Open that URL — index.html + theme.css + app.js are served from this
-directory (`/`, `/static/*`). No npm, no bundler; the Phase-2 native shell
+directory (`/`, `/static/*`). No npm, no bundler; the native shell
 (Tauri/Electron) will wrap exactly these files and talk to the same JSON-RPC
-API, so nothing here is throwaway.
+API, so nothing here is throwaway. Per spec §13 "Double-click installer
+mandate" (2026-10-11) that native installer is a **mandatory** acceptance
+requirement (download → install → run, zero terminal), not optional Phase-2
+scope. End users today should use the zero-argument `prism-gui` launcher
+(see STANDALONE.md); the command above is power-user/dev detail only.
 
 ## Layout
 - `index.html` — balance hero → NL intent bar → plain-language review card →
