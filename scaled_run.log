@@ -1,0 +1,3 @@
+nohup: ignoring input
+scaled spend-to-self property run: 1,000,000 iterations x 4 phases, 2 worker(s), reference cross-check every 256
+PASSED: 1,000,000 iterations in 1459.3s (685 it/s). No invariant violations.
