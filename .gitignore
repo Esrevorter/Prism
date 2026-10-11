@@ -1,50 +1,10 @@
-# ---- Python build / packaging ----
 build/
 dist/
-*.egg-info/
-.eggs/
-
-# ---- Bytecode & caches ----
-*.pyc
-*.pyo
+*.spec.bak
+*.toc
+*.pyz
+*.pkg
+warn-*.txt
+xref-*.html
 __pycache__/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-coverage.xml
-htmlcov/
-
-# ---- Virtual envs ----
-.venv/
-venv/
-env/
-
-# ---- Node (if tooling ever lands here) ----
-node_modules/
-
-# ---- Runtime data (chain/RPC/wallet state, logs, DBs) ----
-data/
-*.log
-*.db
-*.sqlite
-*.sqlite3
-
-# ---- Editors / OS noise ----
-.idea/
-.vscode/
-*.swp
-.DS_Store
-Thumbs.db
-
-# ---- Secrets: never commit ----
-.env
-.env.*
-*.pem
-*.key
-secrets/
-
-# ---- Rust/Tauri build outputs ----
-target/
-node_modules/
-packaging/tauri/prism-gui/dist/
+*.pyc

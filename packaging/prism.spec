@@ -12,12 +12,25 @@ a = Analysis(
     [os.path.join(root, 'prism', 'entry.py')],
     pathex=[os.path.join(root, 'prism')],   # chain/, crypto/, ... are top-level here
     binaries=[],
-    datas=[],
+    datas=[
+        # GUI static bundle served at / by rpc.server; frozen builds resolve
+        # it via sys._MEIPASS/prism/rpc/static (see server.py). Required for
+        # `prism gui` / prism-gui.exe to actually render the wallet UI.
+        (os.path.join(root, 'prism', 'rpc', 'static'),
+         os.path.join('prism', 'rpc', 'static')),
+    ],
     hiddenimports=[
         'chain.cli', 'chain.node', 'chain.block', 'chain.params',
         'chain.emission', 'chain.pow', 'chain.difficulty', 'chain.denylist',
         'crypto.hashing', 'crypto.edwards', 'crypto.field', 'crypto.pedersen',
         'crypto.clsag', 'crypto.bulletproof', 'crypto.stealth',
+        # GUI stack (lazy-imported by `prism gui`; PyInstaller cannot see
+        # lazy imports, so list them explicitly):
+        'rpc.launcher', 'rpc.server', 'rpc.service',
+        'ai.fraud', 'ai.simulator',
+        'wallet.intent', 'wallet.agent_auth', 'wallet.disclosure',
+        'mpc.frost', 'mpc.recovery', 'mpc.sharing',
+        'l2.fees', 'l2.channels',
     ],
     hookspath=[],
     hooksconfig={},
@@ -43,6 +56,31 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,           # CLI tool: keep the terminal attached
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+
+# --- prism-gui: same bundle, zero-argument GUI launcher entry (entry.gui).
+# Ships inside the prism archive so double-clicking prism-gui(.exe) opens
+# the wallet UI in a browser (spec §13 "Double-click installer mandate").
+pyz2 = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe_gui = EXE(
+    pyz2,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='prism-gui',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,           # keeps a terminal for status/errors (v1 posture)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

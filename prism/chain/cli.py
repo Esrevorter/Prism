@@ -5,6 +5,7 @@ Usage:
   prism emit      --heights 0,100,315360
   prism mine      --blocks 5            (placeholder PoW)
   prism params
+  prism gui       [--open]              (wallet daemon + browser UI)
 
 (Also runnable as ``python3 -m chain.cli ...`` from inside the ``prism/`` tree.)
 """
@@ -116,6 +117,22 @@ def cmd_params(a):
                      indent=2, default=str))
 
 
+def cmd_gui(a):
+    """Start the GUI-wallet daemon and open the browser UI.
+
+    Thin alias for ``prism-gui`` / ``rpc.launcher.main`` so the single
+    shipped ``prism`` binary covers everything the README's getting-started
+    flow promises. Import is lazy: chain-only commands never pay the cost
+    of loading the rpc/gui stack (and it stays out of frozen CLI builds
+    unless explicitly bundled).
+    """
+    try:
+        import prism.rpc.launcher as L          # packaged/frozen layout
+    except ImportError:                          # repo-tree / pip-script layout
+        import rpc.launcher as L
+    return L.main([])
+
+
 def main(argv=None):
     import os
     # Show the name the user actually invoked us by ("prism" for the pip script
@@ -131,6 +148,10 @@ def main(argv=None):
     m = sub.add_parser("mine");    m.add_argument("--blocks", type=int, default=3)
     m.add_argument("--network", default="refraction", choices=list(NETWORKS)); m.set_defaults(fn=cmd_mine)
     p = sub.add_parser("params");  p.set_defaults(fn=cmd_params)
+    gw = sub.add_parser(
+        "gui", help="start the GUI wallet daemon and open the browser UI "
+                    "(alias of prism-gui; blocks until you press Enter)")
+    gw.set_defaults(fn=cmd_gui)
 
     args = ap.parse_args(argv)
     args.fn(args)

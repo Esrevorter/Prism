@@ -148,6 +148,9 @@ C:\> prism emit --heights 0,100,315360
 
 C:\> prism mine --blocks 3
 { ...three demo blocks mined and validated end-to-end... }
+
+C:\> prism gui
+[ ...the wallet GUI opens in your browser (same as double-clicking prism-gui.exe)... ]
 ```
 
 Prefer pictures and step-by-step? Follow [Wiki → Getting Started as a User](wiki/Getting-Started-as-a-User.md).
