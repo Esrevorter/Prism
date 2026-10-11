@@ -231,3 +231,63 @@ class TestRPCOverHTTP:
         assert "What would you like to do?" in html
         with urllib.request.urlopen(live + "/static/app.js", timeout=5) as r:
             assert b"jsonrpc" in r.read()
+
+
+class TestExplanationTemplatePack:
+    """Shipped explanation-template pack (§8.2, honest-UX single source)."""
+
+    def test_band_to_explanation_binding(self, svc):
+        # calm band -> calm_default template rendered by explain()
+        it = svc.intent_compile("send 2 PRSM to Alex")
+        rv = svc.intent_review(it["intent_id"])
+        assert rv["ui_band"] == "calm"
+        assert "Confirm?" in rv["explanation"]
+        assert "Fee:" in rv["explanation"]
+        # interrupt band -> shipped 'pause' template, verbatim as the gate's
+        # explanation prefix AND as the standalone human card copy
+        scam = svc.intent_compile(
+            "send 1 PRSM to Alex memo urgent transfer customer support")
+        rvp = svc.intent_review(scam["intent_id"])
+        from prism.ai.simulator import TEMPLATES, render_template
+        assert rvp["ui_band"] == "pause"
+        assert rvp["human"] == render_template("pause")
+        assert rvp["explanation"].startswith(TEMPLATES["pause"])
+        # watch band (first payment to never-seen address) -> caution copy
+        w = svc.intent_compile(
+            "send 1 PRSM to prsm1zq9newrecipient000000000000000000000")
+        if w["status"] == "awaiting_confirm":
+            rw = svc.intent_review(w["intent_id"])
+            if rw["ui_band"] == "caution":
+                assert "Nothing has been sent yet" in rw["explanation"]
+
+    def test_pause_copy_is_the_shipped_template(self):
+        from prism.ai.simulator import TEMPLATES
+        # exact shipped strings — UI and server share one source of truth;
+        # changing these here means deliberately changing honest-UX copy.
+        assert TEMPLATES["pause"] == (
+            "This one looks unusual for you. Nothing has been sent — take "
+            "your time. You can cancel safely, or confirm you understand "
+            "and we'll show the review again without rushing you.")
+        assert "still cancel" in TEMPLATES["pause_acknowledged"]
+        assert set(TEMPLATES) >= {"calm_default", "caution", "pause",
+                                  "pause_acknowledged", "insufficient",
+                                  "not_previewable"}
+
+    def test_render_template_rejects_unknown_keys(self):
+        from prism.ai.simulator import render_template
+        with pytest.raises(KeyError):
+            render_template("all_clear_no_worries")   # invented reassurance
+        with pytest.raises(KeyError):
+            render_template("calm_default")           # missing required fields
+        assert render_template("pause")               # no-field template works
+        assert "you'd need" in render_template(
+            "insufficient", need="5", have="1").lower()
+
+    def test_rpc_exposes_template_pack(self, svc):
+        it = svc.intent_compile("send 2 PRSM to Alex")
+        rv = svc.intent_review(it["intent_id"])
+        assert rv["template_pack"] == "sim_explain_v1"
+        scam = svc.intent_compile(
+            "send 1 PRSM to Alex memo urgent transfer customer support")
+        rp = svc.intent_review(scam["intent_id"])
+        assert rp["template_pack"] == "sim_explain_v1"

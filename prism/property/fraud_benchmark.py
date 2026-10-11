@@ -33,12 +33,15 @@ import sys
 import time
 
 from ..ai.fraud import (FraudDetector, RulePack, TxFeatures, FEATURE_NAMES)
-from ..wallet.intent import AddressBook, Contact, IntentCompiler
+from ..wallet.intent import SHARDS_PER_PRSM, AddressBook, Contact, IntentCompiler
 
 NOW = 1_760_000_000          # fixed clock so runs are reproducible
-# Balance context: a wallet holding 250 PRSM. Benign sends (≤10% of it) sit
-# far from the drain rule; the drainer case (>95%) is genuinely dangerous.
-BALANCE_SHARD = 250_000_000
+# Balance context: a wallet holding 1,000 PRSM. IntentCompiler amounts are
+# already in SHARDS (1e-8 PRSM), and SigningGate passes the compiled shard
+# amount against the shard balance — so the drain rule (>95%) only ever
+# fires on genuine drains. Benign sends here top out at 20% of balance;
+# the phishing drainer (960 PRSM) sits above 95%.
+BALANCE_SHARD = 1_000 * SHARDS_PER_PRSM
 
 ALEX = "prsm1alexdev00000000000000000000000000"
 MOM = "prsm1momdev000000000000000000000000000000"
@@ -83,7 +86,9 @@ PHISHING_CASES = [
     ("send 50 PRSM to Alex for act now deal", "act now"),
     ("send 50 PRSM to Alex for doubling event tonight", "doubling event"),
     ("send 50 PRSM to Alex for send 10 to verify account", "send 10 to verify"),
-    ("send 50 PRSM to Alex for gas fee upfront required", "gas fee upfront"),
+    # NB: the shipped pattern is 'gas fee.{0,20}(advance|up front)' (spaced
+    # 'up front'); earlier corpus wording 'upfront' silently missed it.
+    ("send 50 PRSM to Alex for gas fee up front", "gas fee up front"),
     ("send 50 PRSM to Alex for migrate wallet today", "migrate wallet"),
     ("send 50 PRSM to Mom for airdrop claim steps", "airdrop claim"),
     ("send 50 PRSM to Alex for customer support ticket", "customer support"),
@@ -91,7 +96,7 @@ PHISHING_CASES = [
     ("send 50 PRSM to Alex for free nft giveaway", "free nft"),
     ("send 50 PRSM to Alex for urgent transfer request", "urgent transfer"),
     # composite signatures (ML/rules beyond phrases):
-    ("send 240 PRSM to prsm1zq9newrecipient000000000000000000000 for drain my whole balance", None),   # ~96% drain → INTERRUPT floor 0.60 + first-seen/unverified ML lift
+    ("send 960 PRSM to prsm1zq9newrecipient000000000000000000000 for drain my whole balance", None),   # ~96% drain → INTERRUPT floor 0.60 + first-seen/unverified ML lift
     (f"send 500 PRSM to {ALEX_LOOKALIKE}", None),  # lookalike of trusted alias
 ]
 
