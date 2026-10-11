@@ -21,8 +21,17 @@ if __package__ in (None, ""):        # allow `python prism/rpc/server.py`
 else:
     from .service import PrismService
 
-GUI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "gui")
+if getattr(sys, "frozen", False):
+    # PyInstaller onefile: the GUI static bundle is unpacked into
+    # sys._MEIPASS/prism/rpc/static by packaging/prism_gui.spec (datas entry).
+    _CANDIDATES = [os.path.join(sys._MEIPASS, "prism", "rpc", "static"),
+                   os.path.join(sys._MEIPASS, "prism", "gui")]
+else:
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _CANDIDATES = [os.path.join(_here, "static"),               # packaged/installed
+                   os.path.join(os.path.dirname(_here), "gui")]  # source tree
+GUI_DIR = next((p for p in _CANDIDATES if os.path.isfile(os.path.join(p, "index.html"))),
+               _CANDIDATES[-1])
 
 SERVICE = PrismService()             # one process-wide devnet instance
 
