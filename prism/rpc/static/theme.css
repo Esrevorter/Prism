@@ -143,6 +143,19 @@ footer { text-align: center; padding: 26px; }
 .ring-fg { fill: none; stroke: var(--accent); stroke-width: 4;
            stroke-linecap: round; transition: stroke-dashoffset .25s linear; }
 .captcha-prompt { font-size: 1.05rem; font-weight: 600; margin: 0 0 4px; }
+/* captcha footer controls — styled so the refresh/next buttons and the calm
+   hint line never render as raw unstyled markup (v0.1.6 lesson) */
+.row.spread { justify-content: space-between; }
+.btn.ghost { background: transparent; color: var(--muted); border-color: transparent; }
+.btn.ghost:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.hint { color: var(--muted); font-size: .88rem; margin: 6px 0 0; }
+.help-dot { display: inline-grid; place-items: center; width: 20px; height: 20px;
+            margin-left: 8px; border-radius: 50%; border: 1px solid var(--border);
+            background: transparent; color: var(--muted); font-size: .72rem;
+            font-weight: 700; cursor: pointer; vertical-align: 2px;
+            transition: color .15s ease, border-color .15s ease, transform .15s ease; }
+.help-dot:hover { color: var(--accent); border-color: var(--accent); transform: scale(1.1); }
+@media (prefers-reduced-motion: reduce) { .help-dot { transition: none !important; } }
 .burst { margin-top: 10px; padding: 10px 14px; border-radius: 10px;
          background: color-mix(in srgb, var(--ok) 14%, transparent);
          border: 1px solid var(--ok); color: var(--ok); font-weight: 600; }

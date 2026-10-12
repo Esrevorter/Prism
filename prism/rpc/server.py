@@ -9,6 +9,7 @@ built, so `python -m prism.rpc.server` alone boots the whole dev stack.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import mimetypes
 import os
@@ -34,6 +35,28 @@ else:
                    os.path.join(os.path.dirname(_here), "gui")]  # source tree
 GUI_DIR = next((p for p in _CANDIDATES if os.path.isfile(os.path.join(p, "index.html"))),
                _CANDIDATES[-1])
+
+
+def gui_bundle_fingerprint() -> str:
+    """sha256 over the served GUI bundle files (name + content, sorted).
+
+    Release-gate evidence (docs/ATTESTATION.md §6): proves WHICH front end is
+    inside a binary.  A stale prism/rpc/static copy — exactly how the v0.1.6
+    captcha regression shipped — produces a different fingerprint than the
+    source tree, so CI can refuse to publish instead of shipping old UI.
+    """
+    h = hashlib.sha256()
+    try:
+        names = sorted(os.listdir(GUI_DIR))
+    except OSError:
+        return "missing"
+    for name in names:
+        path = os.path.join(GUI_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        with open(path, "rb") as fh:
+            h.update(name.encode("utf-8") + b"\0" + fh.read())
+    return h.hexdigest()[:16]
 
 # One process-wide instance.  Network selection (Amendment A2 testnet-parity):
 #   PRISM_NETWORK=refraction|prism1   (default: refraction — the "Refraction"
@@ -160,7 +183,8 @@ class RPCRequestHandler(BaseHTTPRequestHandler):
     # ---- routes ----
     def do_GET(self):
         if self.path == "/health":
-            body = json.dumps({"status": "ok"}).encode()
+            body = json.dumps({"status": "ok",
+                               "gui_bundle": gui_bundle_fingerprint()}).encode()
             return self._send(200, body, "application/json")
         if self.path in ("/", "/index.html"):
             return self._serve_static("index.html")

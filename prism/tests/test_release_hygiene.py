@@ -134,3 +134,51 @@ class TestGuiBundleEncoding(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGuiBundleFreshness(unittest.TestCase):
+    """Gate 1 (docs/ATTESTATION.md §6): prism/rpc/static must be byte-identical
+    to prism/gui.  The v0.1.6 regression shipped the OLD captcha UI because a
+    stale static/ copy was frozen into the binary while gui/ held the fix —
+    these pins make that class of bug fail CI before packaging."""
+
+    FILES = ("index.html", "app.js", "theme.css")
+
+    def _dir(self, *parts):
+        return str(ROOT.joinpath(*parts))
+
+    def test_static_bundle_matches_source_of_truth(self):
+        src = self._dir("prism", "gui")
+        dst = self._dir("prism", "rpc", "static")
+        for name in self.FILES:
+            with open(os.path.join(src, name), "rb") as fh:
+                want = fh.read()
+            path = os.path.join(dst, name)
+            self.assertTrue(os.path.isfile(path),
+                            f"packaging bundle missing {name} — run "
+                            f"`python packaging/sync_gui.py`")
+            with open(path, "rb") as fh:
+                got = fh.read()
+            self.assertEqual(got, want,
+                             f"prism/rpc/static/{name} is STALE vs prism/gui/"
+                             f"{name} — run `python packaging/sync_gui.py` "
+                             f"and commit the result")
+
+    def test_served_captcha_is_vector_first(self):
+        # The Windows bug: an <img> PNG plus an unstyled overlay circle read
+        # as "a square and a big black dot".  The served bundle must render
+        # ONE inline SVG whose tiles are themselves the tap targets.
+        html = open(self._dir("prism", "rpc", "static", "index.html"),
+                    encoding="utf-8").read()
+        js = open(self._dir("prism", "rpc", "static", "app.js"),
+                  encoding="utf-8").read()
+        self.assertIn('id="cap-svg"', html)
+        self.assertNotIn('<img id="captcha-img"', html)   # no second picture
+        self.assertIn("renderCapSvg", js)
+        self.assertIn("createElementNS", js)              # vector-first
+        self.assertNotIn('getElementById("captcha-img")', js)
+
+    def test_health_reports_bundle_fingerprint(self):
+        from prism.rpc import server as rpc_server
+        fp = rpc_server.gui_bundle_fingerprint()
+        self.assertRegex(fp, r"^[0-9a-f]{16}$")
