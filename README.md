@@ -146,7 +146,7 @@ Five numbers worth remembering:
 | Neuro-inclusive usability study (n≥20) | 🧪 Open — external human-subjects task (cannot close in code) |
 | Independent audits & mainnet | 🗓️ Planned (Phase 4) |
 
-Full roadmap: [Wiki → Roadmap](./Roadmap.md) · Technical truth source: [`spec.md`](spec.md) (v1.2, incl. Amendment A2)
+Full roadmap: [Wiki → Roadmap](wiki/Roadmap.md) · Technical truth source: [`spec.md`](spec.md) (v1.2, incl. Amendment A2)
 
 ---
 
