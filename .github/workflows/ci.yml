@@ -53,7 +53,10 @@ jobs:
       # version drift between release locations, or captcha wire-contract
       # regressions (missing `tiles` / leaked answer key `target`).
       - name: Release gate (artifacts / versions / captcha contract)
-        run: python scripts/release_gate.py
+        # brand-icon check needs Pillow+numpy (v0.1.13 CI post-mortem)
+        run: |
+          python -m pip install --quiet pillow numpy
+          python scripts/release_gate.py
 
       # Rules v1.3 §5/§6: the asset smoke gate asserted `target` presence
       # while release_gate failed on `target` leakage — mutually unsatisfiable,
