@@ -1,6 +1,6 @@
 # Using the Wallet
 
-*The feature tour for the Prism wallet UI (planned app, per [`spec.md` §7](https://github.com/Esrevorter/Prism/blob/main/spec.md) — plus what's verifiable today in code). Written so you can pre-learn it or evaluate the design.*
+*The feature tour for the Prism wallet UI (planned app, per [`spec.md` §7](../spec.md) — plus what's verifiable today in code). Written so you can pre-learn it or evaluate the design.*
 
 ---
 
@@ -10,22 +10,22 @@ Calm by default. What you see: your balance (one number, one fiat estimate), rec
 
 ## Accounts & sub-addresses
 
-One wallet holds named accounts ("Client income", "Collaborations", "Savings") with unlimited sub-addresses each. Different sub-addresses give different platforms/payers — payments to them all land in your account, but *you* can tell sources apart locally even though the chain can't link them. Handy: "this sub-address is only for Client X" makes later disclosures cleanly scoped ([Preparing a Tax Disclosure](Preparing-a-Tax-Disclosure)).
+One wallet holds named accounts ("Client income", "Collaborations", "Savings") with unlimited sub-addresses each. Different sub-addresses give different platforms/payers — payments to them all land in your account, but *you* can tell sources apart locally even though the chain can't link them. Handy: "this sub-address is only for Client X" makes later disclosures cleanly scoped ([Preparing a Tax Disclosure](./Preparing-a-Tax-Disclosure.md)).
 
 ## Sending
 
 Two paths, same safety pipeline:
 
-- **Natural language:** type/say the request → intent card → preview → confirm. Details in [AI Layer Explained](AI-Layer-Explained).
+- **Natural language:** type/say the request → intent card → preview → confirm. Details in [AI Layer Explained](./AI-Layer-Explained.md).
 - **Form mode:** recipient field (paste address or scan QR), amount toggle PRSM/USD, optional encrypted memo, fee selector (Base / Fast — the only two options; Fast costs at most 10× base ≈ $0.01).
 
 Before signing, every send shows the simulator's exact terms: destination verified identity line, amount in PRSM + locked USD quote, fee, expected confirmation time, privacy statement ("visible to you and the recipient only"). Fraud-flagged destinations add a calm interruption card listing reasons plus a **"sleep on it"** 10-second pause. Nothing auto-executes; nothing hides behind a spinner.
 
-**Scheduled/recurring sends** live under an account's menu and run through the agent permission system — i.e., they get grants, veto windows, and audit-log entries like any autopilot ([AI Layer](AI-Layer-Explained)).
+**Scheduled/recurring sends** live under an account's menu and run through the agent permission system — i.e., they get grants, veto windows, and audit-log entries like any autopilot ([AI Layer](./AI-Layer-Explained.md)).
 
 ## Receiving
 
-Receive screen = QR + `prsm1…` address (+ `prsmsub…` for sub-addresses, `prsmr:` URI when embedding a requested amount/memo invoice). Share freely — the address never appears on-chain itself ([How Privacy Works](How-Privacy-Works)). Incoming states: *pending* (seen in mempool) → *confirmed block k/10* → *spendable*. Each stage tells you roughly how long remains instead of leaving you guessing.
+Receive screen = QR + `prsm1…` address (+ `prsmsub…` for sub-addresses, `prsmr:` URI when embedding a requested amount/memo invoice). Share freely — the address never appears on-chain itself ([How Privacy Works](./How-Privacy-Works.md)). Incoming states: *pending* (seen in mempool) → *confirmed block k/10* → *spendable*. Each stage tells you roughly how long remains instead of leaving you guessing.
 
 ## Contacts & verification
 
@@ -37,22 +37,22 @@ Intensity dials per event class (calm/normal/loud), quiet hours, and a personal 
 
 ## Risk labels
 
-Every incoming output gets a local risk score from the on-device model ("from newly seen address"). Labels are informational, stored only on your device, and never affect consensus — flagged funds remain spendable; the point is informing *you*, not policing the ledger ([Security Model](Security-Model) E17).
+Every incoming output gets a local risk score from the on-device model ("from newly seen address"). Labels are informational, stored only on your device, and never affect consensus — flagged funds remain spendable; the point is informing *you*, not policing the ledger ([Security Model](./Security-Model.md) E17).
 
 ## Privacy Tools (menu)
 
 | Tool | What it does | Deep dive |
 |---|---|---|
-| **Prepare tax report** | Income-attribution proofs for chosen periods | [Preparing a Tax Disclosure](Preparing-a-Tax-Disclosure) |
-| **Proof of funds** | Balance-solvency disclosure with expiry | [Prism Protocol](The-Prism-Protocol) |
-| **Provenance check** | Source-provenance proof against a pinned denylist root | [Prism Protocol](The-Prism-Protocol) |
-| **Active disclosures** | Registry dashboard: what you revealed, to whom, expiring when | [Prism Protocol](The-Prism-Protocol) |
-| **View-key scopes** | Generate/rotate scoped auditor keys | [Prism Protocol](The-Prism-Protocol) |
+| **Prepare tax report** | Income-attribution proofs for chosen periods | [Preparing a Tax Disclosure](./Preparing-a-Tax-Disclosure.md) |
+| **Proof of funds** | Balance-solvency disclosure with expiry | [Prism Protocol](./The-Prism-Protocol.md) |
+| **Provenance check** | Source-provenance proof against a pinned denylist root | [Prism Protocol](./The-Prism-Protocol.md) |
+| **Active disclosures** | Registry dashboard: what you revealed, to whom, expiring when | [Prism Protocol](./The-Prism-Protocol.md) |
+| **View-key scopes** | Generate/rotate scoped auditor keys | [Prism Protocol](./The-Prism-Protocol.md) |
 
 ## Custody & recovery screens
 
 - **Key & password (Settings → Security):** change password, view lockout state (5 wrong tries → cool-down), run a *dry-restore test* proving your 12 words work, rotate the sealed key file location.
-- **Recovery on a new device:** enter your 12-word phrase → same address restored, verified by tests before the app says so ([Recovery & Inheritance Guide](Recovery-and-Inheritance-Guide)). Optional trusted-contact mode shows a visible 72-hour countdown with loud warnings and a cancel path for stale credentials.
+- **Recovery on a new device:** enter your 12-word phrase → same address restored, verified by tests before the app says so ([Recovery & Inheritance Guide](./Recovery-and-Inheritance-Guide.md)). Optional trusted-contact mode shows a visible 72-hour countdown with loud warnings and a cancel path for stale credentials.
 - **Duress PIN:** set a second unlock code → opens plausible decoy wallet.
 - **Dead-man switch:** beneficiary + attestator setup, heartbeat status, grace-ping history.
 
@@ -62,8 +62,8 @@ Encrypted metadata snapshot (address book, registry, settings) to a user-chosen 
 
 ## Payments channels (Phase 3+)
 
-Open a channel with a merchant/collaborator (2 base-fee txs), then tip and micropay instantly at ~zero cost; watchtower option guards against counterparty disappearance ([Fees & Payment Channels](Fees-and-Payment-Channels)).
+Open a channel with a merchant/collaborator (2 base-fee txs), then tip and micropay instantly at ~zero cost; watchtower option guards against counterparty disappearance ([Fees & Payment Channels](./Fees-and-Payment-Channels.md)).
 
 ---
 
-**Next:** [Recovery & Inheritance Guide](Recovery-and-Inheritance-Guide) · [FAQ](FAQ) · [Glossary](Glossary)
+**Next:** [Recovery & Inheritance Guide](./Recovery-and-Inheritance-Guide.md) · [FAQ](./FAQ.md) · [Glossary](./Glossary.md)

@@ -1,6 +1,6 @@
 # Running a Node
 
-*How to operate Prism infrastructure when the network exists — node classes, why your choice matters for privacy, and what's already runnable today. Binding spec: [`spec.md` §4](https://github.com/Esrevorter/Prism/blob/main/spec.md); code: `prism/chain/`.*
+*How to operate Prism infrastructure when the network exists — node classes, why your choice matters for privacy, and what's already runnable today. Binding spec: [`spec.md` §4](../spec.md); code: `prism/chain/`.*
 
 ---
 
@@ -56,7 +56,7 @@ C:\> python -m pytest prism/tests/test_chain.py -q   # the rules, verified on yo
 
 - **Dandelion++:** stem/fluff relay is default-on; don't expose topology telemetry publicly (`--restricted-rpc`).
 - **Fee policy enforcement:** relay transactions honoring base-fee floor and priority ≤10× cap; >cap is non-standard (E-policy in `node.py` acceptance rules).
-- **Denylist roots are pass-through data:** headers carry them; consensus ignores their content ([Governance](Governance) D5). Never build auto-enforcement into your node — that's how "privacy coin" dies socially.
+- **Denylist roots are pass-through data:** headers carry them; consensus ignores their content ([Governance](./Governance.md) D5). Never build auto-enforcement into your node — that's how "privacy coin" dies socially.
 - **Version voting:** signal upgrades deliberately; windows are 181 blocks with ≥90-day notice policies — read release notes before flipping bits.
 
 ## Watchtowers (Phase 3+, channel guardians)
@@ -66,9 +66,9 @@ Optional service role: hold encrypted penalty blobs for payment channels, submit
 ## Becoming useful before mainnet
 
 1. Run the reference tests on your hardware — portability findings are contributions.
-2. Join Refraction testnet when announced ([Roadmap](Roadmap)) and keep a **full** node.
+2. Join Refraction testnet when announced ([Roadmap](./Roadmap.md)) and keep a **full** node.
 3. Report sync/validation anomalies with logs (issue label `node`).
 
 ---
 
-**Next:** [Chain Rules & Monetary Policy](Chain-Rules-and-Monetary-Policy) · [Testing & Quality](Testing-&-Quality) · [Contributing](Contributing)
+**Next:** [Chain Rules & Monetary Policy](./Chain-Rules-and-Monetary-Policy.md) · [Testing & Quality](./Testing-&-Quality.md) · [Contributing](./Contributing.md)

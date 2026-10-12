@@ -93,8 +93,8 @@ Reference-grade PLONK-style polynomial IOP over a BN-family scalar field: select
 
 - Constant-time discipline: reference code uses Python `int` arithmetic — timing side-channels are acceptable *here* (test vectors) but the Rust/C production ports must implement blinding/regular algorithms. Flagged for the Phase-2 port spec.
 - The PLONK instantiation is educational-grade (small domains, no KZG ceremony integration yet); circuits' *constraint logic* is the auditable artifact, the IOP plumbing gets hardened pre-mainnet.
-- No formal verification yet; property testing + fuzzing only ([Testing & Quality](Testing-&-Quality)). Audits gate mainnet ([Security Model](Security-Model)).
+- No formal verification yet; property testing + fuzzing only ([Testing & Quality](./Testing-&-Quality.md)). Audits gate mainnet ([Security Model](./Security-Model.md)).
 
 ---
 
-**Next:** [Architecture Overview](Architecture) · [How Privacy Works](How-Privacy-Works) (the non-math tour) · [Testing & Quality](Testing-&-Quality)
+**Next:** [Architecture Overview](./Architecture.md) · [How Privacy Works](./How-Privacy-Works.md) (the non-math tour) · [Testing & Quality](./Testing-&-Quality.md)

@@ -1,6 +1,6 @@
 # Recovery & Inheritance Guide
 
-*Everything about keeping access when things go wrong — the 12-word recovery phrase, optional trusted-contact mode, duress protections, and the dead-man switch. Binding spec: [`spec.md` §7.4–7.5, §7.8, §9](https://github.com/Esrevorter/Prism/blob/main/spec.md) (Amendment A2); code: `prism/auth/keystore.py` (primary path), `prism/mpc/recovery.py` (legacy tier-B machinery).*
+*Everything about keeping access when things go wrong — the 12-word recovery phrase, optional trusted-contact mode, duress protections, and the dead-man switch. Binding spec: [`spec.md` §7.4–7.5, §7.8, §9](../spec.md) (Amendment A2); code: `prism/auth/keystore.py` (primary path), `prism/mpc/recovery.py` (legacy tier-B machinery).*
 
 ---
 
@@ -72,4 +72,4 @@ There is no recovery path — that's what "legacy" means. The wallet warns at cr
 | Under coercion | Duress PIN → decoy wallet; stall; recovery timelock buys intervention time |
 | Planning ahead | Set dead-man switch + comfort threshold + verified contacts *today* |
 
-**Next:** [Security Model](Security-Model) · [Using the Wallet](Using-the-Wallet) · [FAQ](FAQ)
+**Next:** [Security Model](./Security-Model.md) · [Using the Wallet](./Using-the-Wallet.md) · [FAQ](./FAQ.md)

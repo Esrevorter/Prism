@@ -48,7 +48,7 @@ bad = tamper(proof)                      # flip bytes → must reject
 assert not bulletproof_verify(C, bad)
 ```
 
-Millisecond-cheap assertions × thousands of randomized instances catch the off-by-one universe that hand-written examples miss. Phase-1 acceptance raises stakes: the RingCT spend-to-self loop must clear ≥10⁶ iterations ([Roadmap](Roadmap)).
+Millisecond-cheap assertions × thousands of randomized instances catch the off-by-one universe that hand-written examples miss. Phase-1 acceptance raises stakes: the RingCT spend-to-self loop must clear ≥10⁶ iterations ([Roadmap](./Roadmap.md)).
 
 ## Fuzzing discipline
 
@@ -64,7 +64,7 @@ Pipeline (`.github/workflows/release.yml`):
 2. **Tagged releases:** suite re-run → sdist/wheel build → PyInstaller binaries per OS → **smoke-test each frozen binary** (`--selftest` exercises crypto + chain validation inside the packaged interpreter) → checksums → prerelease publish. Test failures hard-block artifacts.
 3. **Pre-mainnet additions (planned):** continuous fuzzing service, cross-client vector exchange with Rust/C ports, formal-audit remediation tracking.
 
-Quality metrics we publish over time: property-test iteration counts, fuzz campaign durations, mutation scores on consensus modules — numbers, not vibes ([spec §13 security gates](https://github.com/Esrevorter/Prism/blob/main/spec.md)).
+Quality metrics we publish over time: property-test iteration counts, fuzz campaign durations, mutation scores on consensus modules — numbers, not vibes ([spec §13 security gates](../spec.md)).
 
 ## Review standards by blast radius
 
@@ -74,8 +74,8 @@ Quality metrics we publish over time: property-test iteration counts, fuzz campa
 | `wallet/`, `ai/`, `l2/` | 1 approval + tests; privacy-sensitive copy follows honest-language rules |
 | docs/wiki | 1 approval; claims must trace to spec sections or code |
 
-Security findings bypass public review: private disclosure per [Security Model](Security-Model) §Bug bounty.
+Security findings bypass public review: private disclosure per [Security Model](./Security-Model.md) §Bug bounty.
 
 ---
 
-**Next:** [Release Process](Release-Process) · [Cryptography Deep Dive](Cryptography-Deep-Dive) · [Contributing](Contributing)
+**Next:** [Release Process](./Release-Process.md) · [Cryptography Deep Dive](./Cryptography-Deep-Dive.md) · [Contributing](./Contributing.md)
