@@ -357,9 +357,11 @@ def main(argv=None) -> int:
 
     from .service import PrismService           # fresh per-user instance
 
+    network = kwargs.get("network") or os.environ.get("PRISM_NETWORK", "refraction")
+
     def _open_when_ready():
         if wait_until_healthy(host, port):
-            print(f"Wallet ready: {url}  (data: {data_dir})")
+            print(f"Wallet ready: {url}  (data: {data_dir}, network: {network})")
             if json_status:
                 # Machine-readable line for the supervising desktop shell
                 # (packaging/tauri). Emitted only after /health confirms the
@@ -375,7 +377,8 @@ def main(argv=None) -> int:
 
     try:
         serve_with_callback(host=host, port=port, on_ready=_open_when_ready,
-                            service=PrismService())
+                            service=PrismService(network=network,
+                                                 data_dir=data_dir))
     except KeyboardInterrupt:
         pass
     finally:

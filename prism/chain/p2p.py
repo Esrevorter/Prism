@@ -50,7 +50,7 @@ import time
 from dataclasses import dataclass, field
 
 from .block import ZERO32
-from .emission import cumulative_supply
+from .emission import cumulative_supply, emission_at
 from .node import Block, ChainState, make_genesis, mine_block
 from .params import NETWORKS
 from .wire import (FrameReader, MSG_BLOCK, MSG_GETBLOCKS, MSG_INV,
@@ -94,6 +94,8 @@ class Node:
         self.state = ChainState(params=self.params, tip=self.genesis,
                                  difficulty=1)
         self.store: dict[bytes, Block] = {self.genesis.header.hash(): self.genesis}
+        # testnet faucet wallet (testnet-only; see mine_one credit note)
+        self.faucet_shards = 0
         self.lock = threading.RLock()          # guards state + store
         self.peers: list[Peer] = []
         self.rng = random.Random(rng_seed)
@@ -208,6 +210,14 @@ class Node:
             bh = blk.header.hash()
             self.store[bh] = blk
             self.applied += 1
+            # testnet faucet credit (testnet-only economics, §13): the
+            # daemon's ChainState tracks emission consensus-side, but a
+            # solo-mining node needs spendable balance to exercise real
+            # transaction flows. Mirrors rpc/service.mine(): every applied
+            # block credits its coinbase emission to the node wallet.
+            if getattr(self.params, "faucet_credit", False):
+                self.faucet_shards += emission_at(
+                    blk.header.height).total_new_shards
             return blk
 
     # ------------------------------------------------------------ gossip
@@ -508,6 +518,9 @@ class Node:
                 "difficulty": self.state.difficulty,
                 "total_shards": self.state.total_shards,
                 "supply_prsm": self.state.total_shards / 10 ** 8,
+                "faucet_shards": self.faucet_shards,
+                "faucet_enabled": bool(getattr(self.params, "faucet_credit",
+                                               False)),
                 "applied": self.applied,
                 "rejected": self.rejected,
                 "dupes_ignored": self.dupes_ignored,

@@ -112,6 +112,10 @@ class NetworkParams:
     target_block_time: int = BLOCK_TIME_SECONDS
     genesis_timestamp: int = 0
     pow_placeholder: bool = True   # True until librandomx FFI lands (Phase 1)
+    # Testnet parity (§ Amendment A2): when True, a node that mines/applies a
+    # block credits the local faucet wallet so transactions can be exercised
+    # intensively before mainnet.  Never set on MAINNET.
+    faucet_credit: bool = False
 
 
 MAINNET = NetworkParams(name="prism1", genesis_timestamp=1_762_000_000,
@@ -123,6 +127,7 @@ REFRACTION_TESTNET = NetworkParams(  # §13 launch checklist: "Refraction"
     target_block_time=30,          # fast iteration on testnet
     genesis_timestamp=1_759_000_000,
     pow_placeholder=True,          # CPU-faucet PoW until RandomX FFI ships
+    faucet_credit=True,            # full tx/mining soak before mainnet
 )
 
 NETWORKS = {p.name: p for p in (MAINNET, REFRACTION_TESTNET)}

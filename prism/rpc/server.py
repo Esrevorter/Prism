@@ -35,7 +35,13 @@ else:
 GUI_DIR = next((p for p in _CANDIDATES if os.path.isfile(os.path.join(p, "index.html"))),
                _CANDIDATES[-1])
 
-SERVICE = PrismService()             # one process-wide devnet instance
+# One process-wide instance.  Network selection (Amendment A2 testnet-parity):
+#   PRISM_NETWORK=refraction|prism1   (default: refraction — the "Refraction"
+#                                       testnet, full-chain validator, faucet)
+#   PRISM_DATA_DIR=/path              (optional wallet persistence dir)
+# The GUI launcher passes an explicit service; these env vars cover CLI use.
+SERVICE = PrismService(network=os.environ.get("PRISM_NETWORK", "refraction"),
+                       data_dir=os.environ.get("PRISM_DATA_DIR") or None)
 
 # method -> (callable(params-dict) or attr name on the PrismService instance)
 def _dispatch(method: str, params: dict, svc: "PrismService | None" = None):
@@ -198,10 +204,15 @@ class RPCRequestHandler(BaseHTTPRequestHandler):
         self._send(200, json.dumps(resp).encode(), "application/json")
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False):
+def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False,
+          service: "PrismService | None" = None):
+    global SERVICE
+    if service is not None:                    # injected (launcher / tests)
+        SERVICE = service
     httpd = ThreadingHTTPServer((host, port), RPCRequestHandler)
+    httpd.service = SERVICE                    # handler reads server.service
     url = f"http://{host}:{port}/"
-    print(f"Prism RPC devnet listening on {url} "
+    print(f"Prism RPC listening on {url} "
           f"(network={SERVICE.params.name}, tip={SERVICE.chain.tip.header.height})")
     if open_browser:
         # Standalone GUI launch: one command boots daemon + wallet UI.
@@ -255,10 +266,18 @@ def main(argv=None):
                     "command is the standalone desktop entry point.")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--network", default=os.environ.get("PRISM_NETWORK", "refraction"),
+                    choices=["refraction", "prism1"],
+                    help="chain network to serve (default: refraction testnet — "
+                         "identical validation code to mainnet, fast blocks + faucet)")
+    ap.add_argument("--data-dir", default=os.environ.get("PRISM_DATA_DIR"),
+                    help="wallet persistence directory (keystore + history)")
     ap.add_argument("--open", dest="open_browser", action="store_true",
                     help="open the wallet UI in the default browser once the "
                          "daemon is listening (standalone GUI mode)")
     ns = ap.parse_args(argv)
+    global SERVICE
+    SERVICE = PrismService(network=ns.network, data_dir=ns.data_dir or None)
     serve(ns.host, ns.port, open_browser=ns.open_browser)
 
 
