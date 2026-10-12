@@ -55,9 +55,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      # macOS: make the interpreter look like a framework install.
+      # History of this step (evidence trail across two failed releases):
+      #   v0.1.3: setup-python's default *standalone* build lacks the
+      #           Python.framework layout -> PyInstaller died with
+      #           "Unable to find .../Python.framework/Versions/3.12/Python".
+      #   v0.1.4: requesting the runner's preinstalled framework build via
+      #           python-version: 'cpython-3.12' failed outright — the arm64
+      #           macOS 26 image no longer carries it ("not found in manifest").
+      # Fix used here instead: keep the reliable standalone build and create
+      # the framework symlink tree PyInstaller's DarwinAnalysis expects,
+      # pointing at the real libpython dylib. Pure filesystem shim, no
+      # network, works on any runner image.
+      - name: "Framework shim for PyInstaller (macOS only)"
+        if: matrix.artifact_os == 'macos'
+        shell: bash
+        run: bash .github/scripts/macos_framework_shim.sh
 
       # PyInstaller cannot cross-compile: each binary is built on its own OS runner.
       - name: Install build tools
@@ -86,6 +104,9 @@ jobs:
     # Only tag pushes publish a GitHub Release; manual dispatch just uploads artifacts.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write   # sigstore/cosign keyless signing (docs/ATTESTATION.md §4)
     steps:
       # Full history needed so we can diff against the previous tag and read
       # real commit messages / merged PR bodies for the changelog.
@@ -109,6 +130,29 @@ jobs:
           pattern: 'prism-*'
           merge-multiple: true
 
+      # Free cross-platform provenance for CLI binaries + wheel (docs/ATTESTATION.md §4).
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign release assets (cosign keyless)
+        shell: bash
+        run: |
+          set -uo pipefail
+          ok=0; fail=0
+          for f in prism-*.zip *.whl *.tar.gz; do
+            [ -e "$f" ] || continue
+            if cosign sign-blob --yes \
+                 --output-signature "$f.sig" \
+                 --output-certificate "$f.crt" \
+                 "$f"; then
+              ok=$((ok+1))
+            else
+              echo "::warning::cosign failed for $f — shipping unsigned"
+              rm -f "$f.sig" "$f.crt"; fail=$((fail+1))
+            fi
+          done
+          echo "cosigned=$ok failed=$fail" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -116,6 +160,8 @@ jobs:
             prism-*.zip
             *.whl
             *.tar.gz
+            *.sig
+            *.crt
           body_path: RELEASE_NOTES.md
           draft: false
           prerelease: true   # Phase-1 reference implementation — flip to false at mainnet candidate

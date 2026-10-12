@@ -1,3 +1,8 @@
 build/
 dist/
 *.zip
+__pycache__/
+*.pyc
+.git/.pushurl
+build/
+buildtest/
