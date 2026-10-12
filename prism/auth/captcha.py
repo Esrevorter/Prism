@@ -58,16 +58,30 @@ def new_image_grid(seed: Optional[bytes] = None) -> dict:
     render_grid_svg, PNG fallback via render_grid_png; v0.1.5 vector-first.)
     """
     rng = secrets.SystemRandom() if seed is None else _SeededRandom(seed)
-    tiles = [rng.choice(SHAPES) for _ in range(GRID * GRID)]
     target = rng.choice(SHAPES)
     # guarantee solvability: force exactly 3..4 target tiles
     want = rng.randint(3, 4)
+    # Decoys are drawn ONLY from shapes other than `target`.  The old code
+    # shuffled random shapes first and "fixed" collisions by bumping a tile
+    # to the NEXT shape in SHAPES — which could hand a decoy shape a count
+    # >= target's (or even a tie), so the picture no longer matched its own
+    # prompt ("tap every X" while X wasn't the visually obvious group).
+    # Real users failed ~60% of challenges and the honest-solve tests caught
+    # it.  Invariant pinned by test_grid_majority_is_target: target must be
+    # the STRICT majority (count >= 3, every other shape strictly fewer).
+    decoys = [s for s in SHAPES if s != target]
     idx = list(range(GRID * GRID))
     rng.shuffle(idx)
+    tiles = [None] * (GRID * GRID)
     for k, i in enumerate(idx):
-        tiles[i] = target if k < want else (
-            SHAPES[(SHAPES.index(tiles[i]) + 1) % len(SHAPES)]
-            if tiles[i] == target else tiles[i])
+        if k < want:
+            tiles[i] = target
+        else:
+            d = rng.choice(decoys)
+            # cap any decoy at want-1 so the target group stays unambiguous
+            while tiles.count(d) >= want - 1:
+                d = rng.choice([s for s in decoys if s != d] or decoys)
+            tiles[i] = d
     return {
         "challenge_id": secrets.token_hex(8),
         "prompt": f"Tap every {'★ star' if target == 'star' else target + ' shape'}",

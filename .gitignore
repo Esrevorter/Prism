@@ -1,8 +1,11 @@
 build/
+buildtest/
 dist/
-*.zip
+disttest/
+prism-*-*/
+*.toc
+*.pyz
+*.pkg
 __pycache__/
 *.pyc
 .git/.pushurl
-build/
-buildtest/

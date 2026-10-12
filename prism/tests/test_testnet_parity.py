@@ -49,7 +49,10 @@ def _full_flow(svc: PrismService, amount_prsm: float) -> dict:
     assert r["status"] == "awaiting_confirm", r["status"]
     svc.intent_confirm(iid)
     ch = svc.auth_challenge(iid)
-    picks = [i for i, t in enumerate(ch["tiles"]) if t == ch["target"]]
+    # v0.1.7 regression pin: solve using ONLY wire-visible fields (the
+    # picture the user sees), never a server-side answer key.
+    _maj = max(set(ch["tiles"]), key=ch["tiles"].count)
+    picks = [i for i, t in enumerate(ch["tiles"]) if t == _maj]
     solved = svc.auth_solve(ch["challenge_id"], picks, ch["digest_hex"])
     sig = svc.auth_sign(iid, PW, solved["token"])
     assert sig["ok"], sig                       # auth_sign self-verifies the

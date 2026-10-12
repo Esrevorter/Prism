@@ -194,6 +194,22 @@ class TestLeanAuth:
         assert ch["svg"].startswith("<svg") and ch["digest_hex"]
         assert ch["palette"] and "star" in ch["palette"]
 
+    def test_grid_majority_is_target(self):
+        """Regression pin (v0.1.7): new_image_grid() must guarantee the
+        prompt's target shape is the STRICT visual majority (count >= 3,
+        every decoy strictly fewer).  The old collision-fixup could bump a
+        decoy to >= target count, so ~60% of pictures contradicted their own
+        prompt and honest users could never solve them."""
+        from collections import Counter
+        from prism.auth.captcha import new_image_grid
+        for _ in range(200):
+            g = new_image_grid()
+            c = Counter(g["tiles"])
+            top, cnt = c.most_common(1)[0]
+            second = c.most_common(2)[1][1] if len(c) > 1 else 0
+            assert top == g["target"], "majority tile must be the prompt target"
+            assert cnt >= 3 and second < cnt, f"ambiguous grid: {dict(c)}"
+
     def test_captcha_wire_contract(self, svc):
         """Regression pin for the broken v0.1.7 captcha release.
 
@@ -331,10 +347,11 @@ class TestRPCOverHTTP:
         assert conf["confirmation_envelope"]["canonical_digest_hex"]
         ch = self._call(live, "auth.challenge",
                         {"intent_id": it["intent_id"]})["result"]
-        svc_live = rpc_server.SERVICE
-        rec = svc_live.captcha._pending[ch["challenge_id"]]
-        picks = [i for i, s in enumerate(rec["grid"]["tiles"])
-                 if s == rec["grid"]["target"]]
+        # honest solve from the wire payload only (v0.1.7 post-mortem:
+        # reading captcha._pending hid the broken-release bug from CI)
+        _tiles = ch["tiles"]
+        _maj = max(set(_tiles), key=_tiles.count)
+        picks = [i for i, s in enumerate(_tiles) if s == _maj]
         tok = self._call(live, "auth.solve", {"challenge_id": ch["challenge_id"],
                                               "picks": picks,
                                               "digest_hex": ch["digest_hex"]})["result"]
@@ -423,7 +440,10 @@ class TestGUIv2WireContract:
         # fields the animated GUI relies on:
         assert ch["expires_at"] > time.time()          # countdown ring
         assert ch["svg"].startswith("<svg")            # ONE crisp vector picture
-        picks = [i for i, t in enumerate(ch["tiles"]) if t == ch["target"]]
+        # solve like a real user: only wire-visible fields (no answer key)
+        _tiles = ch["tiles"]
+        _target_shape = max(set(_tiles), key=_tiles.count)
+        picks = [i for i, t in enumerate(_tiles) if t == _target_shape]
         sol = self._call(live, "auth.solve",
                         {"challenge_id": ch["challenge_id"],
                          "picks": picks,

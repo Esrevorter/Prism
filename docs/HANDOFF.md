@@ -72,10 +72,33 @@ or `GIT_ASKPASS`.
    until mainnet candidate.
 5. **Tests gate everything:** never merge/tag with a red suite; new features
    land with pinned tests (see `test_lean_auth.py`, `test_testnet_parity.py`).
+   Tests must exercise the WIRE payload only — never reach into server
+   internals like `captcha._pending` to cheat a check that real clients
+   would fail (this exact cheat hid the v0.1.7 broken captcha from CI).
+6. **Release gate is mandatory:** run `python scripts/release_gate.py <X.Y.Z>`
+   before tagging, and re-check the published GitHub Release page title/body
+   version string after the workflow finishes (v0.1.7 shipped labeled 0.1.0).
+   The gate also runs in ci.yml and as the first step of release.yml.
 6. **Legacy code stays unless proven dead:** retired modules keep their
    property/fuzz coverage; wire-level references get deleted.
 
-## 5. Release state (v0.1.5 — shipped 2026-10-12)
+## 5. Release state (v0.1.7 — shipped 2026-10-12, then repaired same day)
+
+**v0.1.7 post-mortem (read before touching releases):** three regressions
+shipped together — (a) the payment CAPTCHA was broken for every user:
+`auth.challenge` stopped shipping the visible `tiles` list AND
+`new_image_grid()` could produce grids whose prompt target wasn't the strict
+visual majority (~60% unsolvable), while the test suite cheated by reading
+the answer key from `captcha._pending`; (b) the published release was labeled
+version 0.1.0 despite the tree carrying 0.1.7 everywhere; (c) ~28 PyInstaller
+build artifacts (`build/`, `buildtest/`, `dist/`, `disttest/`,
+`prism-0.1.3-linux-x86_64/`) were force-added to git. All three are fixed on
+this branch: honest wire-only tests + grid-majority invariant +
+`scripts/release_gate.py` wired into ci.yml and release.yml, artifacts
+untracked, `.gitignore` extended. If you cut the next tag, watch the gate
+steps go green BEFORE publishing, and eyeball the Release page version.
+
+Previous state: https://github.com/Esrevorter/Prism/releases/tag/v0.1.5 — 25 assets,
 
 - https://github.com/Esrevorter/Prism/releases/tag/v0.1.5 — 25 assets,
   cosign `.sig`/`.crt` per asset, SHA256SUMS included. Verified green:

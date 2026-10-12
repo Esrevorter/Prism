@@ -49,6 +49,12 @@ jobs:
       - name: Run test suite
         run: pytest prism/tests -q
 
+      # v0.1.7 post-mortem gate: fails loudly on committed build artifacts,
+      # version drift between release locations, or captcha wire-contract
+      # regressions (missing `tiles` / leaked answer key `target`).
+      - name: Release gate (artifacts / versions / captcha contract)
+        run: python scripts/release_gate.py
+
   installer-dryrun:
     # Validates the desktop pipeline as far as possible WITHOUT a tag:
     # GUI bundle sync + PyInstaller freeze of both binaries. The Tauri bundling
