@@ -6,9 +6,9 @@
 
 ## First steps
 
-1. Read [Prism in Plain English](Prism-in-Plain-English.md) (context), then [`spec.md`](../spec.md) §4–§6 (the rules). Where prose and spec disagree, **spec wins** — if you think the spec is wrong, that's an RFC conversation ([Governance](Governance.md)).
-2. Set up per [Getting Started as a Developer](Getting-Started-as-a-Developer.md): clone → `python -m pytest prism/tests -q` → green on your machine.
-3. Pick something: issues labeled `good-first-issue`, docs gaps (this wiki welcomes fixes), test coverage for any module, or the current frontier — RingCT tx-layer wiring, daemon netcode, L2 channel logic ([Roadmap](Roadmap.md)).
+1. Read [Prism in Plain English](https://github.com/Esrevorter/Prism/wiki/Prism-in-Plain-English) (context), then [`spec.md`](https://github.com/Esrevorter/Prism/wiki/spec) §4–§6 (the rules). Where prose and spec disagree, **spec wins** — if you think the spec is wrong, that's an RFC conversation ([Governance](https://github.com/Esrevorter/Prism/wiki/Governance)).
+2. Set up per [Getting Started as a Developer](https://github.com/Esrevorter/Prism/wiki/Getting-Started-as-a-Developer): clone → `python -m pytest prism/tests -q` → green on your machine.
+3. Pick something: issues labeled `good-first-issue`, docs gaps (this wiki welcomes fixes), test coverage for any module, or the current frontier — RingCT tx-layer wiring, daemon netcode, L2 channel logic ([Roadmap](https://github.com/Esrevorter/Prism/wiki/Roadmap)).
 
 Questions? Open a discussion or tag `question` on an issue; ambiguity in our docs is a bug report about our docs.
 
@@ -22,11 +22,11 @@ git push origin feat/crypto/ring-sampling # then open a PR against main
 
 PR requirements:
 
-- **Tests accompany behavior changes.** Crypto/chain paths need completeness + soundness + malleability cases ([Testing & Quality](Testing-&-Quality.md)); "I'll add tests later" PRs don't merge.
+- **Tests accompany behavior changes.** Crypto/chain paths need completeness + soundness + malleability cases ([Testing & Quality](https://github.com/Esrevorter/Prism/wiki/Testing-&-Quality)); "I'll add tests later" PRs don't merge.
 - **Consensus-affecting diffs cite the spec** (§ number / decision ID) in the description; anything changing monetary or privacy rules additionally needs an accepted RFC.
 - **CI green:** suite across OS/Python matrix, fuzz smoke passing.
 - **Reviewers by blast radius:** `chain/ crypto/ auth/ zk/` → two approvals + spec cross-check; `wallet/ ai/ l2/` → one; docs → one fast review. (`mpc/` is frozen legacy — changes there need a spec-amendment justification.)
-- **Honest-language rule for user-facing copy:** never "revoked disclosure" (only *expired*), never "untraceable," never recovery guarantees beyond what cryptography provides ([FAQ](FAQ.md), [Security Model](Security-Model.md)). Marketing-adjacent wording gets held to the same bar as code here.
+- **Honest-language rule for user-facing copy:** never "revoked disclosure" (only *expired*), never "untraceable," never recovery guarantees beyond what cryptography provides ([FAQ](https://github.com/Esrevorter/Prism/wiki/FAQ), [Security Model](https://github.com/Esrevorter/Prism/wiki/Security-Model)). Marketing-adjacent wording gets held to the same bar as code here.
 
 ## House style (short version)
 
@@ -45,16 +45,16 @@ PR requirements:
 | ZK circuits | reference-grade | constraint-level reviews, statement-encoding attack ideas, circuit test expansion |
 | Lean auth (keystore + CAPTCHA gates) | shipped ✅ | adversarial token replay/expiry fuzzing, lockout UX studies |
 | Wallet UX specs & copy | planning | accessibility review of flows, plain-language drafts under honest-language rules |
-| Documentation | ongoing | translations, tutorials, wiki corrections (start [here](Home.md)) |
+| Documentation | ongoing | translations, tutorials, wiki corrections (start [here](https://github.com/Esrevorter/Prism/wiki/Home)) |
 
 ## Code of conduct & credit
 
-Be technical, be kind, assume good faith; harassment or gatekeeping ends participation. Contributions are credited via commit history; significant design contributions get named in release notes. The dev-fund model ([Governance](Governance.md)) exists so sustained contributors can eventually be funded transparently — milestone proposals follow the RFC process.
+Be technical, be kind, assume good faith; harassment or gatekeeping ends participation. Contributions are credited via commit history; significant design contributions get named in release notes. The dev-fund model ([Governance](https://github.com/Esrevorter/Prism/wiki/Governance)) exists so sustained contributors can eventually be funded transparently — milestone proposals follow the RFC process.
 
 ## Security issues
 
-Do **not** open public issues for vulnerabilities. Private report per [Security Model](Security-Model.md) §Bug bounty (ack ≤72 h, coordinated disclosure ≤90 days).
+Do **not** open public issues for vulnerabilities. Private report per [Security Model](https://github.com/Esrevorter/Prism/wiki/Security-Model) §Bug bounty (ack ≤72 h, coordinated disclosure ≤90 days).
 
 ---
 
-**Next:** [Architecture Overview](Architecture.md) · [Release Process](Release-Process.md) · [Wiki Home](Home.md)
+**Next:** [Architecture Overview](https://github.com/Esrevorter/Prism/wiki/Architecture) · [Release Process](https://github.com/Esrevorter/Prism/wiki/Release-Process) · [Wiki Home](https://github.com/Esrevorter/Prism/wiki/Home)

@@ -1,6 +1,6 @@
 # Getting Started as a Developer
 
-*Set up the codebase, run the tests, and find your way around the contribution workflow. For design rationale read [Architecture](Architecture.md) and [`spec.md`](../spec.md).*
+*Set up the codebase, run the tests, and find your way around the contribution workflow. For design rationale read [Architecture](https://github.com/Esrevorter/Prism/wiki/Architecture) and [`spec.md`](https://github.com/Esrevorter/Prism/wiki/spec).*
 
 ---
 
@@ -48,7 +48,7 @@ spec.md         THE source of truth — decisions D1–D5 are binding
 
 ## Reading order for new contributors
 
-1. [`spec.md` §4–§6](../spec.md) — money rules, privacy model, data formats.
+1. [`spec.md` §4–§6](https://github.com/Esrevorter/Prism/wiki/spec) — money rules, privacy model, data formats.
 2. `prism/crypto/field.py → edwards.py → pedersen.py` — the arithmetic floor everything stands on.
 3. `prism/chain/block.py → node.py` — canonical encoding + validation rules (where most chain-split bugs would live).
 4. Pick your layer: RingCT (`clsag.py`, `bulletproof.py`), custody (`auth/`), disclosures (`zk/`), UX logic (`wallet/`, `ai/`), shipped wallet (`gui/`, `rpc/`).
@@ -71,7 +71,7 @@ python -m pytest prism/tests/test_chain.py -q      # one area
 python -m pytest prism/tests/test_fuzz_parsing.py  # parse/serialize round-trip fuzzers
 ```
 
-CI runs the suite on every push and **blocks releases on failures** ([Testing & Quality](Testing-&-Quality.md)). Property-based tests use randomized inputs with fixed seeds recorded in failure output so any flake reproduces exactly.
+CI runs the suite on every push and **blocks releases on failures** ([Testing & Quality](https://github.com/Esrevorter/Prism/wiki/Testing-&-Quality)). Property-based tests use randomized inputs with fixed seeds recorded in failure output so any flake reproduces exactly.
 
 ## Build a local binary (optional)
 
@@ -80,7 +80,7 @@ pip install pyinstaller
 ./packaging/build_release.sh        # smoke-tests the frozen binary, zips it with SHA256SUMS
 ```
 
-Windows `.exe`s are produced by CI on native runners — see [Release Process](Release-Process.md).
+Windows `.exe`s are produced by CI on native runners — see [Release Process](https://github.com/Esrevorter/Prism/wiki/Release-Process).
 
 ## Contribution workflow
 
@@ -88,9 +88,9 @@ Windows `.exe`s are produced by CI on native runners — see [Release Process](R
 2. Keep commits scoped; consensus-affecting changes require a spec reference (§ number or decision ID) in the PR description.
 3. Tests accompany behavior changes (non-negotiable for crypto/chain paths).
 4. One approval minimum for tooling/docs; **two approvals + spec cross-check for `chain/`, `crypto/`, `auth/`, `zk/`**.
-5. New user-facing copy touching privacy/recovery claims must match the honest-language rules ([AI Layer](AI-Layer-Explained.md), [Security Model](Security-Model.md)) — e.g., never "revoked disclosure," always "expired disclosure."
+5. New user-facing copy touching privacy/recovery claims must match the honest-language rules ([AI Layer](https://github.com/Esrevorter/Prism/wiki/AI-Layer-Explained), [Security Model](https://github.com/Esrevorter/Prism/wiki/Security-Model)) — e.g., never "revoked disclosure," always "expired disclosure."
 
-Good first issues carry the `good-first-issue` label; the current frontier is the RingCT transaction layer wiring, daemon networking for Refraction testnet, and L2 channel logic ([Roadmap](Roadmap.md)).
+Good first issues carry the `good-first-issue` label; the current frontier is the RingCT transaction layer wiring, daemon networking for Refraction testnet, and L2 channel logic ([Roadmap](https://github.com/Esrevorter/Prism/wiki/Roadmap)).
 
 ## Release engineering (maintainers)
 
@@ -100,8 +100,8 @@ Tag → CI builds sdist/wheel + per-OS frozen binaries (windows-latest x64, ubun
 git tag -a v0.1.0 -m "Phase 1 reference implementation" && git push origin v0.1.0
 ```
 
-Details and signing plans: [Release Process](Release-Process.md).
+Details and signing plans: [Release Process](https://github.com/Esrevorter/Prism/wiki/Release-Process).
 
 ---
 
-**Next:** [Architecture Overview](Architecture.md) · [Cryptography Deep Dive](Cryptography-Deep-Dive.md) · [Contributing](Contributing.md)
+**Next:** [Architecture Overview](https://github.com/Esrevorter/Prism/wiki/Architecture) · [Cryptography Deep Dive](https://github.com/Esrevorter/Prism/wiki/Cryptography-Deep-Dive) · [Contributing](https://github.com/Esrevorter/Prism/wiki/Contributing)

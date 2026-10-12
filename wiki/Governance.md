@@ -1,6 +1,6 @@
 # Governance
 
-*Who decides what on Prism, how each power is checked, and where the honest seams are. Binding sources: [`spec.md` §12–§14](../spec.md) (D5 especially).*
+*Who decides what on Prism, how each power is checked, and where the honest seams are. Binding sources: [`spec.md` §12–§14](https://github.com/Esrevorter/Prism/wiki/spec) (D5 especially).*
 
 ---
 
@@ -29,7 +29,7 @@ The founding team also steers architecture through the **RFC/amendment process**
 The most dangerous power in any privacy coin is deciding "who's sanctioned." Prism's containment design:
 
 1. An elected **Prism Compliance Council** — 7 seats, staggered 18-month terms, public signing policy — signs the *official* weekly accumulator root with ≥5-of-7 signatures.
-2. **The chain never enforces it.** Denylist roots appear in block headers as reference data; consensus validates math, not politics. Funds from listed sources still arrive and remain spendable ([Security Model](Security-Model.md) E17).
+2. **The chain never enforces it.** Denylist roots appear in block headers as reference data; consensus validates math, not politics. Funds from listed sources still arrive and remain spendable ([Security Model](https://github.com/Esrevorter/Prism/wiki/Security-Model) E17).
 3. **Parallel lists are first-class.** Any organization may publish roots; disclosure proofs reference a specific root hash, and verifiers choose which list(s) they accept. Users/verifiers can pin any list — a rogue council changes nothing for those who don't consume its roots.
 4. **Misbehavior is checkable:** every root ships with named signatories' signatures; publication is mandatory and auditable after the fact.
 5. Election mechanics, slashing/removal rules, and detailed listing policy are research area **R7** — explicitly unfinished rather than quietly defaulted. That honesty is part of the design.
@@ -38,7 +38,7 @@ The most dangerous power in any privacy coin is deciding "who's sanctioned." Pri
 
 - Model bundles: signed, transparency-logged hashes, pinned versions; wallets refuse unsigned models (E16).
 - Federated learning: per-round opt-in, DP accounting, robust aggregation, emergency global FL pause flag in governance config (E15).
-- Model cards published per release; the anti-hallucination boundary (simulator owns numbers) is a product invariant, not a preference ([AI Layer](AI-Layer-Explained.md)).
+- Model cards published per release; the anti-hallucination boundary (simulator owns numbers) is a product invariant, not a preference ([AI Layer](https://github.com/Esrevorter/Prism/wiki/AI-Layer-Explained)).
 
 ## What governance is NOT on Prism
 
@@ -47,7 +47,7 @@ The most dangerous power in any privacy coin is deciding "who's sanctioned." Pri
 - ❌ No foundation ability to freeze, claw back, or blacklist on-chain.
 - ⚠️ Not a DAO theater either: elections, councils, and vesting are real-world institutions with published policies; the code limits their reach rather than granting it.
 
-## Regulatory posture ([`spec.md` §12](../spec.md))
+## Regulatory posture ([`spec.md` §12](https://github.com/Esrevorter/Prism/wiki/spec))
 
 Foundation position: **privacy software, non-custodial** — no company-held keys, no universal access. Selective disclosure is the compliance bridge: users satisfy tax/audit obligations *themselves*, without trusting intermediaries. Code launches under an OSI permissive license (MIT preferred; BSD-2 alternative pending final legal pick — non-blocking). Entity formation deferred pending counsel (research area R4). Hosted conveniences (watchtowers, invite relays) carry age/ToS gates; the core protocol stays permissionless.
 
@@ -56,8 +56,8 @@ Foundation position: **privacy software, non-custodial** — no company-held key
 - Read the spec sections cited above; every governance claim maps to code paths and tests.
 - Watch the append-only decision log for new D-items and amendments.
 - Run your own node; pin your own denylist roots; compare official roots against parallel publishers.
-- Contribute or challenge via RFCs ([Contributing](Contributing.md)).
+- Contribute or challenge via RFCs ([Contributing](https://github.com/Esrevorter/Prism/wiki/Contributing)).
 
 ---
 
-**Next:** [Roadmap](Roadmap.md) · [The Prism Protocol](The-Prism-Protocol.md) · [FAQ](FAQ.md)
+**Next:** [Roadmap](https://github.com/Esrevorter/Prism/wiki/Roadmap) · [The Prism Protocol](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol) · [FAQ](https://github.com/Esrevorter/Prism/wiki/FAQ)

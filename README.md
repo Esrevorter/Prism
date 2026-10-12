@@ -1,5 +1,7 @@
 <div align="center">
 
+<img width="100%" alt="Prism — clarity on your terms" src="https://placehold.co/1200x280/1a1033/e9e4ff/png?text=%F0%9F%94%B9+Prism++—++Private+by+default+%C2%B7+Forgiving+by+design+%C2%B7+Intelligent%2C+never+intrusive&font=Inter">
+
 # 🔹 Prism
 
 ### Clarity on your terms.
@@ -17,7 +19,7 @@
 
 <br/>
 
-**⬇️ [Download the wallet →](https://github.com/Esrevorter/Prism/releases/latest)** &nbsp;·&nbsp; 📖 [Wiki guided tour](wiki/Home.md)
+**⬇️ [Download the wallet →](https://github.com/Esrevorter/Prism/releases/latest)** &nbsp;·&nbsp; 📖 [Wiki guided tour](https://github.com/Esrevorter/Prism/wiki)
 
 </div>
 
@@ -144,7 +146,7 @@ Five numbers worth remembering:
 | Neuro-inclusive usability study (n≥20) | 🧪 Open — external human-subjects task (cannot close in code) |
 | Independent audits & mainnet | 🗓️ Planned (Phase 4) |
 
-Full roadmap: [Wiki → Roadmap](wiki/Roadmap.md) · Technical truth source: [`spec.md`](spec.md) (v1.2, incl. Amendment A2)
+Full roadmap: [Wiki → Roadmap](https://github.com/Esrevorter/Prism/wiki/Roadmap) · Technical truth source: [`spec.md`](spec.md) (v1.2, incl. Amendment A2)
 
 ---
 
@@ -201,11 +203,11 @@ More in the **[FAQ →](wiki/FAQ.md)**
 
 | 📘 Start here | 🧰 Use it | 🧵 Understand it | 🏗️ Build it |
 |---|---|---|---|
-| [Home](wiki/Home.md) | [Getting Started as a User](wiki/Getting-Started-as-a-User.md) | [How Privacy Works](wiki/How-Privacy-Works.md) | [Architecture Overview](wiki/Architecture.md) |
-| [Glossary](wiki/Glossary.md) | [Using the Wallet](wiki/Using-the-Wallet.md) | [The Prism Protocol: Selective Disclosure](wiki/The-Prism-Protocol.md) | [Chain Rules & Monetary Policy](wiki/Chain-Rules-and-Monetary-Policy.md) |
-| [Roadmap](wiki/Roadmap.md) | [Recovery & Inheritance Guide](wiki/Recovery-and-Inheritance-Guide.md) | [Security Model & Honest Limits](wiki/Security-Model.md) | [Cryptography Deep Dive](wiki/Cryptography-Deep-Dive.md) |
-| [FAQ](wiki/FAQ.md) | [Fees & Payment Channels](wiki/Fees-and-Payment-Channels.md) | [AI: What It Does & Doesn't Do](wiki/AI-Layer-Explained.md) | [Running a Node](wiki/Running-a-Node.md) |
-| [Governance](wiki/Governance.md) | [Preparing a Tax Disclosure](wiki/Preparing-a-Tax-Disclosure.md) | [Money Rules Rationale](wiki/Monetary-Policy-Rationale.md) | [Contributing Guide](wiki/Contributing.md) |
+| [Home](https://github.com/Esrevorter/Prism/wiki) | [Getting Started as a User](https://github.com/Esrevorter/Prism/wiki/Getting-Started-as-a-User) | [How Privacy Works](https://github.com/Esrevorter/Prism/wiki/How-Privacy-Works) | [Architecture Overview](https://github.com/Esrevorter/Prism/wiki/Architecture) |
+| [Glossary](https://github.com/Esrevorter/Prism/wiki/Glossary) | [Using the Wallet](https://github.com/Esrevorter/Prism/wiki/Using-the-Wallet) | [The Prism Protocol: Selective Disclosure](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol) | [Chain Rules & Monetary Policy](https://github.com/Esrevorter/Prism/wiki/Chain-Rules-and-Monetary-Policy) |
+| [Roadmap](https://github.com/Esrevorter/Prism/wiki/Roadmap) | [Recovery & Inheritance Guide](https://github.com/Esrevorter/Prism/wiki/Recovery-and-Inheritance-Guide) | [Security Model & Honest Limits](https://github.com/Esrevorter/Prism/wiki/Security-Model) | [Cryptography Deep Dive](https://github.com/Esrevorter/Prism/wiki/Cryptography-Deep-Dive) |
+| [FAQ](https://github.com/Esrevorter/Prism/wiki/FAQ) | [Fees & Payment Channels](https://github.com/Esrevorter/Prism/wiki/Fees-and-Payment-Channels) | [AI: What It Does & Doesn't Do](https://github.com/Esrevorter/Prism/wiki/AI-Layer-Explained) | [Running a Node](https://github.com/Esrevorter/Prism/wiki/Running-a-Node) |
+| [Governance](https://github.com/Esrevorter/Prism/wiki/Governance) | [Preparing a Tax Disclosure](https://github.com/Esrevorter/Prism/wiki/Preparing-a-Tax-Disclosure) | [Money Rules Rationale](https://github.com/Esrevorter/Prism/wiki/Monetary-Policy-Rationale) | [Contributing Guide](https://github.com/Esrevorter/Prism/wiki/Contributing) |
 
 ---
 

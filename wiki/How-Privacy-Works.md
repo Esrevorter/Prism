@@ -1,6 +1,6 @@
 # How Privacy Works
 
-*What an outside observer actually sees on Prism, and the cryptography that makes each hiding work. Binding spec: [`spec.md` §5](../spec.md).*
+*What an outside observer actually sees on Prism, and the cryptography that makes each hiding work. Binding spec: [`spec.md` §5](https://github.com/Esrevorter/Prism/wiki/spec).*
 
 ---
 
@@ -54,7 +54,7 @@ One subtlety: how do nodes stop someone double-spending if inputs are anonymous?
 
 You publish one payment address, but it never appears on-chain. To pay you, the sender performs a one-time Diffie-Hellman handshake using your public **view key**: they derive a fresh random one-time address (which only you, scanning with your view key, can recognize and unlock). Result: the blockchain contains a brand-new address per payment — no reuse, no clustering, no "address book of the world" analysis. Your wallet scans blocks offline with the view key and reconstructs its own incoming payments while everyone else sees noise.
 
-Two keys split duties: the **spend key** authorizes outgoing funds; the **view key** only reads incoming ones. This split is also the foundation of selective disclosure ([next page](The-Prism-Protocol.md)).
+Two keys split duties: the **spend key** authorizes outgoing funds; the **view key** only reads incoming ones. This split is also the foundation of selective disclosure ([next page](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol)).
 
 ## 4. Hidden origin — Dandelion++ relay
 
@@ -64,7 +64,7 @@ Even perfect crypto leaks if the first node you broadcast from knows your IP. Pr
 
 - **Fees** are visible (fixed base 0.0001 PRSM + optional priority ≤10×).
 - **Timing & volume:** observers see block cadence and how much data moves. Correlating "Maya got paid" with "someone paid something right after" is metadata heuristics — mitigated by batching/lateness norms in the wallet, not eliminated by math.
-- **A global passive adversary** that records everything forever and has quantum-scale analysis tools degrades ring sizes over long horizons. Our threat model states this plainly ([Security Model](Security-Model.md)).
+- **A global passive adversary** that records everything forever and has quantum-scale analysis tools degrades ring sizes over long horizons. Our threat model states this plainly ([Security Model](https://github.com/Esrevorter/Prism/wiki/Security-Model)).
 - **Compelled disclosure:** if *you* hand over your view key or a proof, privacy ends by design — that's the user-controlled half of "clarity on your terms."
 - **Endpoint compromise:** malware reading your live wallet memory is out of scope beyond OS-provided enclave protections. We say so rather than pretend otherwise.
 
@@ -82,8 +82,8 @@ Even perfect crypto leaks if the first node you broadcast from knows your IP. Pr
 | Curve arithmetic | `prism/crypto/edwards.py`, `field.py` | Ed25519 group, scalars mod ℓ |
 | Relay secrecy | (daemon, Phase 1+) | Dandelion++, epoch 64 blocks |
 
-All pure Python, property-tested, and fuzz-checked — see [Cryptography Deep Dive](Cryptography-Deep-Dive.md) and [Testing & Quality](Testing-&-Quality.md).
+All pure Python, property-tested, and fuzz-checked — see [Cryptography Deep Dive](https://github.com/Esrevorter/Prism/wiki/Cryptography-Deep-Dive) and [Testing & Quality](https://github.com/Esrevorter/Prism/wiki/Testing-&-Quality).
 
 ---
 
-**Next:** [The Prism Protocol: Selective Disclosure](The-Prism-Protocol.md) · [Security Model & Honest Limits](Security-Model.md)
+**Next:** [The Prism Protocol: Selective Disclosure](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol) · [Security Model & Honest Limits](https://github.com/Esrevorter/Prism/wiki/Security-Model)

@@ -1,6 +1,6 @@
 # Monetary Policy Rationale
 
-*Why Prism's money rules look the way they do: 21M cap, halvings, tail emission, zero pre-mine, dev fund from future issuance. Binding spec: [`spec.md` §4 + Decision D1](../spec.md).*
+*Why Prism's money rules look the way they do: 21M cap, halvings, tail emission, zero pre-mine, dev fund from future issuance. Binding spec: [`spec.md` §4 + Decision D1](https://github.com/Esrevorter/Prism/wiki/spec).*
 
 ---
 
@@ -38,7 +38,7 @@ Every coin that allocates value to insiders starts with two questions nobody can
 Software needs maintainers; "no team funding" is just pre-mining by another name with worse transparency. The chosen design: a fixed small percentage of each block's reward flows to a dev-fund address, and releases require **milestone vesting recorded on-chain** — public, auditable, capped, and earned. No genesis grant, no back-room allocation, and the community can verify every shard against the emission formula.
 
 ### Fee policy belongs to economics too
-Base fee fixed at 0.0001 PRSM with priority capped at 10× isn't just UX — it's monetary-policy-adjacent: it makes the cost of using the currency *predictable*, which is the precondition for micro-payments and channels ([Fees & Payment Channels](Fees-and-Payment-Channels.md)). Dynamic block size (median-last-10, soft target 2–4 MB) absorbs demand spikes without letting the spot price of blockspace spike with them.
+Base fee fixed at 0.0001 PRSM with priority capped at 10× isn't just UX — it's monetary-policy-adjacent: it makes the cost of using the currency *predictable*, which is the precondition for micro-payments and channels ([Fees & Payment Channels](https://github.com/Esrevorter/Prism/wiki/Fees-and-Payment-Channels)). Dynamic block size (median-last-10, soft target 2–4 MB) absorbs demand spikes without letting the spot price of blockspace spike with them.
 
 ## Supply math, visualized
 
@@ -68,4 +68,4 @@ Cumulative supply converges toward 21M; thereafter balance grows linearly with t
 
 ---
 
-**Next:** [Chain Rules & Monetary Policy](Chain-Rules-and-Monetary-Policy.md) (the technical side) · [Glossary](Glossary.md)
+**Next:** [Chain Rules & Monetary Policy](https://github.com/Esrevorter/Prism/wiki/Chain-Rules-and-Monetary-Policy) (the technical side) · [Glossary](https://github.com/Esrevorter/Prism/wiki/Glossary)

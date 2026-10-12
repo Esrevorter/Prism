@@ -1,6 +1,6 @@
 # Architecture Overview
 
-*The technical map of Prism: what the layers are, what each one trusts, and where this repository's code lives. The binding source of truth is [`spec.md` §3](../spec.md); this page explains it.*
+*The technical map of Prism: what the layers are, what each one trusts, and where this repository's code lives. The binding source of truth is [`spec.md` §3](https://github.com/Esrevorter/Prism/wiki/spec); this page explains it.*
 
 ---
 
@@ -111,7 +111,7 @@ prism/
 
 ## Design decisions that shaped the architecture
 
-Summarized from the decision log ([`spec.md` §14](../spec.md)); read there for full rationale.
+Summarized from the decision log ([`spec.md` §14](https://github.com/Esrevorter/Prism/wiki/spec)); read there for full rationale.
 
 | ID | Decision | Architectural consequence |
 |---|---|---|
@@ -127,9 +127,9 @@ Summarized from the decision log ([`spec.md` §14](../spec.md)); read there for 
 
 - **Blocks:** dynamic size (median-last-10 scaling, soft target 2–4 MB) with oversized-block penalties keeps fee pressure off users during bursts.
 - **Fork policy:** version-bit voting over 181-block windows, ≥90-day notice, 2-week grace. `block.py`'s canonical `version_vote` encoding exists precisely so forks can't be signaled ambiguously.
-- **Privacy at scale:** decoy sampling is recency-weighted with age-bucket floors; pruned nodes deliberately *cannot* serve good decoys, which is why wallets default to full nodes ([Running a Node](Running-a-Node.md)).
+- **Privacy at scale:** decoy sampling is recency-weighted with age-bucket floors; pruned nodes deliberately *cannot* serve good decoys, which is why wallets default to full nodes ([Running a Node](https://github.com/Esrevorter/Prism/wiki/Running-a-Node)).
 - **Post-quantum:** tracked as research area R1; the layered design means the signature/ring layer can be re-instantiated without touching monetary rules.
 
 ---
 
-**Next:** [Chain Rules & Monetary Policy](Chain-Rules-and-Monetary-Policy.md) · [Cryptography Deep Dive](Cryptography-Deep-Dive.md) · [Testing & Quality](Testing-&-Quality.md)
+**Next:** [Chain Rules & Monetary Policy](https://github.com/Esrevorter/Prism/wiki/Chain-Rules-and-Monetary-Policy) · [Cryptography Deep Dive](https://github.com/Esrevorter/Prism/wiki/Cryptography-Deep-Dive) · [Testing & Quality](https://github.com/Esrevorter/Prism/wiki/Testing-&-Quality)

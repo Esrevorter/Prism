@@ -18,7 +18,7 @@ What exists today: a **working wallet app** (Windows `.msi`, macOS `.dmg`, Linux
 3. Open the extracted folder, click the address bar, type `cmd`, press Enter.
 4. Type `prism params` — you just read Prism's money rules directly from the code.
 
-**macOS / Linux:** unzip, then `./prism params` in Terminal (macOS may need *right-click → Open* once, then System Settings approval for unsigned dev builds — see [Release Process](Release-Process.md)).
+**macOS / Linux:** unzip, then `./prism params` in Terminal (macOS may need *right-click → Open* once, then System Settings approval for unsigned dev builds — see [Release Process](https://github.com/Esrevorter/Prism/wiki/Release-Process)).
 
 Try these five commands like a guided tour:
 
@@ -42,7 +42,7 @@ Optional tiers (Settings → Security): a trusted-contact recovery mode with quo
 
 1. Tap **Receive** → pick account (e.g., "Client income") or sub-address → show QR.
 2. Payer scans; within ~2 minutes the payment appears **pending**, then confirms after 10 blocks (~20 min) with a notification at whatever intensity you set (*calm / normal / loud*).
-3. Every payment lands at a brand-new one-time address behind the scenes — the address you shared is safe to reuse because it never actually appears on-chain ([How Privacy Works](How-Privacy-Works.md)).
+3. Every payment lands at a brand-new one-time address behind the scenes — the address you shared is safe to reuse because it never actually appears on-chain ([How Privacy Works](https://github.com/Esrevorter/Prism/wiki/How-Privacy-Works)).
 
 ## 💸 Step 3 — Sending, the natural way
 
@@ -70,12 +70,12 @@ Ambiguity is asked about, never guessed ("Which Alex?" arrives as one tap-to-ans
 ## 🔐 Step 4 — Set up your safety net (do this day one)
 
 - **Test your backup once** — the app offers a dry-run restore so you *know* the 12 words work before you ever need them; optionally add trusted contacts for the tier-B recovery mode.
-- **Turn on the dead-man switch** (optional): choose beneficiary + attestators; if you're unreachable 365 days, signed-heartbeat absence + attestator quorum starts their claim, with 30-day grace pings to you throughout. Full guide: [Recovery & Inheritance](Recovery-and-Inheritance-Guide.md).
+- **Turn on the dead-man switch** (optional): choose beneficiary + attestators; if you're unreachable 365 days, signed-heartbeat absence + attestator quorum starts their claim, with 30-day grace pings to you throughout. Full guide: [Recovery & Inheritance](https://github.com/Esrevorter/Prism/wiki/Recovery-and-Inheritance-Guide).
 - **Set your comfort threshold** — amounts above it always wait out a veto window, even manual sends, if panic-lock is on.
 
 ## 🧾 Step 5 — When reality asks questions (taxes, landlords…)
 
-*Privacy Tools → Prepare tax report* → pick period → review the side-by-side "reveals / doesn't reveal" panel → send the expiring proof package to your accountant's verifier. Walkthrough: [Preparing a Tax Disclosure](Preparing-a-Tax-Disclosure.md).
+*Privacy Tools → Prepare tax report* → pick period → review the side-by-side "reveals / doesn't reveal" panel → send the expiring proof package to your accountant's verifier. Walkthrough: [Preparing a Tax Disclosure](https://github.com/Esrevorter/Prism/wiki/Preparing-a-Tax-Disclosure).
 
 ## ⚙️ Neuro-inclusive settings worth knowing
 
@@ -88,4 +88,4 @@ Ambiguity is asked about, never guessed ("Which Alex?" arrives as one tap-to-ans
 
 ## Where to next
 
-[Fees & Payment Channels](Fees-and-Payment-Channels.md) · [Using the Wallet](Using-the-Wallet.md) · [FAQ](FAQ.md) · [Glossary](Glossary.md)
+[Fees & Payment Channels](https://github.com/Esrevorter/Prism/wiki/Fees-and-Payment-Channels) · [Using the Wallet](https://github.com/Esrevorter/Prism/wiki/Using-the-Wallet) · [FAQ](https://github.com/Esrevorter/Prism/wiki/FAQ) · [Glossary](https://github.com/Esrevorter/Prism/wiki/Glossary)

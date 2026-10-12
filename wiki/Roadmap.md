@@ -1,6 +1,6 @@
 # Roadmap
 
-*Where Prism is, what's being built next, and the acceptance gates between phases. Binding source: [`spec.md` §13](../spec.md); this page adds status color as of **October 2026**.*
+*Where Prism is, what's being built next, and the acceptance gates between phases. Binding source: [`spec.md` §13](https://github.com/Esrevorter/Prism/wiki/spec); this page adds status color as of **October 2026**.*
 
 ---
 
@@ -58,18 +58,18 @@ Phase 4 ░░░░░░░░░░░░░░░░░░░░░░░░
 2. Separate ZKP circuit audits per release.
 3. Continuous fuzzing harnesses (chain parsing, wire formats) — already running in CI.
 4. Property-test thresholds per phase (e.g., RingCT spend-loop ≥10⁶ iterations).
-5. Release pipeline blocks on failing test suites ([Testing & Quality](Testing-&-Quality.md), [Release Process](Release-Process.md)).
+5. Release pipeline blocks on failing test suites ([Testing & Quality](https://github.com/Esrevorter/Prism/wiki/Testing-&-Quality), [Release Process](https://github.com/Esrevorter/Prism/wiki/Release-Process)).
 
 ## Known open research areas (do not block delivery)
 
-R1 post-quantum migration path · R2 mobile ZKP prover optimization · R3 recovery collusion resistance · R4 multi-jurisdiction disclosure interop · R5 consent-based cognitive-load telemetry · R6 forward-revocable disclosures (descoped from v1) · R7 Compliance Council election/slashing mechanics. Details: [`spec.md` §15C](../spec.md).
+R1 post-quantum migration path · R2 mobile ZKP prover optimization · R3 recovery collusion resistance · R4 multi-jurisdiction disclosure interop · R5 consent-based cognitive-load telemetry · R6 forward-revocable disclosures (descoped from v1) · R7 Compliance Council election/slashing mechanics. Details: [`spec.md` §15C](https://github.com/Esrevorter/Prism/wiki/spec).
 
 ## How to follow progress
 
-- Releases are tagged `vX.Y.Z` with per-OS binaries + checksums (see [Release Process](Release-Process.md)).
-- Phase milestones land as PRs referencing spec sections; the decision log ([§14](../spec.md)) is append-only — if a binding choice changes, it appears there first.
+- Releases are tagged `vX.Y.Z` with per-OS binaries + checksums (see [Release Process](https://github.com/Esrevorter/Prism/wiki/Release-Process)).
+- Phase milestones land as PRs referencing spec sections; the decision log ([§14](https://github.com/Esrevorter/Prism/wiki/spec)) is append-only — if a binding choice changes, it appears there first.
 - Testnet access announcements will appear in release notes; no ETA promises beyond the month ranges above.
 
 ---
 
-**Next:** [Architecture Overview](Architecture.md) · [Governance](Governance.md) · [Contributing](Contributing.md)
+**Next:** [Architecture Overview](https://github.com/Esrevorter/Prism/wiki/Architecture) · [Governance](https://github.com/Esrevorter/Prism/wiki/Governance) · [Contributing](https://github.com/Esrevorter/Prism/wiki/Contributing)
