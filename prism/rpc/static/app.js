@@ -345,20 +345,7 @@ async function startCaptcha() {
     capState = { ch, picks: new Set(), token: null, timer: null,
                  deadline: ch.expires_at * 1000 };
     $("#cap-prompt").textContent = ch.prompt;
-    $("#cap-img").src = `data:image/png;base64,${ch.png_base64}`;
-    const taps = $("#cap-taps");
-    taps.replaceChildren(...Array.from({ length: 9 }, (_, i) => {
-      const b = el("button", "tap");
-      b.type = "button";
-      b.setAttribute("aria-label", `tile ${i + 1}`);
-      b.addEventListener("click", () => {
-        if (capState.picks.has(i)) capState.picks.delete(i);
-        else capState.picks.add(i);
-        b.classList.toggle("picked");
-        $("#cap-next").disabled = capState.picks.size === 0;
-      });
-      return b;
-    }));
+    renderCapSvg(ch);
     $("#cap-next").disabled = true;
     $("#cap-burst").hidden = true;
     $("#cap-hint").textContent = ch.human;
@@ -366,6 +353,98 @@ async function startCaptcha() {
     setStepper(1);
     startCapTimer(ch.ttl_s || 120);
   } catch (e) { toast(e.message); }
+}
+
+// Build ONE inline SVG where each tile is itself a button — picture and
+// controls are the same element, so they can never visually desync or show
+// up as "two images". Colours come from the server palette verbatim.
+const SVG_NS = "http://www.w3.org/2000/svg";
+function renderCapSvg(ch) {
+  const host = $("#cap-svg");
+  host.replaceChildren();
+  const TILE = 150, PAD = 10, R = 16, G = 3;
+  const size = G * TILE + (G + 1) * PAD;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+  svg.setAttribute("role", "group");
+  svg.setAttribute("aria-label", "Puzzle: tap every tile with the matching shape");
+  const pal = ch.palette || {};
+  const bg = rect(0, 0, size, size, pal.page || "#fafafc", 20);
+  svg.appendChild(bg);
+  ch.tiles.forEach((shape, i) => {
+    const col = i % G, row = Math.floor(i / G);
+    const x = col * (TILE + PAD) + PAD, y = row * (TILE + PAD) + PAD;
+    const g = document.createElementNS(SVG_NS, "g");
+    g.setAttribute("class", "cap-tile");
+    g.setAttribute("tabindex", "0");
+    g.setAttribute("role", "button");
+    g.setAttribute("aria-pressed", "false");
+    g.setAttribute("aria-label", `tile ${i + 1}: ${shape}`);
+    g.dataset.i = String(i);
+    g.appendChild(rect(x, y, TILE, TILE, pal.tile || "#ffffff", R));
+    const glyph = glyphNode(shape, x + TILE / 2, y + TILE / 2,
+                            pal[shape] || pal.ink || "#2c2c34", pal.ink || "#2c2c34");
+    if (glyph) g.appendChild(glyph);
+    const mark = document.createElementNS(SVG_NS, "path");
+    mark.setAttribute("d", `M ${x + 38} ${y + TILE / 2} l 22 24 l 40 -46`);
+    mark.setAttribute("class", "cap-check");
+    mark.setAttribute("fill", "none");
+    mark.setAttribute("stroke", pal.ink || "#2c2c34");
+    mark.setAttribute("stroke-width", "10");
+    mark.setAttribute("stroke-linecap", "round");
+    mark.setAttribute("stroke-linejoin", "round");
+    g.appendChild(mark);
+    const toggle = () => {
+      if (!capState) return;
+      if (capState.picks.has(i)) capState.picks.delete(i);
+      else capState.picks.add(i);
+      const on = capState.picks.has(i);
+      g.classList.toggle("picked", on);
+      g.setAttribute("aria-pressed", on ? "true" : "false");
+      $("#cap-next").disabled = capState.picks.size === 0;
+    };
+    g.addEventListener("click", toggle);
+    g.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+    });
+    svg.appendChild(g);
+  });
+  host.appendChild(svg);
+}
+function rect(x, y, w, h, fill, rx) {
+  const r = document.createElementNS(SVG_NS, "rect");
+  r.setAttribute("x", x); r.setAttribute("y", y);
+  r.setAttribute("width", w); r.setAttribute("height", h);
+  r.setAttribute("rx", rx); r.setAttribute("fill", fill);
+  return r;
+}
+function glyphNode(shape, cx, cy, fill, ink) {
+  const R = 45;                       // matches prism/auth/captcha.py _glyph_path
+  let n;
+  if (shape === "circle") {
+    n = document.createElementNS(SVG_NS, "circle");
+    n.setAttribute("cx", cx); n.setAttribute("cy", cy); n.setAttribute("r", R);
+  } else {
+    const pts = shape === "square"
+      ? [[-.72,-.72],[.72,-.72],[.72,.72],[-.72,.72]].map(p => `${cx+p[0]*R},${cy+p[1]*R}`)
+      : shape === "triangle"
+      ? [[0,-1],[.9,.5],[-.9,.5]].map(p => `${cx+p[0]*R},${cy+p[1]*R}`)
+      : shape === "diamond"
+      ? [[0,-1.1],[1.1,0],[0,1.1],[-1.1,0]].map(p => `${cx+p[0]*R},${cy+p[1]*R}`)
+      : shape === "star"
+      ? Array.from({length: 10}, (_, k) => {
+          const a = -Math.PI/2 + k*Math.PI/5, rr = (k%2===0?1.15:.5)*R;
+          return `${cx+rr*Math.cos(a)},${cy+rr*Math.sin(a)}`; })
+      : null;
+    if (!pts) return null;
+    n = document.createElementNS(SVG_NS, "polygon");
+    n.setAttribute("points", pts.join(" "));
+  }
+  n.setAttribute("fill", fill);
+  n.setAttribute("stroke", ink);
+  n.setAttribute("stroke-width", "4");
+  n.setAttribute("stroke-linejoin", "round");
+  return n;
 }
 
 function startCapTimer(ttl) {

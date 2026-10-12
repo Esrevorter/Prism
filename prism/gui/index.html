@@ -178,13 +178,16 @@
       <h2>Prove you're here <button class="help-dot" data-help="captcha" aria-label="Why a picture check?">?</button></h2>
       <p class="captcha-prompt" id="cap-prompt">…</p>
       <div class="cap-frame" id="cap-frame">
-        <img id="cap-img" alt="Puzzle image: nine tiles" draggable="false">
+        <!-- ONE self-contained SVG composed by app.js: the nine tiles ARE the
+             buttons (vector-first, v0.1.5). No <img>, no overlay — this fixes
+             the Windows bug where an unstyled overlay circle showed as a big
+             black dot beneath a second picture. -->
+        <div id="cap-svg" class="cap-svg"></div>
         <svg class="ring" viewBox="0 0 44 44" aria-hidden="true">
           <circle class="ring-bg" cx="22" cy="22" r="20"/>
           <circle class="ring-fg" id="cap-ring" cx="22" cy="22" r="20"/>
         </svg>
       </div>
-      <div class="tap-grid" id="cap-taps"><!-- 9 tap buttons overlaid via CSS grid --></div>
       <p class="hint" id="cap-hint">Tap every tile that matches, then continue. Takes about three seconds.</p>
       <div class="row spread">
         <button class="btn ghost" id="cap-refresh" title="A fresh picture">↻ New picture</button>

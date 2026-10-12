@@ -116,3 +116,33 @@ footer { text-align: center; padding: 26px; }
 .digest-card .digest-line { margin: 0 0 .5rem; font-size: 1.05rem; line-height: 1.5; }
 .digest-card .row { gap: .5rem; }
 @media (prefers-reduced-motion: reduce) { .digest-card, .digest-card button { transition: none !important; } }
+
+/* ─── CAPTCHA stage, vector-first (v0.1.5) ────────────────────────────────
+   The picture IS the control: one inline SVG, tiles are buttons.  This block
+   was missing before — which is why the countdown ring rendered as a big
+   black circle and the layout looked like "two images" on Windows. */
+.cap-frame { position: relative; display: flex; justify-content: center;
+             margin: 14px 0 6px; }
+.cap-svg svg { width: min(340px, 78vw); height: auto; display: block;
+               border-radius: 20px; box-shadow: var(--shadow); }
+.cap-tile { cursor: pointer; }
+.cap-tile rect:first-of-type { transition: filter .15s ease; }
+.cap-tile:hover rect:first-of-type { filter: brightness(.97); }
+.cap-tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px;
+                          border-radius: 16px; }
+.cap-check { opacity: 0; transform-box: fill-box; transform-origin: center;
+             transform: scale(.4); transition: opacity .18s ease, transform .18s cubic-bezier(.3,1.6,.5,1); }
+.cap-tile.picked .cap-check { opacity: 1; transform: scale(1); }
+.cap-tile.picked rect:first-of-type { fill: color-mix(in srgb, var(--accent) 18%, #ffffff); }
+@media (prefers-reduced-motion: reduce) {
+  .cap-check, .cap-tile rect:first-of-type { transition: none !important; }
+}
+.ring { position: absolute; top: -8px; right: max(-8px, calc(50% - 186px));
+        width: 44px; height: 44px; transform: rotate(-90deg); }
+.ring-bg { fill: none; stroke: var(--border); stroke-width: 4; }
+.ring-fg { fill: none; stroke: var(--accent); stroke-width: 4;
+           stroke-linecap: round; transition: stroke-dashoffset .25s linear; }
+.captcha-prompt { font-size: 1.05rem; font-weight: 600; margin: 0 0 4px; }
+.burst { margin-top: 10px; padding: 10px 14px; border-radius: 10px;
+         background: color-mix(in srgb, var(--ok) 14%, transparent);
+         border: 1px solid var(--ok); color: var(--ok); font-weight: 600; }

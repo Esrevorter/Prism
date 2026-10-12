@@ -53,7 +53,9 @@ def new_image_grid(seed: Optional[bytes] = None) -> dict:
     """Generate a fresh challenge: 9 tiles, 3–4 of them share the target shape.
 
     Returns a plain dict so it JSON-round-trips straight through the RPC wire:
-      {challenge_id, prompt, target, tiles:[shape,...], png_base64}
+      {challenge_id, prompt, target, tiles:[shape,...]}
+    (The picture itself is rendered on demand — SVG for the GUI via
+    render_grid_svg, PNG fallback via render_grid_png; v0.1.5 vector-first.)
     """
     rng = secrets.SystemRandom() if seed is None else _SeededRandom(seed)
     tiles = [rng.choice(SHAPES) for _ in range(GRID * GRID)]
@@ -96,39 +98,183 @@ class _SeededRandom:
 
 
 # ---------------------------------------------------------------------------
-# Minimal stdlib PNG encoder (truecolor 8-bit) — tiles drawn as flat glyphs
+# Minimal stdlib PNG encoder (truecolor 8-bit + alpha) — vector-first shapes
+#
+# v0.1.5 fix (Windows bug report): the old renderer drew tiny dark glyphs on
+# a light background with no anti-aliasing ("looks nineties"), and the GUI's
+# countdown ring rendered as a big black circle because its CSS was missing.
+# The picture is now crisp by construction: high-resolution supersampled
+# anti-aliased coverage, rounded pastel tiles, vivid colored glyphs, generous
+# padding.  The server still emits ONE self-contained image (base64 PNG);
+# the GUI overlays invisible tap targets on it — never a second picture.
 # ---------------------------------------------------------------------------
 
-_TILE = 96
-_PAD = 6
+_TILE = 150          # logical tile size (px as displayed)
+_PAD = 10            # gap between tiles
+_SUP = 2             # supersample factor for free anti-aliasing
+_RADIUS = 16         # tile corner radius (logical px)
+_INK = (44, 44, 52)  # glyph outline colour (dark slate, AA'd against fill)
+
+# Per-shape fills: calm pastels that read clearly in light AND dark themes.
+_SHAPE_FILL = {
+    "star":     (255, 193, 7),
+    "circle":   (95, 180, 255),
+    "square":   (108, 255, 158),
+    "triangle": (255, 95, 126),
+    "diamond":  (180, 95, 255),
+}
 
 
 def render_grid_png(tiles: list[str], target: str) -> bytes:
-    """Rasterize the 3×3 grid into a PNG without any imaging dependency.
+    """Rasterize the 3×3 grid into one sharp, anti-aliased PNG.
 
-    Shapes are filled polygon masks computed per pixel — crude but perfectly
-    adequate for 96 px tiles, and byte-deterministic for tests.
+    No imaging dependency: each pixel's coverage is computed analytically
+    (rounded-rect SDF for tiles, exact polygon/circle membership for glyphs)
+    at _SUP² samples per output pixel, then averaged — true anti-aliasing
+    from pure stdlib math.  Byte-deterministic for seeded inputs (tests).
     """
+    import math
+    step = 1.0 / _SUP
     w = h = GRID * _TILE + (GRID + 1) * _PAD
-    bg = (248, 246, 240)
-    fg = (44, 44, 52)
-    hl = (214, 178, 60)          # target tint never used — honest grids only
-    rows = []
-    for y in range(h):
-        row = bytearray()
-        for x in range(w):
-            r, g, b = bg
-            ti = _tile_at(x, y)
-            if ti is not None:
-                shape = tiles[ti]
-                cx, cy = _tile_center(ti)
-                inside, color = _glyph(shape, x - cx, y - cy)
-                if inside:
-                    r, g, b = color
-            row += bytes((r, g, b))
-        rows.append(b"\x00" + bytes(row))
-    raw = b"".join(rows)
-    return _png(w, h, raw)
+    page = (250, 250, 252)       # neutral near-white page behind tiles
+    tile_bg = (255, 255, 255)
+    out = bytearray()
+    for py in range(h):
+        out.append(0)            # PNG filter byte per scanline
+        for px in range(w):
+            ti = _tile_at(px, py)
+            if ti is None:       # gutter: page colour, fully opaque
+                out += bytes(page)
+                continue
+            shape = tiles[ti]
+            fill = _SHAPE_FILL.get(shape, _INK)
+            cx, cy = _tile_center(ti)
+            acc_r = acc_g = acc_b = acc_a = 0.0
+            for sy in range(_SUP):
+                fy = py + (sy + 0.5) * step - cy
+                for sx in range(_SUP):
+                    fx = px + (sx + 0.5) * step - cx
+                    t_in = _in_rounded(fx, fy, _TILE / 2, _RADIUS)
+                    if not t_in:
+                        continue                     # outside tile: page shows
+                    g_in = _glyph(shape, fx, fy)
+                    if g_in:
+                        # glyph body with a crisp AA'd ink rim
+                        rim = _glyph(shape, fx, fy, shrink=3.5)
+                        col = _INK if not rim else fill
+                        acc_r += col[0]; acc_g += col[1]; acc_b += col[2]
+                        acc_a += 1.0
+                    else:
+                        acc_r += tile_bg[0]; acc_g += tile_bg[1]
+                        acc_b += tile_bg[2]; acc_a += 1.0
+            n = _SUP * _SUP
+            a = acc_a / n
+            if a <= 0.0:
+                out += bytes(page)
+            else:
+                r = (acc_r / acc_a) * a + page[0] * (1 - a)
+                g = (acc_g / acc_a) * a + page[1] * (1 - a)
+                b = (acc_b / acc_a) * a + page[2] * (1 - a)
+                out += bytes((min(255, max(0, round(r))),
+                              min(255, max(0, round(g))),
+                              min(255, max(0, round(b)))))
+    return _png(w, h, bytes(out))
+
+
+def _in_rounded(dx: float, dy: float, half: float, radius: float) -> bool:
+    """Point-in-rounded-rect test relative to tile centre."""
+    ax, ay = abs(dx), abs(dy)
+    if ax > half or ay > half:
+        return False
+    ox, oy = ax - (half - radius), ay - (half - radius)
+    if ox > 0 and oy > 0:
+        return ox * ox + oy * oy <= radius * radius
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Vector renderer — the primary picture format since v0.1.5
+#
+# One self-contained SVG: rounded white tiles on a soft page, each glyph a
+# filled path in its shape colour with an ink rim.  Scales perfectly on every
+# display (the Windows bug was a tiny raster blown up by the webview); no
+# per-pixel math, so issuing is ~instant.  The PNG encoder above stays as a
+# dependency-free fallback for non-browser consumers/tests.
+# ---------------------------------------------------------------------------
+
+def shape_palette() -> dict:
+    """Server-authoritative colours, shared verbatim with the GUI overlay."""
+    pal = {s: "#%02x%02x%02x" % c for s, c in _SHAPE_FILL.items()}
+    pal["ink"] = "#%02x%02x%02x" % _INK
+    pal["tile"] = "#ffffff"
+    pal["page"] = "#fafafc"
+    return pal
+
+
+def render_grid_svg(tiles: list[str], target: str) -> str:
+    """Render the 3×3 grid as one inline-ready SVG document string."""
+    import math
+    w = h = GRID * _TILE + (GRID + 1) * _PAD
+    pal = shape_palette()
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
+        f'width="{w}" height="{h}" role="img" aria-label="Puzzle image: nine '
+        f'tiles of simple shapes">',
+        f'<rect width="{w}" height="{h}" rx="20" fill="{pal["page"]}"/>',
+    ]
+    for i, shape in enumerate(tiles):
+        tx, ty = _tile_origin(i)
+        cx, cy = tx + _TILE / 2, ty + _TILE / 2
+        fill = pal.get(shape, pal["ink"])
+        parts.append(
+            f'<rect x="{tx}" y="{ty}" width="{_TILE}" height="{_TILE}" '
+            f'rx="{_RADIUS}" fill="{pal["tile"]}"/>')
+        d = _glyph_path(shape, cx, cy)
+        if d:
+            parts.append(
+                f'<path d="{d}" fill="{fill}" stroke="{pal["ink"]}" '
+                f'stroke-width="4" stroke-linejoin="round"/>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _tile_origin(i: int) -> tuple[int, int]:
+    r, c = divmod(i, GRID)
+    return (c * (_TILE + _PAD) + _PAD, r * (_TILE + _PAD) + _PAD)
+
+
+def _glyph_path(shape: str, cx: float, cy: float) -> str:
+    """SVG path data for one glyph centred at (cx, cy)."""
+    import math
+    R = _TILE * 0.30
+    def pts2d(pts):
+        return " ".join(f"{cx + px:.2f},{cy + py:.2f}" for px, py in pts)
+    if shape == "circle":
+        return (f"M {cx - R:.2f},{cy} a {R:.2f},{R:.2f} 0 1,0 {2*R:.2f},0 "
+                f"a {R:.2f},{R:.2f} 0 1,0 {-2*R:.2f},0 Z")
+    if shape == "square":
+        s = R * 0.85; k = R * 0.22
+        corners = _rounded_rect_points(s, k)
+        return "M " + pts2d(corners).replace(" ", " L ", 1) + " Z"
+    poly = _poly_points(shape, R)
+    if not poly:
+        return ""
+    return "M " + pts2d(poly).replace(" ", " L ", 1) + " Z"
+
+
+def _rounded_rect_points(half: float, rad: float, n: int = 6) -> list:
+    """Polygonal approximation of a rounded square (for path symmetry)."""
+    import math
+    pts = []
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            ccx, ccy = sx * (half - rad), sy * (half - rad)
+            a0 = math.atan2(ccy, ccx)          # corner outward direction
+            for k in range(n + 1):
+                a = a0 - math.pi / 2 + k * math.pi / 2 / n
+                pts.append((ccx + rad * math.cos(a), ccy + rad * math.sin(a)))
+    pts.sort(key=lambda p: math.atan2(p[1], p[0]))
+    return pts
 
 
 def _tile_at(x: int, y: int) -> Optional[int]:
@@ -145,32 +291,56 @@ def _tile_center(i: int) -> tuple[int, int]:
             r * (_TILE + _PAD) + _PAD + _TILE // 2)
 
 
-def _glyph(shape: str, dx: int, dy: int) -> tuple[bool, tuple[int, int, int]]:
-    """Return (pixel inside glyph, color). Radius ≈ 34 px."""
-    R = 34
-    ink = (60, 60, 72)
+def _glyph(shape: str, dx: float, dy: float, shrink: float = 0.0) -> bool:
+    """True if (dx, dy) [relative to tile centre] lies inside the glyph.
+
+    `shrink` insets the shape by that many logical px — used to paint an
+    anti-aliased ink rim around each coloured glyph.  Radius scales with
+    the larger tiles so glyphs occupy ~60% of each tile.
+    """
+    R = _TILE * 0.30 - shrink
+    if R <= 0:
+        return False
     if shape == "circle":
-        return (dx * dx + dy * dy <= R * R, ink)
+        return dx * dx + dy * dy <= R * R
     if shape == "square":
-        return (abs(dx) <= R * 0.85 and abs(dy) <= R * 0.85, ink)
+        return _in_rounded(dx, dy, R * 0.85, R * 0.22)
     if shape == "triangle":
-        return (dy > -R and dy < R * 0.8 and abs(dx) * 1.15 < (R * 0.8 - dy), ink)
+        return _inside_poly(dx, dy, _poly_points("triangle", R))
     if shape == "diamond":
-        return (abs(dx) + abs(dy) <= R * 1.1, ink)
+        return _inside_poly(dx, dy, _poly_points("diamond", R))
     if shape == "star":
-        # 5-point star via polar test against outer/inner radii
-        import math
-        ang = math.atan2(dy, dx)
-        rad = math.hypot(dx, dy)
-        if rad > R * 1.15:
-            return (False, ink)
+        return _inside_poly(dx, dy, _poly_points("star", R))
+    return False
+
+
+def _poly_points(shape: str, R: float) -> list[tuple[float, float]]:
+    """Canonical vertex lists; cached per (shape, radius)."""
+    key = (shape, round(R, 3))
+    cached = _POLY_CACHE.get(key)
+    if cached is not None:
+        return cached
+    import math
+    if shape == "triangle":
+        pts = [(R * math.cos(-math.pi / 2 + i * 2 * math.pi / 3),
+                R * math.sin(-math.pi / 2 + i * 2 * math.pi / 3))
+               for i in range(3)]
+    elif shape == "diamond":
+        rr = R * 1.15
+        pts = [(0, -rr), (rr, 0), (0, rr), (-rr, 0)]
+    elif shape == "star":
         pts = []
         for k in range(10):
             a = -math.pi / 2 + k * math.pi / 5
-            rr = R * 1.1 if k % 2 == 0 else R * 0.45
+            rr = R * 1.15 if k % 2 == 0 else R * 0.5
             pts.append((rr * math.cos(a), rr * math.sin(a)))
-        return (_inside_poly(dx, dy, pts), ink)
-    return (False, ink)
+    else:
+        pts = []
+    _POLY_CACHE[key] = pts
+    return pts
+
+
+_POLY_CACHE: dict[tuple[str, float], list[tuple[float, float]]] = {}
 
 
 def _inside_poly(px: int, py: int, pts: list[tuple[float, float]]) -> bool:
@@ -224,7 +394,14 @@ class CaptchaEngine:
 
     # -- issuing -------------------------------------------------------------
     def issue(self, intent_digest_hex: str) -> dict:
-        """Create a challenge bound to this exact transaction preview."""
+        """Create a challenge bound to this exact transaction preview.
+
+        The grid ships as ONE self-contained SVG picture (crisp at any DPI —
+        v0.1.5 fix for the blurry 'nineties' PNG on Windows).  The server's
+        tile colours are embedded so the GUI's tap overlay can mirror them
+        exactly; the answer key (`target`) never leaves this process except
+        via the display-only view service.auth_challenge already redacts.
+        """
         grid = new_image_grid()
         cid = grid["challenge_id"]
         self._pending[cid] = {
@@ -232,12 +409,11 @@ class CaptchaEngine:
             "intent_digest_hex": intent_digest_hex,
             "attempts": 0,
         }
-        import base64
-        png = render_grid_png(grid["tiles"], grid["target"])
         return {
             "challenge_id": cid,
             "prompt": grid["prompt"],
-            "png_base64": base64.b64encode(png).decode(),
+            "svg": render_grid_svg(grid["tiles"], grid["target"]),
+            "palette": shape_palette(),
             "ttl_s": self.ttl_s,
             "human": ("Prove you're human: look at the picture and tap the "
                       "button under each tile that matches. This only unlocks "

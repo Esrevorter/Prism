@@ -180,7 +180,9 @@ class TestLeanAuth:
             svc.auth_challenge(it["intent_id"])          # awaiting_confirm
         svc.intent_confirm(it["intent_id"])
         ch = svc.auth_challenge(it["intent_id"])
-        assert ch["png_base64"] and ch["digest_hex"]
+        # v0.1.5: vector-first picture (one inline SVG) — never a raw <img>
+        assert ch["svg"].startswith("<svg") and ch["digest_hex"]
+        assert ch["palette"] and "star" in ch["palette"]
 
     def test_wrong_captcha_picks_refused_then_fresh_solve_ok(self, svc):
         svc.auth_create(PW); svc.mine(5)
@@ -382,7 +384,7 @@ class TestGUIv2WireContract:
                         {"intent_id": it["intent_id"]})["result"]
         # fields the animated GUI relies on:
         assert ch["expires_at"] > time.time()          # countdown ring
-        assert ch["png_base64"]                         # picture
+        assert ch["svg"].startswith("<svg")            # ONE crisp vector picture
         picks = [i for i, t in enumerate(ch["tiles"]) if t == ch["target"]]
         sol = self._call(live, "auth.solve",
                         {"challenge_id": ch["challenge_id"],

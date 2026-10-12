@@ -465,10 +465,12 @@ class PrismService:
             # GUI an absolute unix deadline so its countdown ring stays in
             # lock-step with the server (honest UX: no fake timers).
             ch["expires_at"] = int(time.time()) + self.captcha.ttl_s
-            # honest UX: the GUI renders a 3x3 tap grid over the PNG, so it
-            # needs to know WHICH cells are target tiles (the answer lives
-            # only server-side in _pending; this view is display-only and
-            # leaks nothing the user can't see by looking at the picture).
+            # vector-first since v0.1.5: the GUI composes ONE inline SVG that
+            # contains both the picture and its own tap targets, so there is
+            # never a second visual element (the old bug: <img> plus an
+            # unstyled overlay circle).  The answer key lives only server-side
+            # in _pending; tiles/target here are display-only and leak nothing
+            # a human can't see by looking at the picture itself.
             rec = self.captcha._pending.get(ch["challenge_id"])
             if rec is not None:
                 g = rec["grid"]
