@@ -65,7 +65,7 @@ Fraud patterns evolve faster than any team ships updates, so wallets learn colle
 - ❌ Sends your financial content anywhere. On-device or nothing.
 - ❌ Makes numeric claims from its own generation. That's the simulator's job.
 
-If marketing copy ever promises more than this list allows, the copy is wrong — [Governance](./Governance.md) covers how to hold us to it.
+If marketing copy ever promises more than this list allows, the copy is wrong — [Governance](Governance) covers how to hold us to it.
 
 ---
 
@@ -80,4 +80,4 @@ If marketing copy ever promises more than this list allows, the copy is wrong �
 | DP federated-update client | `prism/ai/fl_client.py` | ✅ Implemented |
 | Actual distilled LLM weights | shipped separately, signed | 🗓️ Phase 2 |
 
-**Next:** [Using the Wallet](./Using-the-Wallet.md) · [Security Model](./Security-Model.md)
+**Next:** [Using the Wallet](Using-the-Wallet) · [Security Model](Security-Model)

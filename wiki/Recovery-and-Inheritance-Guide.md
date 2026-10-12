@@ -72,4 +72,4 @@ There is no recovery path — that's what "legacy" means. The wallet warns at cr
 | Under coercion | Duress PIN → decoy wallet; stall; recovery timelock buys intervention time |
 | Planning ahead | Set dead-man switch + comfort threshold + verified contacts *today* |
 
-**Next:** [Security Model](./Security-Model.md) · [Using the Wallet](./Using-the-Wallet.md) · [FAQ](./FAQ.md)
+**Next:** [Security Model](Security-Model) · [Using the Wallet](Using-the-Wallet) · [FAQ](FAQ)

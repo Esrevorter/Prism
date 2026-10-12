@@ -1,6 +1,6 @@
 # Prism in Plain English
 
-*Ten minutes, zero jargon. If you finish this page and still have questions, the [FAQ](./FAQ.md) probably has you.*
+*Ten minutes, zero jargon. If you finish this page and still have questions, the [FAQ](FAQ) probably has you.*
 
 ---
 
@@ -26,10 +26,10 @@ Maya is a freelance designer. On Tuesday she receives client payments from three
 
 ## What Prism deliberately is *not*
 
-- **Not anonymous in the absolute sense.** It hides far more than Bitcoin does, by default and permanently. But no technology defeats a global adversary that can watch every wire *and* pressure every device; we describe our honest limits in [Security Model](./Security-Model.md) instead of pretending.
+- **Not anonymous in the absolute sense.** It hides far more than Bitcoin does, by default and permanently. But no technology defeats a global adversary that can watch every wire *and* pressure every device; we describe our honest limits in [Security Model](Security-Model) instead of pretending.
 - **Not a company coin.** No pre-mine, no token sale, no foundation-held keys, no admin switch. The supply rules are fixed in code: 21 million PRSM maximum, created only by miners over time.
 - **Not a compliance tool first.** There's no built-in blacklist enforcement and no universal surveillance key. The disclosure tools exist because *users* need them for taxes and audits — they work for you, not on you.
-- **Not finished.** Today this is the reference implementation — the engine on the test bench. See [Roadmap](./Roadmap.md) for the path to a live network.
+- **Not finished.** Today this is the reference implementation — the engine on the test bench. See [Roadmap](Roadmap) for the path to a live network.
 
 ## The name, finally
 
@@ -37,4 +37,4 @@ A prism takes white light and lets you choose which wavelengths to show. That's 
 
 ---
 
-**Keep going:** [How Privacy Works](./How-Privacy-Works.md) · [Glossary](./Glossary.md) · [FAQ](./FAQ.md)
+**Keep going:** [How Privacy Works](How-Privacy-Works) · [Glossary](Glossary) · [FAQ](FAQ)

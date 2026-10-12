@@ -127,9 +127,9 @@ Summarized from the decision log ([`spec.md` §14](https://github.com/Esrevorter
 
 - **Blocks:** dynamic size (median-last-10 scaling, soft target 2–4 MB) with oversized-block penalties keeps fee pressure off users during bursts.
 - **Fork policy:** version-bit voting over 181-block windows, ≥90-day notice, 2-week grace. `block.py`'s canonical `version_vote` encoding exists precisely so forks can't be signaled ambiguously.
-- **Privacy at scale:** decoy sampling is recency-weighted with age-bucket floors; pruned nodes deliberately *cannot* serve good decoys, which is why wallets default to full nodes ([Running a Node](./Running-a-Node.md)).
+- **Privacy at scale:** decoy sampling is recency-weighted with age-bucket floors; pruned nodes deliberately *cannot* serve good decoys, which is why wallets default to full nodes ([Running a Node](Running-a-Node)).
 - **Post-quantum:** tracked as research area R1; the layered design means the signature/ring layer can be re-instantiated without touching monetary rules.
 
 ---
 
-**Next:** [Chain Rules & Monetary Policy](./Chain-Rules-and-Monetary-Policy.md) · [Cryptography Deep Dive](./Cryptography-Deep-Dive.md) · [Testing & Quality](./Testing-&-Quality.md)
+**Next:** [Chain Rules & Monetary Policy](Chain-Rules-and-Monetary-Policy) · [Cryptography Deep Dive](Cryptography-Deep-Dive) · [Testing & Quality](Testing-&-Quality)

@@ -146,7 +146,7 @@ Five numbers worth remembering:
 | Neuro-inclusive usability study (n≥20) | 🧪 Open — external human-subjects task (cannot close in code) |
 | Independent audits & mainnet | 🗓️ Planned (Phase 4) |
 
-Full roadmap: [Wiki → Roadmap](wiki/Roadmap.md) · Technical truth source: [`spec.md`](spec.md) (v1.2, incl. Amendment A2)
+Full roadmap: [Wiki → Roadmap](https://github.com/Esrevorter/Prism/wiki/Roadmap) · Technical truth source: [`spec.md`](spec.md) (v1.2, incl. Amendment A2)
 
 ---
 
@@ -162,14 +162,14 @@ $ prism gui                         # opens the wallet in your browser
 
 Verify downloads against `SHA256SUMS`, and (since v0.1.5) every asset carries a keyless **cosign/sigstore signature** bound to this repo's GitHub Actions identity — instructions in [docs/ATTESTATION.md](docs/ATTESTATION.md).
 
-Prefer pictures and step-by-step? Follow [Wiki → Getting Started as a User](wiki/Getting-Started-as-a-User.md).
-Prefer building from source? See [Wiki → Getting Started as a Developer](wiki/Getting-Started-as-a-Developer.md) — pure Python 3.10+, **zero third-party dependencies**.
+Prefer pictures and step-by-step? Follow [Wiki → Getting Started as a User](https://github.com/Esrevorter/Prism/wiki/Getting-Started-as-a-User).
+Prefer building from source? See [Wiki → Getting Started as a Developer](https://github.com/Esrevorter/Prism/wiki/Getting-Started-as-a-Developer) — pure Python 3.10+, **zero third-party dependencies**.
 
 ---
 
 ## Privacy: what we can honestly promise
 
-We'd rather tell you the truth than oversell. Full list in [Wiki → FAQ](wiki/FAQ.md); headline version:
+We'd rather tell you the truth than oversell. Full list in [Wiki → FAQ](https://github.com/Esrevorter/Prism/wiki/FAQ); headline version:
 
 ✅ **We promise:** amounts, senders, and receivers hidden on-chain by default · no company ever holds your keys · your spend key and password never leave your machine · disclosures are scoped, expiring, and logged locally so you always know what you revealed · AI runs entirely on your hardware.
 
@@ -180,7 +180,7 @@ We'd rather tell you the truth than oversell. Full list in [Wiki → FAQ](wiki/F
 ## For developers, auditors & researchers
 
 - **Code map:** `prism/crypto` primitives · `prism/chain` consensus rules & CLI · `prism/auth` sealed key store + CAPTCHA gates (current custody model) · `prism/mpc` retired ceremony modules (unwired, historical) · `prism/zk` disclosure circuits · `prism/wallet` intents & agents · `prism/ai` fraud/simulator/federated-learning clients · `prism/l2` fee policy & payment channels (beta) · `prism/gui` + `prism/rpc` the shipped wallet
-- **Quality gates:** 511 tests incl. property tests, parsing fuzzers and testnet-parity soak run on every release build — [Wiki → Testing & Quality](wiki/Testing-&-Quality.md)
+- **Quality gates:** 511 tests incl. property tests, parsing fuzzers and testnet-parity soak run on every release build — [Wiki → Testing & Quality](https://github.com/Esrevorter/Prism/wiki/Testing-&-Quality)
 - **Design rationale:** every binding decision (D1–D5, A2) is recorded in [`spec.md` §14](spec.md)
 - **License:** MIT — read it, fork it, ship it ([LICENSE](LICENSE))
 
@@ -195,21 +195,21 @@ We'd rather tell you the truth than oversell. Full list in [Wiki → FAQ](wiki/F
 **Can a government see my balance?** Not on-chain. They can compel *you* to disclose — which is exactly why the disclosure tooling exists: you control scope, recipient, and expiry.
 **Is there a token sale?** No. Zero pre-mine, no sale, ever. Funding comes from transparent future emission only.
 
-More in the **[FAQ →](wiki/FAQ.md)**
+More in the **[FAQ →](https://github.com/Esrevorter/Prism/wiki/FAQ)**
 
 ---
 
 ## Explore the Wiki
 
-*The full documentation set lives in the [`wiki/`](https://github.com/Esrevorter/Prism/tree/main/wiki) folder — 24 pages, rendered beautifully right here on GitHub. (GitHub's separate hosted-wiki feature is disabled for this repo; `scripts/publish_wiki.py` can sync it later if ever enabled.)*
+*The full documentation set lives on the **[GitHub Wiki](https://github.com/Esrevorter/Prism/wiki)** — 24 pages, rendered and linked natively. The source of truth is the [`wiki/`](https://github.com/Esrevorter/Prism/tree/main/wiki) folder in this repo; `scripts/publish_wiki.py` syncs it to the hosted wiki (rewriting relative links for wiki-native navigation) after each docs change.*
 
 | 📘 Start here | 🧰 Use it | 🧵 Understand it | 🏗️ Build it |
 |---|---|---|---|
-| [Home](https://github.com/Esrevorter/Prism/tree/main/wiki) | [Getting Started as a User](./Getting-Started-as-a-User.md) | [How Privacy Works](./How-Privacy-Works.md) | [Architecture Overview](./Architecture.md) |
-| [Glossary](./Glossary.md) | [Using the Wallet](./Using-the-Wallet.md) | [The Prism Protocol: Selective Disclosure](./The-Prism-Protocol.md) | [Chain Rules & Monetary Policy](./Chain-Rules-and-Monetary-Policy.md) |
-| [Roadmap](./Roadmap.md) | [Recovery & Inheritance Guide](./Recovery-and-Inheritance-Guide.md) | [Security Model & Honest Limits](./Security-Model.md) | [Cryptography Deep Dive](./Cryptography-Deep-Dive.md) |
-| [FAQ](./FAQ.md) | [Fees & Payment Channels](./Fees-and-Payment-Channels.md) | [AI: What It Does & Doesn't Do](./AI-Layer-Explained.md) | [Running a Node](./Running-a-Node.md) |
-| [Governance](./Governance.md) | [Preparing a Tax Disclosure](./Preparing-a-Tax-Disclosure.md) | [Money Rules Rationale](./Monetary-Policy-Rationale.md) | [Contributing Guide](./Contributing.md) |
+| [Home](https://github.com/Esrevorter/Prism/tree/main/wiki) | [Getting Started as a User](https://github.com/Esrevorter/Prism/wiki/Getting-Started-as-a-User) | [How Privacy Works](https://github.com/Esrevorter/Prism/wiki/How-Privacy-Works) | [Architecture Overview](https://github.com/Esrevorter/Prism/wiki/Architecture) |
+| [Glossary](https://github.com/Esrevorter/Prism/wiki/Glossary) | [Using the Wallet](https://github.com/Esrevorter/Prism/wiki/Using-the-Wallet) | [The Prism Protocol: Selective Disclosure](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol) | [Chain Rules & Monetary Policy](https://github.com/Esrevorter/Prism/wiki/Chain-Rules-and-Monetary-Policy) |
+| [Roadmap](https://github.com/Esrevorter/Prism/wiki/Roadmap) | [Recovery & Inheritance Guide](https://github.com/Esrevorter/Prism/wiki/Recovery-and-Inheritance-Guide) | [Security Model & Honest Limits](https://github.com/Esrevorter/Prism/wiki/Security-Model) | [Cryptography Deep Dive](https://github.com/Esrevorter/Prism/wiki/Cryptography-Deep-Dive) |
+| [FAQ](https://github.com/Esrevorter/Prism/wiki/FAQ) | [Fees & Payment Channels](https://github.com/Esrevorter/Prism/wiki/Fees-and-Payment-Channels) | [AI: What It Does & Doesn't Do](https://github.com/Esrevorter/Prism/wiki/AI-Layer-Explained) | [Running a Node](https://github.com/Esrevorter/Prism/wiki/Running-a-Node) |
+| [Governance](https://github.com/Esrevorter/Prism/wiki/Governance) | [Preparing a Tax Disclosure](https://github.com/Esrevorter/Prism/wiki/Preparing-a-Tax-Disclosure) | [Money Rules Rationale](https://github.com/Esrevorter/Prism/wiki/Monetary-Policy-Rationale) | [Contributing Guide](https://github.com/Esrevorter/Prism/wiki/Contributing) |
 
 ---
 

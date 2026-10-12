@@ -36,7 +36,7 @@ header = height(u64) ‖ timestamp(u64) ‖ prev_hash(32) ‖ merkle_root(32)
 
 Notable fields:
 - **`im_merkle_root`** — accumulator over all spent key images; lets nodes prove "this image was never seen" cheaply.
-- **`denylist_root`** — weekly sanctioned-output accumulator root published *for reference*, never enforced by consensus (D5 design; see [Prism Protocol](./The-Prism-Protocol.md)).
+- **`denylist_root`** — weekly sanctioned-output accumulator root published *for reference*, never enforced by consensus (D5 design; see [Prism Protocol](The-Prism-Protocol)).
 - **`version.vote`** — canonical domain `{0,1}` enforced in both constructor and parser; bool/int coercion variants are rejected so parse→serialize round-trips are exact (fuzz-tested).
 
 ## Proof of work (`prism/chain/pow.py`)
@@ -54,7 +54,7 @@ Pure function of height → `(base_shards, tail_shards, miner_share, dev_fund_sh
 
 - Halving curve toward the 21M cap, then constant tail (D1).
 - Dev-fund carve-out is a fixed percentage of each reward; everything else goes to the miner.
-- Property tests assert monotonic convergence to cap, exact zero at genesis, and continuity across halving boundaries. Rationale prose lives in [Monetary Policy Rationale](./Monetary-Policy-Rationale.md).
+- Property tests assert monotonic convergence to cap, exact zero at genesis, and continuity across halving boundaries. Rationale prose lives in [Monetary Policy Rationale](Monetary-Policy-Rationale).
 
 ## Node validation rules (`prism/chain/node.py`)
 
@@ -73,8 +73,8 @@ RingCT v2 txs carry: ring inputs (members, key image, CLSAG proof), Pedersen-com
 
 ## Fork & upgrade policy
 
-Version bits voted per block; 181-window tally; upgrades activate with ≥90 days' announced notice and 2-week grace; frozen-consensus testing rig guards against bricking (E18). Circuit IDs and crypto-algorithm IDs version separately so ZK layer can rotate without hard forks ([Security Model](./Security-Model.md) E6).
+Version bits voted per block; 181-window tally; upgrades activate with ≥90 days' announced notice and 2-week grace; frozen-consensus testing rig guards against bricking (E18). Circuit IDs and crypto-algorithm IDs version separately so ZK layer can rotate without hard forks ([Security Model](Security-Model) E6).
 
 ---
 
-**Next:** [Cryptography Deep Dive](./Cryptography-Deep-Dive.md) · [Running a Node](./Running-a-Node.md) · [Testing & Quality](./Testing-&-Quality.md)
+**Next:** [Cryptography Deep Dive](Cryptography-Deep-Dive) · [Running a Node](Running-a-Node) · [Testing & Quality](Testing-&-Quality)

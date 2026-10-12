@@ -48,7 +48,7 @@ bad = tamper(proof)                      # flip bytes → must reject
 assert not bulletproof_verify(C, bad)
 ```
 
-Millisecond-cheap assertions × thousands of randomized instances catch the off-by-one universe that hand-written examples miss. Phase-1 acceptance raises stakes: the RingCT spend-to-self loop must clear ≥10⁶ iterations ([Roadmap](./Roadmap.md)).
+Millisecond-cheap assertions × thousands of randomized instances catch the off-by-one universe that hand-written examples miss. Phase-1 acceptance raises stakes: the RingCT spend-to-self loop must clear ≥10⁶ iterations ([Roadmap](Roadmap)).
 
 ## Fuzzing discipline
 
@@ -74,8 +74,8 @@ Quality metrics we publish over time: property-test iteration counts, fuzz campa
 | `wallet/`, `ai/`, `l2/` | 1 approval + tests; privacy-sensitive copy follows honest-language rules |
 | docs/wiki | 1 approval; claims must trace to spec sections or code |
 
-Security findings bypass public review: private disclosure per [Security Model](./Security-Model.md) §Bug bounty.
+Security findings bypass public review: private disclosure per [Security Model](Security-Model) §Bug bounty.
 
 ---
 
-**Next:** [Release Process](./Release-Process.md) · [Cryptography Deep Dive](./Cryptography-Deep-Dive.md) · [Contributing](./Contributing.md)
+**Next:** [Release Process](Release-Process) · [Cryptography Deep Dive](Cryptography-Deep-Dive) · [Contributing](Contributing)

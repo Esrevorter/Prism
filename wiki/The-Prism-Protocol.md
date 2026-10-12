@@ -24,7 +24,7 @@ Implemented in `prism/zk/circuits.py`; each is a versioned circuit ID (e.g. `prs
 | 4 | **Reserve/Attestation** | "I hold collateral C right now" | Merchants, escrow |
 | 5 | **Clean-Exit** | "This output will be spent only to addresses I control" | Exchange off-ramps |
 
-All operate against the **public commitment tree** — the same sealed envelopes everyone can see but nobody can open (§[How Privacy Works](./How-Privacy-Works.md)). The proof manipulates the envelopes' math directly.
+All operate against the **public commitment tree** — the same sealed envelopes everyone can see but nobody can open (§[How Privacy Works](How-Privacy-Works)). The proof manipulates the envelopes' math directly.
 
 ## Why PLONK zk-SNARKs here (Decision D2)
 
@@ -63,7 +63,7 @@ Circuit #1 needs a denylist — which immediately raises the censorship question
 
 - An elected **Prism Compliance Council** (7 seats, staggered 18-month terms, public signing policy, ≥5-of-7 signatures) signs the *official* weekly accumulator root.
 - **Parallel third-party lists remain first-class.** Proofs reference a specific root hash; verifiers choose which list(s) they accept. No single censor point exists — a council gone rogue changes only consumers who pin its roots.
-- Everything is checkable: roots publish with signatures; users can pin any list. Governance mechanics live in [Governance](./Governance.md); election/slashing rules are research area R7.
+- Everything is checkable: roots publish with signatures; users can pin any list. Governance mechanics live in [Governance](Governance); election/slashing rules are research area R7.
 
 Note what this does **not** do: the chain never *enforces* the denylist. Funds from listed sources still arrive and remain spendable; flagging is local labeling plus optional provenance proofs. Consensus validates math, never politics.
 
@@ -76,7 +76,7 @@ Note what this does **not** do: the chain never *enforces* the denylist. Funds f
 3. She sends the package to her accountant's verifier app. Proof verifies against public chain state, expires 90 days later, bound to her accountant's nonce so it can't be repurposed to a different verifier.
 4. Registry entry appears under Active disclosures with a one-line revoke-equivalent: *expires Apr 2, 2027*.
 
-Full walkthrough: [Preparing a Tax Disclosure](./Preparing-a-Tax-Disclosure.md).
+Full walkthrough: [Preparing a Tax Disclosure](Preparing-a-Tax-Disclosure).
 
 ---
 
@@ -90,4 +90,4 @@ Full walkthrough: [Preparing a Tax Disclosure](./Preparing-a-Tax-Disclosure.md).
 | Denylist accumulator | `prism/chain/denylist.py`, header field `denylist_root` |
 | Registry & scoped-key structures | wallet-side schemas, [`spec.md` §6.2](https://github.com/Esrevorter/Prism/blob/main/spec.md) |
 
-**Next:** [AI Layer Explained](./AI-Layer-Explained.md) · [Security Model](./Security-Model.md) · [Glossary](./Glossary.md)
+**Next:** [AI Layer Explained](AI-Layer-Explained) · [Security Model](Security-Model) · [Glossary](Glossary)

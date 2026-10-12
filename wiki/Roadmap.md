@@ -58,7 +58,7 @@ Phase 4 ░░░░░░░░░░░░░░░░░░░░░░░░
 2. Separate ZKP circuit audits per release.
 3. Continuous fuzzing harnesses (chain parsing, wire formats) — already running in CI.
 4. Property-test thresholds per phase (e.g., RingCT spend-loop ≥10⁶ iterations).
-5. Release pipeline blocks on failing test suites ([Testing & Quality](./Testing-&-Quality.md), [Release Process](./Release-Process.md)).
+5. Release pipeline blocks on failing test suites ([Testing & Quality](Testing-&-Quality), [Release Process](Release-Process)).
 
 ## Known open research areas (do not block delivery)
 
@@ -66,10 +66,10 @@ R1 post-quantum migration path · R2 mobile ZKP prover optimization · R3 recove
 
 ## How to follow progress
 
-- Releases are tagged `vX.Y.Z` with per-OS binaries + checksums (see [Release Process](./Release-Process.md)).
+- Releases are tagged `vX.Y.Z` with per-OS binaries + checksums (see [Release Process](Release-Process)).
 - Phase milestones land as PRs referencing spec sections; the decision log ([§14](https://github.com/Esrevorter/Prism/blob/main/spec.md)) is append-only — if a binding choice changes, it appears there first.
 - Testnet access announcements will appear in release notes; no ETA promises beyond the month ranges above.
 
 ---
 
-**Next:** [Architecture Overview](./Architecture.md) · [Governance](./Governance.md) · [Contributing](./Contributing.md)
+**Next:** [Architecture Overview](Architecture) · [Governance](Governance) · [Contributing](Contributing)

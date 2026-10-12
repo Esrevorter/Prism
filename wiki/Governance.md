@@ -29,7 +29,7 @@ The founding team also steers architecture through the **RFC/amendment process**
 The most dangerous power in any privacy coin is deciding "who's sanctioned." Prism's containment design:
 
 1. An elected **Prism Compliance Council** — 7 seats, staggered 18-month terms, public signing policy — signs the *official* weekly accumulator root with ≥5-of-7 signatures.
-2. **The chain never enforces it.** Denylist roots appear in block headers as reference data; consensus validates math, not politics. Funds from listed sources still arrive and remain spendable ([Security Model](./Security-Model.md) E17).
+2. **The chain never enforces it.** Denylist roots appear in block headers as reference data; consensus validates math, not politics. Funds from listed sources still arrive and remain spendable ([Security Model](Security-Model) E17).
 3. **Parallel lists are first-class.** Any organization may publish roots; disclosure proofs reference a specific root hash, and verifiers choose which list(s) they accept. Users/verifiers can pin any list — a rogue council changes nothing for those who don't consume its roots.
 4. **Misbehavior is checkable:** every root ships with named signatories' signatures; publication is mandatory and auditable after the fact.
 5. Election mechanics, slashing/removal rules, and detailed listing policy are research area **R7** — explicitly unfinished rather than quietly defaulted. That honesty is part of the design.
@@ -38,7 +38,7 @@ The most dangerous power in any privacy coin is deciding "who's sanctioned." Pri
 
 - Model bundles: signed, transparency-logged hashes, pinned versions; wallets refuse unsigned models (E16).
 - Federated learning: per-round opt-in, DP accounting, robust aggregation, emergency global FL pause flag in governance config (E15).
-- Model cards published per release; the anti-hallucination boundary (simulator owns numbers) is a product invariant, not a preference ([AI Layer](./AI-Layer-Explained.md)).
+- Model cards published per release; the anti-hallucination boundary (simulator owns numbers) is a product invariant, not a preference ([AI Layer](AI-Layer-Explained)).
 
 ## What governance is NOT on Prism
 
@@ -56,8 +56,8 @@ Foundation position: **privacy software, non-custodial** — no company-held key
 - Read the spec sections cited above; every governance claim maps to code paths and tests.
 - Watch the append-only decision log for new D-items and amendments.
 - Run your own node; pin your own denylist roots; compare official roots against parallel publishers.
-- Contribute or challenge via RFCs ([Contributing](./Contributing.md)).
+- Contribute or challenge via RFCs ([Contributing](Contributing)).
 
 ---
 
-**Next:** [Roadmap](./Roadmap.md) · [The Prism Protocol](./The-Prism-Protocol.md) · [FAQ](./FAQ.md)
+**Next:** [Roadmap](Roadmap) · [The Prism Protocol](The-Prism-Protocol) · [FAQ](FAQ)

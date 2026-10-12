@@ -26,6 +26,27 @@ import tempfile
 REPO = os.environ.get("PRISM_WIKI_REPO", "https://github.com/Esrevorter/Prism.wiki.git")
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "wiki")
 
+import re as _re
+
+
+def transform(text):
+    """Rewrite repo-style links so they work on GitHub's hosted wiki.
+
+    GitHub renders wiki pages itself, but relative links that were written for
+    the in-repo `wiki/` folder do not resolve there:
+      * `[text](./Page.md)`  -> `[text](Page)`   (wiki-internal link)
+      * `[text](../LICENSE)` -> absolute repo URL (wiki sits in its own repo)
+    The source of truth stays plain Markdown that renders perfectly in the repo.
+    """
+    # internal page links: ./Name.md (optionally with #anchor) -> Name(#anchor)
+    text = _re.sub(r"\]\(\./([A-Za-z0-9&;_\-\.]+?)\.md(#[^)]*)?\)",
+                   lambda m: f"]({m.group(1)}{m.group(2) or ''})", text)
+    # parent-relative repo links -> absolute URLs to the code repo
+    text = _re.sub(r"\]\(\.\./([^)#]+)(#[^)]*)?\)",
+                   lambda m: f"](https://github.com/Esrevorter/Prism/blob/main/{m.group(1)}{m.group(2) or ''})",
+                   text)
+    return text
+
 
 def _auth(url):
     tok = os.environ.get("GITHUB_TOKEN", "")
@@ -59,7 +80,10 @@ def main():
         n = 0
         for name in sorted(os.listdir(SRC)):
             if name.endswith(".md"):
-                shutil.copyfile(os.path.join(SRC, name), os.path.join(tmp, name))
+                with open(os.path.join(SRC, name), encoding="utf-8") as fh:
+                    body = fh.read()
+                with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
+                    fh.write(transform(body))
                 n += 1
         run("git", "-C", tmp, "add", "-A")
         if run("git", "-C", tmp, "status", "--porcelain").strip():
