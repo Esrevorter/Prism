@@ -65,20 +65,28 @@ def _dispatch(method: str, params: dict, svc: "PrismService | None" = None):
                                            str(p["intent_id"]),
                                            acknowledged_risk=bool(
                                                p.get("acknowledged_risk"))),
-        "mpc.ceremony_start":    lambda p: S.ceremony_start(),
-        "mpc.ceremony_status":   lambda p: S.ceremony_status(),
-        "mpc.ceremony_reset":    lambda p: S.ceremony_reset(),
-        "mpc.sign_preview":      lambda p: S.sign_preview(str(p["intent_id"])),
-        "recovery.status":       lambda p: S.recovery_status(),
-        "recovery.attach_social": lambda p: S.recovery_attach_social(),
-        "recovery.initiate":     lambda p: S.recovery_initiate(
-                                           [int(i) for i in p.get("collectors", [])],
-                                           [int(i) for i in p.get("stale_legs", [])]),
-        "recovery.cancel":       lambda p: S.recovery_cancel(
-                                           int(p["share_index"])),
-        "recovery.finalize":     lambda p: S.recovery_finalize(),
-        "recovery.advance_window": lambda p: S.recovery_advance_window(
-                                           float(p.get("hours", 73.0))),
+        # ---- lean auth (spec §9, Amendment A2-2026-10) ----
+        # One password-sealed key + a per-payment image CAPTCHA. The former
+        # mpc.* ceremony / recovery.* endpoints are retired.
+        "auth.status":           lambda p: S.auth_status(),
+        "auth.create":           lambda p: S.auth_create(str(p["password"])),
+        "auth.unlock":           lambda p: S.auth_unlock(str(p["password"])),
+        "auth.lock":             lambda p: S.auth_lock(),
+        "auth.recover":          lambda p: S.auth_recover(
+                                           str(p["phrase"]),
+                                           str(p["new_password"])),
+        "auth.change_password":  lambda p: S.auth_change_password(
+                                           str(p["old"]), str(p["new"])),
+        "auth.challenge":        lambda p: S.auth_challenge(str(p["intent_id"])),
+        "auth.solve":            lambda p: S.auth_solve(
+                                           str(p["challenge_id"]),
+                                           [int(i) for i in p.get("picks", [])],
+                                           str(p["digest_hex"])),
+        "auth.sign":             lambda p: S.auth_sign(
+                                           str(p["intent_id"]),
+                                           str(p["password"]),
+                                           p["token"]),
+        "auth.history":          lambda p: S.auth_history(),
         "agent.grant_create":    lambda p: S.grant_create(
                                            days=int(p.get("days", 30)),
                                            per_action_prsm=float(p.get(

@@ -19,9 +19,15 @@ Methods (v0):
     intent.answer          -> fold a clarification-chip answer into a draft
     intent.simulate        -> plain-language simulation preview of a draft
     intent.confirm         -> mark confirmed; returns signed-pending envelope
-    mpc.ceremony_start     -> run 2-of-3 Solo keygen ceremony for a wallet
-    mpc.ceremony_status    -> poll ceremony progress (staged, async-safe)
-    mpc.sign_preview       -> threshold-sign a confirmation hash
+    auth.status            -> {has_wallet, unlocked, address, ...} (spec §9 A2)
+    auth.create            -> password-seal a new spend key; returns 12-word phrase once
+    auth.unlock / lock     -> open/close the sealed key in memory
+    auth.recover           -> restore from the 12-word phrase (address-invariant)
+    auth.change_password   -> re-seal the same key under a new password
+    auth.challenge         -> image CAPTCHA bound to a confirmed intent digest
+    auth.solve             -> submit grid picks -> single-use signing token
+    auth.sign              -> token + password -> signed, mined payment (only path that moves money)
+    auth.history           -> recently signed transactions for the GUI ledger view
 
 Security posture for local dev: binds 127.0.0.1 only, no auth (the GUI is
 a same-machine loopback client); CORS restricted to localhost origins.

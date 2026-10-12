@@ -3,112 +3,273 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prism — Wallet</title>
+<title>Prism — your money, plainly</title>
 <link rel="stylesheet" href="/static/theme.css">
 </head>
-<body data-theme="light">
-<header class="topbar">
-  <div class="brand"><span class="prism-mark" aria-hidden="true"></span><strong>Prism</strong></div>
-  <div class="status" id="net-status" role="status" aria-live="polite">connecting…</div>
-  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">◐</button>
+<body data-theme="dark">
+
+<!-- Ambient aurora background (pure CSS, GPU-composited) -->
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<header class="topbar glass">
+  <div class="brand">
+    <span class="prism-mark" aria-hidden="true"></span>
+    <strong>Prism</strong>
+    <button class="help-dot" data-help="what-is-prism" aria-label="What is Prism?">?</button>
+  </div>
+  <div class="status pill" id="net-status" role="status" aria-live="polite">connecting…</div>
+  <div class="top-actions">
+    <button class="icon-btn" id="lock-btn" title="Lock my wallet" hidden>🔒 <span>Lock</span></button>
+    <button class="icon-btn theme-toggle" id="theme-toggle" aria-label="Toggle light/dark mode">◐</button>
+  </div>
 </header>
 
 <main>
-  <!-- Balance hero: the first thing a nervous first-time user should see -->
-  <section class="card balance-card" aria-labelledby="bal-h">
-    <h2 id="bal-h">Your balance</h2>
-    <p class="big-number" id="balance">—</p>
-    <p class="muted" id="balance-note">Waiting for your node…</p>
-    <div class="row">
-      <button class="btn secondary" id="faucet-btn" title="Devnet only: mine 5 blocks and credit the wallet">
-        Get test PRSM (mine 5 blocks)
-      </button>
-      <button class="btn secondary" id="ceremony-btn">Set up device keys</button>
-    </div>
-    <p class="muted" id="ceremony-status" aria-live="polite"></p>
-  </section>
 
-  <!-- NL intent bar: the key differentiator. Plain words in, plain review out. -->
-  <section class="card" aria-labelledby="nl-h">
-    <h2 id="nl-h">What would you like to do?</h2>
-    <form id="intent-form" autocomplete="off">
-      <input id="utterance" type="text" placeholder="e.g. send 2 PRSM to Alex"
-             aria-label="Describe your payment in plain words" autofocus>
-      <button class="btn primary" type="submit">Review</button>
-    </form>
-    <div id="chips" class="chips" hidden></div>
-  </section>
-
-  <!-- Review / simulation card: server-provided human language only -->
-  <section class="card" id="review" hidden aria-labelledby="rev-h">
-    <h2 id="rev-h">Here's what will happen</h2>
-    <div id="fraud-banner" class="risk-banner" role="alert" hidden></div>
-    <div id="review-body"></div>
-    <div class="row">
-      <button class="btn danger" id="cancel-btn">Cancel</button>
-      <button class="btn secondary" id="sleep-btn" hidden>Sleep on it — I'll come back</button>
-      <button class="btn primary" id="confirm-btn">Looks right — confirm</button>
+  <!-- ═══ WELCOME / FIRST-RUN HERO ═══ -->
+  <section class="hero screen" id="screen-welcome" hidden>
+    <div class="hero-inner rise">
+      <h1>Your money,<br><em>in plain sight.</em></h1>
+      <p class="lede">Prism speaks human. Type what you want to do — “send 2 PRSM to Alex” —
+         review it in plain words, prove you're there with a three-second picture check,
+         and sign with your password. No device jargon. Ever.</p>
+      <button class="btn primary xl pulse-glow" id="start-btn">Create my wallet — takes under a minute</button>
+      <button class="btn ghost" id="restore-btn">I have a 12-word recovery phrase</button>
+      <ul class="hero-points stagger">
+        <li>🔑 <b>One password.</b> Your key never leaves this computer.</li>
+        <li>🖼️ <b>One picture check per payment.</b> Bots can't click for you.</li>
+        <li>🧘 <b>No pressure.</b> Prism pauses risky moves and explains why.</li>
+      </ul>
     </div>
   </section>
 
-  <!-- Device keys (MPC ceremony): share-handling UX, plain words only -->
-  <section class="card" id="devices-card" hidden aria-labelledby="dev-h">
-    <h2 id="dev-h">Your device keys</h2>
-    <p class="muted" id="devices-human" aria-live="polite"></p>
-    <ul id="devices" class="device-list"></ul>
-    <details class="share-help">
-      <summary>Why can't I see my key shares?</summary>
-      <p id="share-help-body" class="muted"></p>
+  <!-- ═══ WALLET SETUP ═══ -->
+  <section class="screen" id="screen-create" hidden>
+    <div class="card glass form-card flip-in">
+      <h2>Choose a password</h2>
+      <p class="muted">It seals your spending key on this machine. Prism stores no copy —
+        <button class="help-dot" data-help="why-password" aria-label="Why a password?">?</button></p>
+      <form id="create-form" autocomplete="off">
+        <div class="pw-wrap">
+          <input id="pw1" type="password" placeholder="A password you'll actually remember" required minlength="10" aria-label="Password">
+          <button type="button" class="icon-btn peek" data-for="pw1" aria-label="Show password">👁</button>
+        </div>
+        <div class="strength" aria-hidden="true"><i id="pw-meter"></i></div>
+        <p class="hint" id="pw-hint">At least 10 characters. Longer beats complicated.</p>
+        <input id="pw2" type="password" placeholder="Type it once more" required aria-label="Repeat password">
+        <div class="row end">
+          <button class="btn primary" type="submit">Seal my key</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ═══ RECOVERY PHRASE (one-time, paper) ═══ -->
+  <section class="screen" id="screen-phrase" hidden>
+    <div class="card glass form-card flip-in">
+      <h2>Write these twelve words on paper</h2>
+      <div class="warn-strip">⚠️ This is shown <b>once</b>. It's the only way back in if you forget
+        your password — Prism cannot restore it for you. Keep the paper somewhere safe, offline.
+        <button class="help-dot" data-help="why-words" aria-label="Why twelve words?">?</button></div>
+      <ol class="word-grid stagger" id="word-grid"></ol>
+      <label class="check"><input type="checkbox" id="wrote-it"> I've written them down</label>
+      <div class="row end">
+        <button class="btn primary" id="phrase-done-btn" disabled>My wallet is ready →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ RESTORE ═══ -->
+  <section class="screen" id="screen-restore" hidden>
+    <div class="card glass form-card flip-in">
+      <h2>Welcome back</h2>
+      <p class="muted">Enter your twelve words and pick a new password. Same wallet, same address, same balance.</p>
+      <form id="restore-form" autocomplete="off">
+        <textarea id="phrase-in" rows="3" placeholder="twelve words, separated by spaces" required></textarea>
+        <input id="rpw" type="password" placeholder="New password (min 10 chars)" required minlength="10">
+        <div class="row end">
+          <button class="btn ghost" type="button" id="restore-cancel">Cancel</button>
+          <button class="btn primary" type="submit">Restore my wallet</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ═══ UNLOCK ═══ -->
+  <section class="screen" id="screen-unlock" hidden>
+    <div class="card glass form-card flip-in narrow">
+      <h2>Unlock your wallet</h2>
+      <form id="unlock-form" autocomplete="off">
+        <input id="upw" type="password" placeholder="Your password" required autofocus aria-label="Password">
+        <p class="hint" id="unlock-note">Nothing can be signed until you unlock.
+          <button class="help-dot" data-help="locked" aria-label="Why locked?">?</button></p>
+        <div class="row end">
+          <button class="btn ghost" type="button" id="forgot-btn">I forgot it — use my 12 words</button>
+          <button class="btn primary" type="submit">Unlock</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ═══ APP ═══ -->
+  <section class="app-grid" id="screen-app" hidden>
+
+    <div class="card glass balance-card pop">
+      <div class="bal-head">
+        <h2>Balance <button class="help-dot" data-help="balance" aria-label="About the balance">?</button></h2>
+        <span class="chip devnet">devnet</span>
+      </div>
+      <p class="big-number count-up" id="balance">—</p>
+      <p class="muted mono" id="my-address" title="Your receiving address"></p>
+      <div class="row">
+        <button class="btn secondary sm" id="faucet-btn">Get test PRSM</button>
+        <button class="btn ghost sm" id="copy-addr-btn">Copy address</button>
+      </div>
+      <details class="ctx-help"><summary>Where does this money live?</summary>
+        <p>Your key is sealed on <b>this computer only</b>; the balance is tracked on your local
+        Prism devnet. Every spend needs your password plus a fresh picture check.</p></details>
+    </div>
+
+    <div class="card glass nl-card pop">
+      <h2>What would you like to do? <button class="help-dot" data-help="nl-bar" aria-label="About plain words">?</button></h2>
+      <form id="intent-form" autocomplete="off">
+        <div class="nl-wrap">
+          <input id="utterance" type="text" placeholder="e.g. send 2 PRSM to Alex"
+                 aria-label="Describe your payment in plain words" autofocus>
+          <button class="btn primary" type="submit">Review →</button>
+        </div>
+      </form>
+      <div class="suggest-row" id="suggest-row">
+        <button class="chip suggest" data-say="send 2 PRSM to Alex">send 2 PRSM to Alex</button>
+        <button class="chip suggest" data-say="pay mom $20">pay mom $20</button>
+        <button class="chip suggest" data-say="send 1 PRSM to Dana">send 1 PRSM to Dana</button>
+      </div>
+      <div id="chips" class="chips" hidden></div>
+    </div>
+
+    <!-- staged payment flow: Review → Picture check → Password → Receipt -->
+    <div class="stepper" id="stepper" hidden aria-hidden="false">
+      <span class="step done">✓ Reviewed</span><i class="bar"></i>
+      <span class="step" data-i="1">Picture check</span><i class="bar"></i>
+      <span class="step" data-i="2">Password</span><i class="bar"></i>
+      <span class="step" data-i="3">Sent</span>
+    </div>
+
+    <section class="card glass review-card" id="review" hidden aria-labelledby="rev-h">
+      <h2 id="rev-h">Here's what will happen</h2>
+      <div id="fraud-banner" class="risk-banner" role="alert" hidden></div>
+      <div id="review-body" class="skeleton-host"></div>
+      <div class="row spread">
+        <button class="btn ghost" id="cancel-btn">Never mind</button>
+        <div class="row">
+          <button class="btn secondary" id="sleep-btn" hidden>Sleep on it — I'll come back</button>
+          <button class="btn primary" id="confirm-btn">Looks right — continue</button>
+        </div>
+      </div>
+      <details class="ctx-help"><summary>Why do I see this page?</summary>
+        <p>Prism re-states your instruction in literal terms and runs a fraud simulation first.
+        What you approve here is cryptographically fingerprinted — the preview digest is exactly
+        what gets signed later. Nothing is sent yet.</p></details>
+    </section>
+
+    <!-- CAPTCHA stage -->
+    <section class="card glass captcha-card" id="captcha-stage" hidden>
+      <h2>Prove you're here <button class="help-dot" data-help="captcha" aria-label="Why a picture check?">?</button></h2>
+      <p class="captcha-prompt" id="cap-prompt">…</p>
+      <div class="cap-frame" id="cap-frame">
+        <img id="cap-img" alt="Puzzle image: nine tiles" draggable="false">
+        <svg class="ring" viewBox="0 0 44 44" aria-hidden="true">
+          <circle class="ring-bg" cx="22" cy="22" r="20"/>
+          <circle class="ring-fg" id="cap-ring" cx="22" cy="22" r="20"/>
+        </svg>
+      </div>
+      <div class="tap-grid" id="cap-taps"><!-- 9 tap buttons overlaid via CSS grid --></div>
+      <p class="hint" id="cap-hint">Tap every tile that matches, then continue. Takes about three seconds.</p>
+      <div class="row spread">
+        <button class="btn ghost" id="cap-refresh" title="A fresh picture">↻ New picture</button>
+        <button class="btn primary" id="cap-next" disabled>That's all of them →</button>
+      </div>
+      <div class="burst" id="cap-burst" hidden>✓ You're human — verified</div>
+    </section>
+
+    <!-- password-to-sign stage -->
+    <section class="card glass sign-card" id="sign-stage" hidden>
+      <h2>Last step: sign with your password</h2>
+      <p class="muted">Your password unlocks the key just long enough to sign <b>this exact payment</b>.
+        <button class="help-dot" data-help="signing" aria-label="How signing works">?</button></p>
+      <form id="sign-form" autocomplete="off">
+        <input id="spw" type="password" placeholder="Your password" required aria-label="Signing password">
+        <div class="row end">
+          <button class="btn ghost" type="button" id="sign-back">Back</button>
+          <button class="btn primary glow" type="submit">Sign &amp; send</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- receipt -->
+    <section class="card glass receipt-card" id="receipt" hidden>
+      <div class="confetti" id="confetti" aria-hidden="true"></div>
+      <div class="receipt-check pop">✓</div>
+      <h2>Sent.</h2>
+      <p class="mono big" id="receipt-line">—</p>
+      <p class="muted mono" id="receipt-detail"></p>
+      <div class="row center">
+        <button class="btn primary" id="receipt-done">Done</button>
+        <button class="btn ghost" id="receipt-another">Make another payment</button>
+      </div>
+    </section>
+
+    <!-- activity -->
+    <section class="card glass" id="activity-card" hidden>
+      <h2>Recent activity</h2>
+      <ul class="activity-list" id="activity"></ul>
+    </section>
+
+    <!-- plans -->
+    <section class="card glass" id="plans-card" hidden>
+      <h2>Your standing plans <button class="help-dot" data-help="plans" aria-label="About plans">?</button></h2>
+      <p class="muted" id="plans-human" aria-live="polite"></p>
+      <div id="pending-digests"></div>
+      <form id="plan-form" class="row">
+        <input id="plan-utterance" placeholder="e.g. buy $50 of PRSM every week"
+               aria-label="Plan in plain words" required>
+        <button class="btn primary" type="submit">Create plan</button>
+      </form>
+      <details class="ctx-help"><summary>How do these plans work?</summary>
+        <p>A plan is something you allowed once, like “buy a little PRSM each week”. Before anything
+        runs, you get 24 hours to change your mind — nothing happens silently. Stopping a plan cancels
+        everything waiting under it, and history keeps a record so nothing disappears.</p></details>
+    </section>
+
+    <!-- contacts -->
+    <section class="card glass" id="contacts-card">
+      <h2>People you can pay</h2>
+      <ul id="contacts" class="contacts stagger"></ul>
+      <form id="contact-form" class="row">
+        <input id="ct-name" placeholder="Name" aria-label="Contact name" required>
+        <input id="ct-addr" placeholder="prsm1…" aria-label="Contact address" required>
+        <button class="btn secondary" type="submit">Add</button>
+      </form>
+    </section>
+
+    <details class="node-panel glass">
+      <summary>Node details (advanced)</summary>
+      <pre id="chain-info"></pre>
     </details>
-    <div class="row">
-      <button class="btn secondary" id="ceremony-redo-btn">Start over (reshare)</button>
-    </div>
   </section>
 
-  <!-- Recovery (Phase 3 GA): social recovery status, veto, and restore flow -->
-  <section class="card" id="recovery-card" hidden aria-labelledby="rec-h">
-    <h2 id="rec-h">Recovery &amp; safety</h2>
-    <p class="muted" id="recovery-human" aria-live="polite"></p>
-    <ul id="recovery-facts" class="device-list"></ul>
-    <div class="row" id="recovery-actions"></div>
-  </section>
-
-  <!-- Plans (agent runtime): pending digest, one-tap veto/revoke, plain words only -->
-  <section class="card" id="plans-card" hidden aria-labelledby="plans-h">
-    <h2 id="plans-h">Your standing plans</h2>
-    <p class="muted" id="plans-human" aria-live="polite"></p>
-    <ul id="plans-list" class="plan-list"></ul>
-    <div id="pending-digests"></div>
-    <form id="plan-form" class="row">
-      <input id="plan-utterance" placeholder="e.g. buy $50 of PRSM every week"
-             aria-label="Plan in plain words" required>
-      <button class="btn primary" type="submit">Create plan</button>
-    </form>
-    <details class="plan-help">
-      <summary>How do these plans work?</summary>
-      <p class="muted">A plan is something you allowed once, like "buy a little PRSM each week". Before anything runs, you get 24 hours to change your mind — nothing happens silently. Stopping a plan cancels everything waiting under it, and history keeps a record so nothing disappears.</p>
-    </details>
-  </section>
-
-  <!-- Contacts -->
-  <section class="card" aria-labelledby="ct-h">
-    <h2 id="ct-h">People you can pay</h2>
-    <ul id="contacts" class="contacts"></ul>
-    <form id="contact-form" class="row">
-      <input id="ct-name" placeholder="Name" aria-label="Contact name" required>
-      <input id="ct-addr" placeholder="prsm1…" aria-label="Contact address" required>
-      <button class="btn secondary" type="submit">Add</button>
-    </form>
-  </section>
-
-  <!-- Node panel (collapsible; never front-and-center for non-technical users) -->
-  <details class="node-panel">
-    <summary>Node details (advanced)</summary>
-    <pre id="chain-info"></pre>
-  </details>
+  <!-- global toast + status line -->
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </main>
 
-<footer class="muted">Local devnet · Refraction params · virtual block cadence until wall-clock deployment</footer>
+<footer class="muted">Local devnet · Refraction params · one password, one picture check, zero jargon</footer>
+
+<!-- ═══ context-help modal library (all copy server-approved / spec-derived) ═══ -->
+<dialog id="help-modal" class="glass help-modal">
+  <h3 id="help-title"></h3>
+  <div id="help-body"></div>
+  <form method="dialog"><button class="btn primary">Got it</button></form>
+</dialog>
 <script src="/static/app.js"></script>
 </body>
 </html>

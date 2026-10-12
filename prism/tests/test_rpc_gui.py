@@ -15,6 +15,22 @@ import pytest
 from prism.rpc.service import PrismService
 from prism.rpc import server as rpc_server
 
+PW = "correct horse battery staple 42!"   # devnet test password (>= policy len)
+
+
+def _full_auth_sign(svc: PrismService, intent_id: str) -> dict:
+    """Drive the exact GUI happy path for one payment: CAPTCHA challenge ->
+    honest client-side solve (read the grid spec from the engine's pending
+    record, like a screen-reader test harness would) -> token -> password
+    sign. Returns auth_sign's result."""
+    ch = svc.auth_challenge(intent_id)
+    digest = ch["digest_hex"]
+    rec = svc.captcha._pending[ch["challenge_id"]]
+    tiles, target = rec["grid"]["tiles"], rec["grid"]["target"]
+    picks = [i for i, s in enumerate(tiles) if s == target]
+    solved = svc.auth_solve(ch["challenge_id"], picks, digest)
+    return svc.auth_sign(intent_id, PW, solved["token"])
+
 
 @pytest.fixture()
 def svc():
@@ -41,14 +57,14 @@ class TestChainFaucet:
 
 class TestIntentFlow:
     def test_clear_utterance_reaches_confirm_and_signs(self, svc):
-        svc.ceremony_start()
+        svc.auth_create(PW)
+        svc.mine(5)
         it = svc.intent_compile("send 2 PRSM to Alex")
         assert it["status"] == "awaiting_confirm"
         done = svc.intent_confirm(it["intent_id"])
         assert "canonical_digest_hex" in done["confirmation_envelope"]
-        signed = svc.sign_preview(it["intent_id"])
-        assert all(q["verifies"] for q in signed["quorums"].values())
-        assert len(signed["quorums"]) == 3      # every 2-of-3 quorum works
+        signed = _full_auth_sign(svc, it["intent_id"])
+        assert signed["ok"] and signed["height"] > 0
 
     def test_vague_utterance_gets_chips_then_resolves(self, svc):
         d = svc.intent_compile("pay mom")
@@ -140,39 +156,90 @@ class TestChainBlocks:
                               "tx_count"}
 
 
-class TestCeremonyDevicesReset:
-    def test_status_lists_three_device_share_cards(self, svc):
-        st = svc.ceremony_start()
-        assert st["status"] == "complete"
-        devs = st["devices"]
-        assert [d["label"] for d in devs] == ["Phone", "Laptop", "Backup card"]
-        fps = {d["share_fingerprint"] for d in devs}
-        assert len(fps) == 3                          # each device holds a piece
-        assert all(d["verified_against_commitments"] for d in devs)
-        assert "share_handling" in st                 # never-show-shares UX text
-        assert "human" in st
+class TestLeanAuth:
+    """RPC-level pins for the lean auth stack (spec §9, Amendment A2-2026-10)."""
 
-    def test_reset_returns_to_idle_and_sign_refused(self, svc):
-        svc.ceremony_start()
-        r = svc.ceremony_reset()
-        assert r["status"] == "idle" and r["percent"] == 0
-        assert "devices" not in r
-        it = svc.intent_compile("send 2 PRSM to Alex")
-        with pytest.raises(ValueError, match="mpc.ceremony_start"):
-            svc.sign_preview(it["intent_id"])
+    def test_status_without_wallet(self, svc):
+        st = svc.auth_status()
+        assert st["exists"] is False and st["unlocked"] is False
+        assert "Create one" in st["human"]
 
+    def test_create_returns_phrase_once_and_keeps_address_stable(self, svc):
+        r = svc.auth_create(PW)
+        assert len(r["recovery_phrase"].split()) == 12
+        addr = r["address"]
+        assert svc.auth_status()["address"] == addr      # same across calls
+        with pytest.raises(ValueError):                  # no silent overwrite
+            svc.auth_create(PW)
 
-class TestCeremony:
-    def test_staged_progress_and_pk(self, svc):
-        st = svc.ceremony_start()
-        assert st["status"] == "complete" and st["percent"] == 100
-        assert len(bytes.fromhex(st["joint_pk_hex"])) == 32
+    def test_challenge_requires_confirmed_intent(self, svc):
+        svc.auth_create(PW)
+        it = svc.intent_compile("send 1 PRSM to Alex")
+        with pytest.raises(ValueError, match="not ready to sign"):
+            svc.auth_challenge(it["intent_id"])          # awaiting_confirm
+        svc.intent_confirm(it["intent_id"])
+        ch = svc.auth_challenge(it["intent_id"])
+        assert ch["png_base64"] and ch["digest_hex"]
 
-    def test_sign_without_ceremony_refused(self, svc):
+    def test_wrong_captcha_picks_refused_then_fresh_solve_ok(self, svc):
+        svc.auth_create(PW); svc.mine(5)
         it = svc.intent_compile("send 1 PRSM to Alex")
         svc.intent_confirm(it["intent_id"])
+        ch = svc.auth_challenge(it["intent_id"])
         with pytest.raises(ValueError):
-            svc.sign_preview(it["intent_id"])
+            svc.auth_solve(ch["challenge_id"], [0], ch["digest_hex"])
+        r = _full_auth_sign(svc, it["intent_id"])        # new challenge path
+        assert r["ok"]
+
+    def test_token_replay_refused(self, svc):
+        svc.auth_create(PW); svc.mine(5)
+        it = svc.intent_compile("send 1 PRSM to Alex")
+        svc.intent_confirm(it["intent_id"])
+        ch = svc.auth_challenge(it["intent_id"])
+        rec = svc.captcha._pending[ch["challenge_id"]]
+        picks = [i for i, s in enumerate(rec["grid"]["tiles"])
+                 if s == rec["grid"]["target"]]
+        solved = svc.auth_solve(ch["challenge_id"], picks, ch["digest_hex"])
+        assert svc.auth_sign(it["intent_id"], PW, solved["token"])["ok"]
+        it2 = svc.intent_compile("send 1 PRSM to Alex")
+        svc.intent_confirm(it2["intent_id"])
+        with pytest.raises(ValueError, match="expired or does not match"):
+            svc.auth_sign(it2["intent_id"], PW, solved["token"])
+
+    def test_sign_without_password_refused(self, svc):
+        svc.auth_create(PW); svc.mine(5)
+        it = svc.intent_compile("send 1 PRSM to Alex")
+        svc.intent_confirm(it["intent_id"])
+        ch = svc.auth_challenge(it["intent_id"])
+        rec = svc.captcha._pending[ch["challenge_id"]]
+        picks = [i for i, s in enumerate(rec["grid"]["tiles"])
+                 if s == rec["grid"]["target"]]
+        tok = svc.auth_solve(ch["challenge_id"], picks, ch["digest_hex"])["token"]
+        with pytest.raises(ValueError):
+            svc.auth_sign(it["intent_id"], "totally wrong password 1!", tok)
+
+    def test_recovery_restores_same_address(self, svc):
+        created = svc.auth_create(PW)
+        phrase, addr = created["recovery_phrase"], created["address"]
+        fresh = PrismService()
+        r = fresh.auth_recover(phrase, PW)
+        assert r["address"] == addr
+
+    def test_change_password_keeps_key(self, svc):
+        addr = svc.auth_create(PW)["address"]
+        pw2 = "brand new passphrase 99#"
+        svc.auth_change_password(PW, pw2)
+        assert svc.auth_unlock(pw2)["address"] == addr
+        with pytest.raises(ValueError):
+            svc.auth_unlock(PW)
+
+    def test_history_lists_signed_tx(self, svc):
+        svc.auth_create(PW); svc.mine(5)
+        it = svc.intent_compile("send 2 PRSM to Alex")
+        svc.intent_confirm(it["intent_id"])
+        _full_auth_sign(svc, it["intent_id"])
+        h = svc.auth_history()
+        assert h["count"] == 1 and h["txs"][0]["amount_prsm"] in ("2", "2.0")
 
 
 class TestContacts:
@@ -211,15 +278,31 @@ class TestRPCOverHTTP:
         with urllib.request.urlopen(live + "/health", timeout=5) as r:
             assert json.loads(r.read())["status"] == "ok"
         assert self._call(live, "chain.mine", {"count": 2})["result"]["mined"] == 2
-        assert self._call(live, "mpc.ceremony_start")["result"]["status"] == "complete"
+        st = self._call(live, "auth.status")["result"]
+        assert st["exists"] is False
+        made = self._call(live, "auth.create", {"password": PW})["result"]
+        assert len(made["recovery_phrase"].split()) == 12
+        assert self._call(live, "chain.mine", {"count": 5})["result"]["mined"] == 5
         it = self._call(live, "intent.compile",
                         {"utterance": "send 1 PRSM to Alex"})["result"]
         conf = self._call(live, "intent.confirm",
                           {"intent_id": it["intent_id"]})["result"]
         assert conf["confirmation_envelope"]["canonical_digest_hex"]
-        signed = self._call(live, "mpc.sign_preview",
-                            {"intent_id": it["intent_id"]})["result"]
-        assert "2 of your 3 devices" in signed["human"]
+        ch = self._call(live, "auth.challenge",
+                        {"intent_id": it["intent_id"]})["result"]
+        svc_live = rpc_server.SERVICE
+        rec = svc_live.captcha._pending[ch["challenge_id"]]
+        picks = [i for i, s in enumerate(rec["grid"]["tiles"])
+                 if s == rec["grid"]["target"]]
+        tok = self._call(live, "auth.solve", {"challenge_id": ch["challenge_id"],
+                                              "picks": picks,
+                                              "digest_hex": ch["digest_hex"]})["result"]
+        signed = self._call(live, "auth.sign", {"intent_id": it["intent_id"],
+                                                "password": PW,
+                                                "token": tok["token"]})["result"]
+        assert signed["ok"] and "Sent" in signed["human"]
+        hist = self._call(live, "auth.history")["result"]
+        assert hist["count"] == 1
 
     def test_method_not_found_wire_format(self, live):
         resp = self._call(live, "bogus.method")
@@ -368,160 +451,3 @@ class TestAgentRuntime:
         assert svc.agent_pending()["count"] == 0
         after = svc.agent_propose("Buy $10 of PRSM to My DCA pot", grant_id=gid)
         assert after.get("refused") is True      # revoked plan never resumes
-
-
-class TestRecovery:
-    """Phase-3 GA social-recovery RPC surface (spec §7.3 / E9 / D4).
-
-    State-machine internals are pinned in test_mpc.py; here we pin the
-    service-level flows the GUI drives: arm-on-ceremony, initiate/veto/
-    finalize/cancel, cooldown enforcement, honest-UX copy, and the JSON-RPC
-    wire contract for every recovery.* method.
-    """
-
-    def _solo(self, svc):
-        svc.ceremony_start()
-        return svc.recovery_status()
-
-    def test_solo_ceremony_arms_recovery_state(self, svc):
-        st = self._solo(svc)
-        assert st["phase"] == "active"
-        assert st["quorum"] == 2                    # 2-of-3 device legs
-        assert st["timelock_hours"] == 72           # E9 window
-        assert st["cooldown_days"] == 30
-
-    def test_status_without_ceremony_refused(self, svc):
-        with pytest.raises(ValueError):
-            svc.recovery_status()
-
-    def test_initiate_requires_exact_quorum(self, svc):
-        self._solo(svc)
-        with pytest.raises(ValueError):
-            svc.recovery_initiate([1, 2, 3], [3])   # solo quorum is 2
-
-    def test_pending_window_veto_then_restart(self, svc):
-        self._solo(svc)
-        r = svc.recovery_initiate([1, 2], [3])
-        assert r["ok"] and r["veto_legs_armed"] == 1
-        assert svc.recovery_status()["phase"] == "pending"
-        c = svc.recovery_cancel(3)                  # stale leg exercises veto
-        assert c["phase"] == "cancelled"
-        assert "cancelled by one of your devices" in c["human"]
-        # a cancelled machine can be re-armed (no cooldown from cancellation)
-        r2 = svc.recovery_initiate([1, 2], [3])
-        assert r2["ok"]
-
-    def test_cancel_with_unknown_share_refused(self, svc):
-        self._solo(svc)
-        svc.recovery_initiate([1, 2], [3])
-        with pytest.raises(PermissionError):
-            svc.recovery_cancel(99)
-
-    def test_finalize_blocked_until_timelock_elapsed(self, svc):
-        self._solo(svc)
-        svc.recovery_initiate([1, 2], [3])
-        with pytest.raises(RuntimeError, match="timelock not expired"):
-            svc.recovery_finalize()
-
-    def test_advance_window_guarded(self, svc):
-        self._solo(svc)
-        # devnet helper refuses to fast-forward when nothing is pending
-        with pytest.raises(RuntimeError):
-            svc.recovery_advance_window()
-        svc.recovery_initiate([1, 2], [3])
-        a = svc.recovery_advance_window(hours=1)    # under-window request
-        assert a["window_remaining_s"] == 0         # clamped to full 72 h + 1
-
-    def test_full_flow_finalize_reshares_and_cooldown(self, svc):
-        self._solo(svc)
-        old_pk = svc.recovery_status()              # sanity: readable
-        assert old_pk["phase"] == "active"
-        svc.recovery_initiate([1, 2], [3])
-        svc.recovery_advance_window()
-        f = svc.recovery_finalize()
-        assert f["phase"] == "active" and f["generation"] == 1
-        assert sorted(f["reshared_legs"]) == [1, 2, 3]  # ALL live legs rotated
-        st = svc.recovery_status()
-        assert st["cooldown_remaining_s"] > 0
-        # post-recovery cooldown blocks a second recovery (E9 anti-harassment)
-        with pytest.raises(RuntimeError, match="cooldown"):
-            svc.recovery_initiate([1, 2], [3])
-
-    def test_attach_social_upgrade_changes_address_honestly(self, svc):
-        self._solo(svc)
-        up = svc.recovery_attach_social()
-        assert up["scheme"].startswith("3-of-5 Social")
-        # honest-UX: a fresh ceremony means a NEW receiving address — the
-        # response must say so rather than pretend the old key gained friends
-        assert up["address_changed"] is True
-        assert up["old_joint_pk_hex"] != up["new_joint_pk_hex"]
-        assert "NEW receiving address" in up["human"]
-        st = svc.recovery_status()
-        assert st["quorum"] == 3 and st["legs"] == 5
-
-    def test_social_flow_contact_veto_and_finalize(self, svc):
-        self._solo(svc)
-        svc.recovery_attach_social()
-        svc.recovery_initiate([2, 3, 4], [5])       # collectors incl. contacts
-        assert svc.recovery_status()["veto_legs_armed"] == 1
-        svc.recovery_advance_window()
-        f = svc.recovery_finalize()
-        assert f["phase"] == "active"
-        assert sorted(f["reshared_legs"]) == [1, 2, 3, 4, 5]
-
-    def test_full_quorum_loss_refused_out_of_scope(self, svc):
-        self._solo(svc)
-        with pytest.raises(ValueError, match="out of scope"):
-            svc.recovery_initiate([1, 2], [])       # no live leg => no veto
-
-
-class TestRecoveryOverHTTP:
-    """recovery.* methods through the real JSON-RPC wire contract."""
-
-    @pytest.fixture()
-    def live(self, monkeypatch):
-        monkeypatch.setattr(rpc_server, "SERVICE", PrismService())
-        httpd = rpc_server.ThreadingHTTPServer(("127.0.0.1", 0),
-                                               rpc_server.RPCRequestHandler)
-        th = threading.Thread(target=httpd.serve_forever, daemon=True)
-        th.start()
-        yield f"http://127.0.0.1:{httpd.server_address[1]}"
-        httpd.shutdown()
-        th.join(timeout=2)
-
-    def _call(self, base, method, params=None):
-        req = urllib.request.Request(
-            base + "/jsonrpc",
-            data=json.dumps({"jsonrpc": "2.0", "method": method,
-                             "params": params or {}, "id": 1}).encode(),
-            headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as r:
-            return json.loads(r.read())
-
-    def test_recovery_wire_contract_end_to_end(self, live):
-        assert self._call(live, "mpc.ceremony_start")["result"]["status"] \
-            == "complete"
-        st = self._call(live, "recovery.status")["result"]
-        assert st["phase"] == "active" and st["quorum"] == 2
-        ini = self._call(live, "recovery.initiate",
-                         {"collectors": [1, 2], "stale_legs": [3]})["result"]
-        assert ini["ok"] and ini["window_remaining_s"] > 0
-        assert self._call(live, "recovery.status")["result"][
-            "phase"] == "pending"
-        # early finalize must surface as a JSON-RPC error, never a result
-        early = self._call(live, "recovery.finalize")
-        assert "error" in early and "timelock" in early["error"]["message"]
-        adv = self._call(live, "recovery.advance_window",
-                         {"hours": 73.0})["result"]
-        assert adv["window_remaining_s"] == 0
-        fin = self._call(live, "recovery.finalize")["result"]
-        assert fin["phase"] == "active" and fin["generation"] == 1
-        cd = self._call(live, "recovery.status")["result"]
-        assert cd["cooldown_remaining_s"] > 0
-
-    def test_recovery_cancel_wire(self, live):
-        self._call(live, "mpc.ceremony_start")
-        self._call(live, "recovery.initiate",
-                   {"collectors": [1, 2], "stale_legs": [3]})
-        c = self._call(live, "recovery.cancel", {"share_index": 3})["result"]
-        assert c["phase"] == "cancelled"
