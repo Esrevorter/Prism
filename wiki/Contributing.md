@@ -47,6 +47,23 @@ PR requirements:
 | Wallet UX specs & copy | planning | accessibility review of flows, plain-language drafts under honest-language rules |
 | Documentation | ongoing | translations, tutorials, wiki corrections (start [here](./Home.md)) |
 
+## Session handoff (required for AI-assisted and multi-session work)
+
+[`docs/HANDOFF.md`](../docs/HANDOFF.md) is the project's durable memory:
+snapshot, environment setup, conventions, release state, open threads, known
+pitfalls, and a resume protocol. The rules:
+
+1. **Start of session:** follow HANDOFF §9 (Resume protocol) — fetch main,
+   run the test suite *before* changing anything, pick a confirmed open thread.
+2. **Same-commit maintenance:** any commit that changes project state updates
+   HANDOFF (status §5, backlog §6, Last-updated line). A stale handoff is a
+   bug; reviewers should request the update like any other missing test.
+3. **Verify-then-claim:** after pushes/tags/wiki publishes, confirm against
+   `git ls-remote` and the GitHub API before reporting success. Exit codes are
+   not evidence. (This failure mode burned us twice during Amendment A2.)
+4. **New pitfalls discovered?** Add them to HANDOFF §7 in the same PR — that
+   list is how the next session avoids paying for the same lesson.
+
 ## Code of conduct & credit
 
 Be technical, be kind, assume good faith; harassment or gatekeeping ends participation. Contributions are credited via commit history; significant design contributions get named in release notes. The dev-fund model ([Governance](./Governance.md)) exists so sustained contributors can eventually be funded transparently — milestone proposals follow the RFC process.

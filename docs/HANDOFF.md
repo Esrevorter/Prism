@@ -1,0 +1,149 @@
+# Prism — Engineering Handoff
+
+> **Purpose:** make this repository resumable by any human or AI agent in a fresh
+> session, with zero chat history. Chat memory is disposable; this file plus the
+> git history are the durable state. If you are an AI agent reading this at the
+> start of a session: follow §9 ("Resume protocol") before touching anything.
+>
+> **Maintenance rule (binding):** every session that changes project state must
+> update this file *in the same commit* as the work — status, open threads, and
+> evidence pointers. Stale handoffs are bugs. See `wiki/Contributing.md`.
+
+Last updated: 2026-10-12 · by: Qwen agent session · release: v0.1.5
+
+---
+
+## 1. Project snapshot (one paragraph)
+
+Prism (PRI) is a privacy-focused reference coin with a zero-dependency Python
+core, a local GUI wallet, and a lean authentication model. Since
+**spec Amendment A2-2026-10**, the multi-device MPC/FROST ceremony is retired
+and replaced by a password-sealed local spend key (`prism/auth/keystore.py`)
+plus a single-use, intent-bound image-grid CAPTCHA gate (`prism/auth/captcha.py`)
+before every signature. Testnet parity with production validation is enforced
+by dedicated tests. Current release: **v0.1.5** (live on GitHub Releases with
+Windows/macOS/Linux installers, CLI binaries, SHA256SUMS, and cosign/sigstore
+keyless signatures on every asset).
+
+## 2. Where everything lives
+
+| Area | Path | Notes |
+|---|---|---|
+| Spec (source of truth) | `spec.md` | v1.2 incl. Amendment A2; §7.9 = binding UI/UX mandate |
+| Auth layer | `prism/auth/{keystore,captcha}.py` | stdlib-only; scrypt envelope; HMAC challenge tokens |
+| Legacy MPC (retired, unwired) | `prism/mpc/` | kept for Phase-1 evidence; property/fuzz tests still exercise as pure crypto |
+| RPC service + server | `prism/rpc/service.py`, `server.py` | full `auth.*` method set; no `mpc.*` endpoints remain |
+| GUI v2 | `prism/gui/{index.html,app.js,theme.css}` | synced into `prism/rpc/static/` via `packaging/sync_gui.py` |
+| Tauri desktop shell | `desktop/` | boot-screen HTML is intentional (sidecar pattern) — do not overwrite from `prism/gui/` |
+| Packaging | `packaging/` | PyInstaller specs, `build_release.sh`, `sync_gui.py` |
+| CI | `.github/workflows/{ci,release,desktop}.yml` | 3-OS test matrix; installer builds gated on tag; attestation steps credential-gated |
+| Docs source of truth | `README.md`, `wiki/*.md`, `docs/` | hosted wiki is a *rendered copy* — see §8 |
+| Attestation plan | `docs/ATTESTATION.md` | cosign live; Apple/Microsoft cert steps pending secrets |
+| Tests | `tests/` | current state: **511 passed / 7 skipped**; incl. `test_testnet_parity.py` |
+
+## 3. Environment & setup (reproduce in any fresh sandbox)
+
+```bash
+cd /workspace                      # git repo, branch main
+python -m pytest tests/ -q         # full suite (~110 s), no deps beyond stdlib+pytest
+node --check prism/gui/app.js      # GUI controller syntax check
+bash packaging/build_release.sh    # Linux binary -> dist/prism (PyInstaller can't cross-compile)
+python scripts/publish_wiki.py     # push wiki/ -> hosted GitHub wiki (needs write token)
+```
+
+Credentials: read from environment only (`GITHUB_TOKEN` etc.). **Never paste
+tokens into chat or files.** The workspace `.git/config` must never embed a
+token in a remote URL; use one-shot `https://x-access-token:$TOKEN@...` pushes
+or `GIT_ASKPASS`.
+
+## 4. Conventions (hard rules distilled from spec + sessions)
+
+1. **Honest UX everywhere:** no invented reassurance text; server-computed
+   `human` fields drive UI copy; CAPTCHA framed as presence-check, never as
+   identity proof.
+2. **Single source of truth:** GUI edits go to `prism/gui/`, then run
+   `packaging/sync_gui.py`; wiki edits go to `wiki/`, then publish.
+3. **Version bumps touch all five places:** `pyproject.toml`,
+   `prism/chain/__init__.py::__version__`, `desktop/src-tauri/tauri.conf.json`,
+   `desktop/src-tauri/Cargo.toml`, `desktop/package.json`.
+4. **Tags trigger releases:** annotated tag `vX.Y.Z` → release.yml +
+   desktop.yml build and publish artifacts automatically. Prerelease flag
+   until mainnet candidate.
+5. **Tests gate everything:** never merge/tag with a red suite; new features
+   land with pinned tests (see `test_lean_auth.py`, `test_testnet_parity.py`).
+6. **Legacy code stays unless proven dead:** retired modules keep their
+   property/fuzz coverage; wire-level references get deleted.
+
+## 5. Release state (v0.1.5 — shipped 2026-10-12)
+
+- https://github.com/Esrevorter/Prism/releases/tag/v0.1.5 — 25 assets,
+  cosign `.sig`/`.crt` per asset, SHA256SUMS included. Verified green:
+  ci.yml, release.yml (all jobs incl. macOS framework shim), desktop.yml.
+- Wiki: 24 pages live at https://github.com/Esrevorter/Prism/wiki, links
+  rendered natively (transform happens at publish time in
+  `scripts/publish_wiki.py`; repo keeps relative links so they render in the
+  repo browser too).
+- Actions tab tidied to 3 runs; pre-overhaul releases removed (user request).
+
+## 6. Open threads / backlog (next candidates)
+
+1. **Attestation certs:** enroll Apple Developer ($99/yr) → add secrets
+   `APPLE_ID/APPLE_TEAM_ID/APPLE_APP_SPECIFIC_PASSWORD`; Azure Trusted Signing
+   (~$10/mo) → `WINDOWS_PFX_*` or federation vars. Steps already wired and
+   credential-gated in `desktop.yml`; next tag auto-signs/notarizes.
+2. **Optional local LLM accelerator (approved direction, not started):**
+   two-tier design — deterministic validator always authoritative, optional
+   2B–4B INT4 GGUF sidekick (Qwen2.5-1.5B/3B-Instruct preferred) for structured
+   output drafting only; hard guardrails: never sees keys, never signs, no
+   silent weight downloads (supply-chain rule).
+3. **Soak testing:** extend P5-style soak on public testnet before flipping
+   prerelease→latest.
+4. **Hosted-wiki automation:** consider a small CI job that publishes
+   `wiki/` on change (needs a wiki-write secret).
+5. Nice-to-have: README hero banner image asset; animation-intensity dial
+   already specced (§7.9.4) — verify it ships in GUI settings.
+
+## 7. Known pitfalls (each cost a debugging session once)
+
+- **Tauri `dist/index.html` is a boot screen**, not the GUI bundle. Copying
+  `prism/gui/index.html` over it breaks sidecar startup. (True story.)
+- **Fine-grained PATs cannot write the hosted wiki** — classic token with
+  `repo` scope (or the workflow `GITHUB_TOKEN`) required. Pushes that "succeed"
+  locally may still not land remotely: **always verify with `ls-remote`/API**.
+- **PyInstaller on macOS runners** needs the framework layout shim
+  (`.github/scripts/macos_framework_shim.sh`); standalone CPython alone fails.
+- **GitHub's `permissions` field on fine-grained tokens reflects the user, not
+  the token** — probe writes to know the truth.
+- **setup-python `cpython-3.12` is unresolvable** on arm64 macos-26 runners;
+  use default + shim instead.
+- **The hosted wiki needs a manually created first page** once per repo before
+  any git push to `*.wiki.git` works.
+- Never trust prior-session claims of completion — re-verify against the repo
+  and GitHub API at session start (this exact failure mode produced false
+  "published" reports twice; fixed by making verification part of the protocol).
+
+## 8. Documentation flow
+
+`spec.md` (decisions) → code + tests (evidence) → `wiki/` (human docs, source
+of truth) → `scripts/publish_wiki.py` → hosted wiki (rendered copy).
+README badges/links point at live release + live wiki. When editing docs, ask:
+"would a first-time user find this on the hosted wiki?" — if yes, edit `wiki/`
+and republish; if developer-facing, `docs/` or README is fine.
+
+## 9. Resume protocol (for the next agent session — follow exactly)
+
+1. `git fetch origin && git log --oneline origin/main -5` — reconcile local vs
+   remote HEAD; fast-forward if behind.
+2. Read §5/§6 here: pick the top open thread the user confirms.
+3. Run `python -m pytest tests/ -q` **before** changing anything; a red suite
+   means resume debugging, not feature work.
+4. Make the change; update this file's §5/§6/Last-updated line in the same
+   commit (maintenance rule).
+5. Push/verify: after every push, confirm with `git ls-remote` **and** the
+   GitHub API (contents/commits endpoint) that the remote actually has it.
+   Report only what was verified. Never claim success from exit codes alone.
+6. For releases: bump versions (§4.3), annotated tag, watch the three
+   workflows to completion, spot-check release assets via API, then tidy old
+   runs/releases only when asked.
+
+*End of handoff. Keep this file honest — it is the only memory that survives.*
