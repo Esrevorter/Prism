@@ -58,16 +58,30 @@ def new_image_grid(seed: Optional[bytes] = None) -> dict:
     render_grid_svg, PNG fallback via render_grid_png; v0.1.5 vector-first.)
     """
     rng = secrets.SystemRandom() if seed is None else _SeededRandom(seed)
-    tiles = [rng.choice(SHAPES) for _ in range(GRID * GRID)]
     target = rng.choice(SHAPES)
     # guarantee solvability: force exactly 3..4 target tiles
     want = rng.randint(3, 4)
+    # Decoys are drawn ONLY from shapes other than `target`.  The old code
+    # shuffled random shapes first and "fixed" collisions by bumping a tile
+    # to the NEXT shape in SHAPES — which could hand a decoy shape a count
+    # >= target's (or even a tie), so the picture no longer matched its own
+    # prompt ("tap every X" while X wasn't the visually obvious group).
+    # Real users failed ~60% of challenges and the honest-solve tests caught
+    # it.  Invariant pinned by test_grid_majority_is_target: target must be
+    # the STRICT majority (count >= 3, every other shape strictly fewer).
+    decoys = [s for s in SHAPES if s != target]
     idx = list(range(GRID * GRID))
     rng.shuffle(idx)
+    tiles = [None] * (GRID * GRID)
     for k, i in enumerate(idx):
-        tiles[i] = target if k < want else (
-            SHAPES[(SHAPES.index(tiles[i]) + 1) % len(SHAPES)]
-            if tiles[i] == target else tiles[i])
+        if k < want:
+            tiles[i] = target
+        else:
+            d = rng.choice(decoys)
+            # cap any decoy at want-1 so the target group stays unambiguous
+            while tiles.count(d) >= want - 1:
+                d = rng.choice([s for s in decoys if s != d] or decoys)
+            tiles[i] = d
     return {
         "challenge_id": secrets.token_hex(8),
         "prompt": f"Tap every {'★ star' if target == 'star' else target + ' shape'}",
@@ -404,6 +418,14 @@ class CaptchaEngine:
         """
         grid = new_image_grid()
         cid = grid["challenge_id"]
+        # Regression pin (v0.1.7 broken-captcha post-mortem): the client can
+        # only answer honestly if the wire payload carries what is VISIBLE in
+        # the picture — the tile shapes themselves.  The GUI composes its tap
+        # overlay from `tiles` (see prism/gui/app.js renderCapSvg); when a
+        # release dropped this field, every payment failed with "not quite —
+        # tap every matching shape" and users could never sign.  Never remove
+        # or rename these display-only fields without updating the GUI and
+        # test_captcha_wire_contract below in the same commit.
         self._pending[cid] = {
             "grid": grid,
             "intent_digest_hex": intent_digest_hex,
@@ -413,6 +435,7 @@ class CaptchaEngine:
             "challenge_id": cid,
             "prompt": grid["prompt"],
             "svg": render_grid_svg(grid["tiles"], grid["target"]),
+            "tiles": list(grid["tiles"]),
             "palette": shape_palette(),
             "ttl_s": self.ttl_s,
             "human": ("Prove you're human: look at the picture and tap the "

@@ -24,6 +24,7 @@ import ast
 import io
 import os
 import pathlib
+import re
 import sys
 import unittest
 
@@ -182,3 +183,61 @@ class TestGuiBundleFreshness(unittest.TestCase):
         from prism.rpc import server as rpc_server
         fp = rpc_server.gui_bundle_fingerprint()
         self.assertRegex(fp, r"^[0-9a-f]{16}$")
+
+
+class TestGuiClassContract(unittest.TestCase):
+    """Gate 2 (v0.1.9 post-mortem): index.html/app.js reference a rich CSS
+    class vocabulary (glass, aurora, stepper, toast, confetti, hero...).
+    theme.css silently fell behind — ~50 classes rendered as raw unstyled
+    markup, which is exactly what made the shipped UI look "nineties" even
+    though the markup was modern.  Every class used by the GUI must have at
+    least one rule in theme.css; this pin fails CI the moment they drift."""
+
+    _CLASS_ATTR = re.compile(r'class="([^"]+)"')
+    _JS_CLASS = re.compile(r"classList\.(?:add|toggle|remove)\('([^']+)'\)")
+
+    def _used_classes(self):
+        gui = ROOT.joinpath("prism", "gui")
+        html = open(gui / "index.html", encoding="utf-8").read()
+        js = open(gui / "app.js", encoding="utf-8").read()
+        used = set()
+        for m in self._CLASS_ATTR.finditer(html):
+            used.update(m.group(1).split())
+        for m in self._JS_CLASS.finditer(js):
+            used.add(m.group(1))
+        # JS also toggles these state classes via string literals
+        used.update({"screen-enter", "show", "weak", "done", "active",
+                     "picked", "calm", "caution", "pause"})
+        return used
+
+    def test_gui_class_contract(self):
+        css = open(ROOT.joinpath("prism", "gui", "theme.css"),
+                   encoding="utf-8").read()
+        missing = sorted(c for c in self._used_classes()
+                         if not re.search(r"\." + re.escape(c) + r"\b", css))
+        self.assertFalse(
+            missing,
+            "prism/gui/theme.css has NO rule for these classes referenced by "
+            "index.html/app.js — they would render unstyled (the v0.1.9 "
+            f"'nineties look' bug): {missing}")
+
+    def test_captcha_wire_ships_visible_tiles_only(self):
+        # v0.1.8 lesson: shipping an `answer` shortcut on the wire is an
+        # answer-key leak by another name (client could auto-solve without
+        # looking).  The GUI must derive picks from `tiles` alone.
+        from prism.rpc.service import PrismService
+        svc = PrismService()
+        svc.auth_create("gate password 123!")
+        svc.mine(3)
+        it = svc.intent_compile("send 1 PRSM to Alex")
+        svc.intent_confirm(it["intent_id"])
+        ch = svc.auth_challenge(it["intent_id"])
+        for leaked in ("target", "answer"):
+            self.assertNotIn(leaked, ch,
+                             f"'{leaked}' must NEVER cross the captcha wire")
+        tiles = ch["tiles"]
+        shape = max(set(tiles), key=tiles.count)
+        solved = svc.auth_solve(ch["challenge_id"],
+                                [i for i, s in enumerate(tiles) if s == shape],
+                                ch["digest_hex"])
+        self.assertTrue(solved["ok"])
