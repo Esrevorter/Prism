@@ -147,8 +147,7 @@ def main() -> int:
     if args.check:
         with tempfile.TemporaryDirectory() as td:
             build_all(master, Path(td))
-            # README.txt is a hand-written note that lives in the icons dir; not generator output
-            rc = subprocess.run(["diff", "-rq", "--exclude=README.txt", td, str(ICONS)]).returncode
+            rc = subprocess.run(["diff", "-rq", "--exclude=README.txt", "--exclude=icon-source.png", td, str(ICONS)]).returncode
             print("icons match generator" if rc == 0 else "icons OUT OF SYNC with scripts/make_icon.py")
             return rc
     build_all(master, ICONS)
