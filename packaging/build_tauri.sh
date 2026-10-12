@@ -22,8 +22,14 @@ TAURI_DIR="packaging/tauri/prism-gui"
 SRC_TAURI="$TAURI_DIR/src-tauri"
 BIN_DIR="$SRC_TAURI/binaries"
 
-echo "==> [1/5] Sync GUI static bundle"
+echo "==> [1/5] Sync GUI static bundle + Tauri webview shell"
 python packaging/sync_gui.py
+
+# NOTE: packaging/tauri/prism-gui/dist/index.html is intentionally NOT a copy
+# of prism/gui. It is the boot screen the webview shows while the Rust shell
+# spawns the bundled daemon; main.rs then navigates the webview to the live
+# http://127.0.0.1:<port>/ URL served by the sidecar (the real GUI v2 wallet).
+# There is no duplicated UI to keep in sync — do not copy prism/gui assets here.
 
 echo "==> [2/5] Freeze prism-gui desktop binary (PyInstaller, onefile)"
 python -m pip install --quiet pyinstaller
