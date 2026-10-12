@@ -55,26 +55,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # macOS: use the GitHub-hosted framework build of CPython, NOT the
-      # action's default standalone python-build-standalone distribution.
-      # Reason (learned from the v0.1.3 release failure): PyInstaller's
-      # macoS phase resolves the interpreter via find_library('python3')
-      # and expects an Xcode-style Python.framework layout; the standalone
-      # build ships a lib/python3.12/... layout instead, so Analysis dies
-      # with "Unable to find .../packaging/Python.framework/Versions/3.12/Python".
-      # cpython-py3x images are pre-installed framework builds on the runner.
-      - name: "Setup Python (macOS: framework build)"
-        if: matrix.artifact_os == 'macos'
-        uses: actions/setup-python@v5
-        with:
-          python-version: 'cpython-3.12'
-          check-latest: true
-
       - name: Setup Python
-        if: matrix.artifact_os != 'macos'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      # macOS: make the interpreter look like a framework install.
+      # History of this step (evidence trail across two failed releases):
+      #   v0.1.3: setup-python's default *standalone* build lacks the
+      #           Python.framework layout -> PyInstaller died with
+      #           "Unable to find .../Python.framework/Versions/3.12/Python".
+      #   v0.1.4: requesting the runner's preinstalled framework build via
+      #           python-version: 'cpython-3.12' failed outright — the arm64
+      #           macOS 26 image no longer carries it ("not found in manifest").
+      # Fix used here instead: keep the reliable standalone build and create
+      # the framework symlink tree PyInstaller's DarwinAnalysis expects,
+      # pointing at the real libpython dylib. Pure filesystem shim, no
+      # network, works on any runner image.
+      - name: "Framework shim for PyInstaller (macOS only)"
+        if: matrix.artifact_os == 'macos'
+        shell: bash
+        run: bash .github/scripts/macos_framework_shim.sh
 
       # PyInstaller cannot cross-compile: each binary is built on its own OS runner.
       - name: Install build tools
