@@ -201,6 +201,8 @@ More in the **[FAQ →](wiki/FAQ.md)**
 
 ## Explore the Wiki
 
+*The full documentation set lives in the [`wiki/`](https://github.com/Esrevorter/Prism/tree/main/wiki) folder — 24 pages, rendered beautifully right here on GitHub. (GitHub's separate hosted-wiki feature is disabled for this repo; `scripts/publish_wiki.py` can sync it later if ever enabled.)*
+
 | 📘 Start here | 🧰 Use it | 🧵 Understand it | 🏗️ Build it |
 |---|---|---|---|
 | [Home](https://github.com/Esrevorter/Prism/tree/main/wiki) | [Getting Started as a User](./Getting-Started-as-a-User.md) | [How Privacy Works](./How-Privacy-Works.md) | [Architecture Overview](./Architecture.md) |
