@@ -1,5 +1,21 @@
 # Tool Calling and Execution Rules
 
+> **Rules file version: v1.3 (2026-10-12).** This version stamp exists because releases
+> v0.1.6–v0.1.10 kept shipping "fixed" claims while the user saw an unchanged app — a rules
+> file with no version cannot be proven to have been loaded by any given session. If a fix
+> session's plan does not cite this number, its rules were probably not read at all.
+
+> **Release-versioning rule (MANDATORY since v1.3, added after the v0.1.10 report):**
+> Every release commit MUST bump the version in *all* of these locations in one change,
+> and the release gate MUST verify tag == tree == UI-visible version:
+> 1. `pyproject.toml` (`version = "x.y.z"`)
+> 2. `prism/chain/__init__.py` (`__version__`)
+> 3. `packaging/tauri/prism-gui/package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`
+> 4. `README.md` release badge (historically forgotten — still shows v0.1.5 as of v0.1.10)
+> 5. A build stamp visible in the GUI itself (About/footer), so users and bug reports can
+>    prove which build is actually running. Without #4/#5, "nothing changed" complaints are
+>    undiagnosable: stale installers, cached bundles, and unfixed code look identical.
+
 > **Binding companion files (re-read before every substantive task):** `docs/internal/qwen.md`
 > (anti-burst pacing — one tool call per turn, sequential only, ≥20 s inter-request;
 > Oct 11 addendum: if this file and `docs/internal/qwen.md` ever disagree on pacing numbers,
@@ -10,7 +26,12 @@
 > tool output from the current session.
 
 ## 1. Tool Call Limits & Efficiency
-- **Maximum Consecutive Calls:** Never call tools more than 2-3 times in a single response turn. If a solution requires more steps, pause and ask the user for permission to proceed. *(Exception for tidying/cleanup sessions: see §5 — do NOT stop to ask; batching is mandatory there.)*
+*(v1.3 adjustment: the old "2-3 calls per turn" cap was tuned for chat UX, but it made
+diagnosis-heavy fix tasks (captcha/interface bugs) give up after one or two probes and fall
+back to assumptions — exactly how unverified "fixed" claims survived to release. The budget
+below keeps burst protection while leaving room for real verification work.)*
+
+- **Maximum Consecutive Calls:** Never call tools more than 5 times in a single response turn for exploratory reads; for chained verification commands (§5 "Chain Everything") count each chain as ONE call. If a solution genuinely requires more steps, summarize findings so far and ask the user for permission to proceed. *(Exceptions: tidying/cleanup sessions — see §5 — do NOT stop to ask; batching is mandatory there. Verification runs required by §4 evidence rules never count toward the stop-to-ask threshold.)*
 - **Batching:** If you need to perform multiple actions (e.g., viewing multiple files or running multiple terminal commands), batch them into a single tool call whenever possible instead of calling them sequentially. Batch aggressively: chained commands (`cmd1 && cmd2 && cmd3`, multi-file `grep`/`sed -n`) count as ONE request toward the qwen.md pacing/breather budget.
 - **Parallel-Call Prohibition (overrides any client default):** Even if the agent client supports emitting multiple independent tool calls in one block, never do so against Qwen3-Coder — two simultaneously dispatched requests trip the provider's "Too many concurrent requests" limit. Emit exactly one tool call, await its full result, then proceed per qwen.md pacing.
 
@@ -42,3 +63,23 @@
 - **Never Fan Out:** Do not issue parallel/per-block multi-tool calls even when the client allows it (see §1 Parallel-Call Prohibition). Tidy-up steps are strictly sequential with full qwen.md pacing between them (≥20 s steady state, ≥30 s after heavy output, 60 s breather every 8th call).
 - **Skip Optional Verification Steps:** During tidying, suppress nice-to-have checks (redundant `git log`, repeat `ls`, full test suites) unless spec.md/ethics.md §4 requires evidence for a status claim. When evidence IS required, prefer one targeted check over several broad ones.
 - **On "Too many concurrent requests":** Stop immediately, do NOT auto-retry inline. Wait the full 60 s (then 120 s → 240 s exponential per qwen.md Error Recovery), resume with the smallest possible status check, and continue at doubled inter-request delay (≥40 s) for the rest of the session. Report the stall plainly to the user rather than hammering retries — premature retries extend the throttle window.
+
+## 6. "Fix Shipped But User Sees No Change" — Root Cause & Mandatory Checklist
+*Added v1.3 (Oct 12, 2026) after the founder reported: "nothing has been fixed in v0.1.10, it looks exactly the same as all previous versions: broken captcha, ugly interface, despite all made claims." Honest post-mortem of what was and was not verifiable:*
+
+**What inspection proved (verified this session):**
+- The repo tree at tag `v0.1.10` DOES contain real captcha/UI fixes: `prism/auth/captcha.py` wire-stamp contract, `app.js` "build out of date" loud error + single-SVG puzzle, `gui/ ↔ static/` bundles byte-identical (`diff` exit 0), version 0.1.10 present in pyproject.toml, chain.__init__, package.json, Cargo.toml, tauri.conf.json.
+- What is NOT provable from inside this repo: which binary the user actually launched. Release artifacts are built by CI on GitHub; no session here observed a successful build, uploaded asset, or installed app.
+
+**Root-cause candidates, in order of likelihood:**
+1. **Stale installer / no auto-update:** the user runs an old frozen bundle (the very failure mode v0.1.10 tried to patch server-side). Old GUI + new server = unchanged appearance. Nothing in the UI displayed a version, so neither user nor agent could tell (now mandatory: rules header above, item 5).
+2. **Release assets never rebuilt/published:** a git tag does not rebuild binaries. If CI failed or assets were not replaced, v0.1.10 downloads ARE v0.1.9 content under a new tag. Claiming "fixed in v0.1.10" without fetching the published asset and checking its embedded version violates §4 (Never Predict Results as Facts).
+3. **The claimed fixes addressed the wrong layer:** prior sessions asserted captcha/UI defects were fixed based on green tests in the repo, never on a screenshot/rendered DOM of the shipped app. Tests passing ≠ user-visible change.
+
+**Mandatory pre-release checklist (blocks any "fixed" claim):**
+- [ ] Run `scripts/release_gate.py` AND paste its actual output (§4 evidence citation).
+- [ ] Fetch the published release asset list (`gh release view` or API) and confirm the asset timestamp is AFTER the fix commit — a tag alone proves nothing.
+- [ ] Download the shipped artifact and verify its embedded version string equals the tag (this is the step every prior release skipped).
+- [ ] Add/update the visible version stamp in the GUI About/footer so future reports can be triaged by build.
+- [ ] In status reports, separate: "fixed in code (evidence: commit)" from "shipped to user (evidence: asset hash + embedded version)" from "user experience changed (evidence: rendered screenshot of the shipped app)". Only the third justifies the word "fixed" to a non-technical user; otherwise say PARTIAL.
+- [ ] If any of the above cannot be run in-session, report UNVERIFIED explicitly — do not soften (§4 Fail Loud).
