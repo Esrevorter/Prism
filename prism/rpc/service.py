@@ -323,8 +323,15 @@ class PrismService:
 
     def auth_create(self, password: str) -> dict:
         """First-run wallet creation (<60 s target, spec §7.1). Returns the
-        12-word recovery phrase exactly once — honest warning included."""
+        12-word recovery phrase exactly once — honest warning included.
+        Refuses to overwrite an existing sealed key (that would destroy the
+        old wallet's funds — recover with the 12 words instead)."""
         with self._lock:
+            if self.keystore.blob is not None:
+                raise ValueError("a wallet already exists on this device — "
+                                 "unlock it, or use your 12 recovery words "
+                                 "(auth.recover) — creating again would "
+                                 "destroy the current wallet")
             try:
                 phrase = self.keystore.create(password)
             except RuntimeError as e:
