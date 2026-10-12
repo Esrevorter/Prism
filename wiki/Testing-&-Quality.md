@@ -17,7 +17,9 @@ Consensus and cryptography fail in the weird corners, so testing effort concentr
 | `test_clsag_extra.py` | Ring sigs | Linkability (double-spend detectable), aggregation across multi-input txs, negative cases |
 | `test_chain.py`, `test_block_codec.py` | Chain rules | Emission curve monotonicity/cap convergence, difficulty retarget bounds, header codec round-trips, node accept/reject matrix |
 | `test_dandelion.py` | Relay policy | Stem/fluff state machine invariants |
-| `test_mpc_recovery_acceptance.py`, `test_sharing_refresh.py`, `test_gg20_candidate.py`, `test_frost_candidate.py`, `test_secp256k1_curve.py` | Keys | Threshold correctness, refresh revokes stale shares, ceremony abort/resume safety, recovery timelock + cancellation flows |
+| `test_auth*.py` (keystore + captcha) | Custody (A2) | Seal/unlock/lockout, phrase→same-address restore, token digest-binding, single-use & expiry rejection |
+| `test_testnet_parity.py` | Testnet | Faucet economics, CLI↔GUI↔daemon block cross-validation, 10-payment soak, restart persistence |
+| `test_mpc_recovery_acceptance.py`, `test_gg20_candidate.py`, `test_frost_candidate.py`, `test_secp256k1_curve.py` | Legacy crypto (unwired) | Property-level correctness of retired ceremony primitives, kept as historical evidence |
 | `test_zk_circuits_v1.py`, `test_income_circuit.py`, `test_plonk_verifier.py`, `test_statement_malleability.py` | Disclosures | Each circuit's honest prove→verify, statement-encoding malleability attacks rejected |
 | `test_intent_compiler.py`, `test_nl_grammar.py`, `test_agent_perms.py`, `test_fl_dp_accounting.py`, `test_simulator_explain.py` | Wallet/AI | Grammar-validated compile-or-fallback, grant enforcement outside the model, DP noise accounting, simulator determinism |
 | `test_l2_channels.py` | Channels | Open/transfer/close/penalty state machine |
@@ -68,7 +70,7 @@ Quality metrics we publish over time: property-test iteration counts, fuzz campa
 
 | Path | Requirement |
 |---|---|
-| `chain/`, `crypto/`, `mpc/`, `zk/` | 2 approvals + spec cross-check + tests proving completeness/soundness/malleability for touched code |
+| `chain/`, `crypto/`, `auth/`, `zk/` | 2 approvals + spec cross-check + tests proving completeness/soundness/malleability for touched code (`mpc/` frozen — legacy) |
 | `wallet/`, `ai/`, `l2/` | 1 approval + tests; privacy-sensitive copy follows honest-language rules |
 | docs/wiki | 1 approval; claims must trace to spec sections or code |
 

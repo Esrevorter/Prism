@@ -60,8 +60,8 @@ Fraud patterns evolve faster than any team ships updates, so wallets learn colle
 
 ## What the AI layer categorically never does
 
-- ❌ Derives keys, sees private keys or MPC shares, or sits inside the signing quorum.
-- ❌ Signs or broadcasts anything irreversible without explicit informed confirmation (biometric gate) — except pre-authorized scoped agent actions, which always carry their veto window.
+- ❌ Derives keys, sees the sealed key or its password, or sits anywhere inside the signing path.
+- ❌ Signs or broadcasts anything irreversible without explicit informed confirmation (human-presence gate) — except pre-authorized scoped agent actions, which always carry their veto window. In v0.1.x the human gate is a picture-puzzle token + password unlock (Amendment A2), replacing the earlier biometric/MPC wording.
 - ❌ Sends your financial content anywhere. On-device or nothing.
 - ❌ Makes numeric claims from its own generation. That's the simulator's job.
 

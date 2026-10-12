@@ -49,9 +49,10 @@
 | Term | Definition |
 |---|---|
 | **spend key / view key** | Private spend key authorizes outgoing funds; private view key scans incoming. Public halves live in your payment address. |
-| **MPC / threshold signing** | Key split into shares (Shamir); any quorum co-signs, fewer-than-quorum learns nothing. GG20/FROST-style protocols. [Recovery Guide](Recovery-and-Inheritance-Guide.md) |
-| **key share** | One fragment of your spend authority, held by a device or contact. Opaque alone. |
-| **Solo MPC / Social MPC** | 2-of-3 across your own devices / 3-of-5 including up to four contacts. Prism itself holds nothing (Decision D4). |
+| **sealed key store** | Your spend key encrypted at rest under your password (scrypt KDF, authenticated envelope, lockout on repeated failures). Code: `prism/auth/keystore.py`. |
+| **recovery phrase** | 12 words that regenerate the *exact same* key and address on any fresh install. Nobody at Prism can reset or substitute it. |
+| **human-presence gate (CAPTCHA token)** | Image-grid puzzle whose answer is bound to one specific transaction's digest; single-use, expires in ~2 minutes. Proves a person approved these exact bytes — not *who*, and not against screen-watching malware; the UI states both limits. |
+| **MPC / threshold signing (legacy)** | Original Phase-1 custody design: key split into shares co-signed by multiple devices/contacts (GG20/FROST-style). **Retired by spec Amendment A2**; modules remain in-tree, unwired, as historical evidence. |
 | **proactive refresh** | Periodic re-splitting of the key into new shares (every 90 days) — stolen old shares decay to worthless. |
 | **social recovery** | Quorum-approved regeneration of shares on a new device, gated by the 72-hour cancellable timelock. |
 | **timelock (recovery)** | 72 h during which recovered shares can't move funds while warnings broadcast and stale shares retain cancel rights. |

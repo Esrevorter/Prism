@@ -86,7 +86,7 @@ Reference-grade PLONK-style polynomial IOP over a BN-family scalar field: select
 ## 7. Threshold keys (`mpc/`)
 
 - **Shamir sharing** with verifiable commitments (every share provably consistent with the public key); **proactive refresh** rotates shares without changing the key (90-day cadence).
-- **GG20-style ECDSA** and **FROST-style EdDSA** round protocols implemented as message state machines — pausable, abort-safe, resumable ceremonies (spec §7.1).
+- **GG20-style ECDSA** and **FROST-style EdDSA** round protocols — implemented and property-tested during Phase 1, then **retired from the product by Amendment A2** (spec §9 rewrite); they remain in `prism/mpc/` as validated historical research, unwired from the wallet. Current custody: scrypt-sealed Ed25519-group key (`auth/keystore.py`) + HMAC-signed CAPTCHA tokens (`auth/captcha.py`).
 - **Recovery coordinator** (`recovery.py`): quorum check → 72 h timelock → cancellation path for stale-share holders → re-sharing that revokes everything old. Pure logic layer; transports (QR, invite links, EE2EE channels) sit above it in the wallet.
 
 ## Known limitations (pre-audit honesty)

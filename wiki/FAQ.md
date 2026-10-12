@@ -42,7 +42,7 @@
 
 **Do my recovery contacts see my money?** Never. Contacts hold opaque numbers that only ever contribute to co-signing ceremonies you initiate. Being a contact costs them one rare approval tap.
 
-**What stops the AI assistant from stealing my funds?** Cryptography, not policy: the model never derives or sees keys/shares, its output must pass a deterministic validator before signing, agent actions execute only within grants enforced *by the signer* outside the model, and irreversible sends require your biometric confirmation. ([AI Layer](AI-Layer-Explained.md))
+**What stops the AI assistant from stealing my funds?** Cryptography, not policy: the model never derives or sees your sealed key or password, its output must pass a deterministic validator before signing, agent actions execute only within grants enforced *outside* the model, and irreversible sends require two human gates — a picture puzzle bound to that exact transaction plus your password unlock (spec Amendment A2). ([AI Layer](AI-Layer-Explained.md))
 
 **What happens if I'm forced to open my wallet?** Duress PIN opens a plausible decoy; forced recovery still burns 72 h in alarm state; optional panic-lock delays above-threshold sends even manually. Honest caveat: these raise attacker cost and buy intervention time — they're not magic. ([Recovery Guide](Recovery-and-Inheritance-Guide.md) · [Security Model](Security-Model.md))
 

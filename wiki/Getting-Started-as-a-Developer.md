@@ -12,7 +12,7 @@
 ## Clone & run
 
 ```bash
-git clone https://github.com/prism-prsm/prism.git
+git clone https://github.com/Esrevorter/Prism.git
 cd prism
 
 # Run the test suite directly from the repo layout:
@@ -25,7 +25,7 @@ prism params | head -20
 prism mine --blocks 3
 ```
 
-The tests import packages relative to `prism/` (each subpackage — `chain`, `crypto`, `mpc`, … — is imported top-level); editable installs put them on the path via `[tool.setuptools.packages.find] where=["prism"]`.
+The tests import packages relative to `prism/` (each subpackage — `chain`, `crypto`, `auth`, … — is imported top-level); editable installs put them on the path via `[tool.setuptools.packages.find] where=["prism"]`.
 
 ## Repository layout
 
@@ -34,7 +34,8 @@ prism/
 ├── crypto/     Ed25519 field/group, hashing, Pedersen, stealth, CLSAG, Bulletproofs+
 ├── chain/      params · emission · difficulty · pow · block (canonical codec)
 │               denylist · node (ChainState validation) · cli (`prism` command)
-├── mpc/        secp256k1 · Shamir sharing · GG20 · FROST · recovery state machine
+├── auth/       keystore.py (sealed key, phrase restore) · captcha.py (presence gates)
+├── mpc/        LEGACY (retired by A2, unwired): secp256k1 · Shamir · GG20 · FROST · recovery
 ├── zk/         BN scalar field · PLONK-style IOP · disclosure circuits
 ├── wallet/     intent schema/compiler · agent grants & audit log
 ├── ai/         fraud scoring · deterministic simulator · FL client
@@ -50,7 +51,7 @@ spec.md         THE source of truth — decisions D1–D5 are binding
 1. [`spec.md` §4–§6](../spec.md) — money rules, privacy model, data formats.
 2. `prism/crypto/field.py → edwards.py → pedersen.py` — the arithmetic floor everything stands on.
 3. `prism/chain/block.py → node.py` — canonical encoding + validation rules (where most chain-split bugs would live).
-4. Pick your layer: RingCT (`clsag.py`, `bulletproof.py`), keys (`mpc/`), disclosures (`zk/`), UX logic (`wallet/`, `ai/`).
+4. Pick your layer: RingCT (`clsag.py`, `bulletproof.py`), custody (`auth/`), disclosures (`zk/`), UX logic (`wallet/`, `ai/`), shipped wallet (`gui/`, `rpc/`).
 
 Each module's docstring states its construction and paper-lineage; tests double as executable documentation (`prism/tests/test_crypto.py` shows every primitive's intended behavior including negative cases).
 
@@ -86,7 +87,7 @@ Windows `.exe`s are produced by CI on native runners — see [Release Process](R
 1. Branch from `main`: `feat/<area>/<summary>` or `fix/<area>/<issue>`.
 2. Keep commits scoped; consensus-affecting changes require a spec reference (§ number or decision ID) in the PR description.
 3. Tests accompany behavior changes (non-negotiable for crypto/chain paths).
-4. One approval minimum for tooling/docs; **two approvals + spec cross-check for `chain/`, `crypto/`, `mpc/`, `zk/`**.
+4. One approval minimum for tooling/docs; **two approvals + spec cross-check for `chain/`, `crypto/`, `auth/`, `zk/`**.
 5. New user-facing copy touching privacy/recovery claims must match the honest-language rules ([AI Layer](AI-Layer-Explained.md), [Security Model](Security-Model.md)) — e.g., never "revoked disclosure," always "expired disclosure."
 
 Good first issues carry the `good-first-issue` label; the current frontier is the RingCT transaction layer wiring, daemon networking for Refraction testnet, and L2 channel logic ([Roadmap](Roadmap.md)).

@@ -1,29 +1,29 @@
 # Recovery & Inheritance Guide
 
-*Everything about keeping access when things go wrong — key shares, social recovery, duress protections, and the dead-man switch. Binding spec: [`spec.md` §7.4–7.5, §7.8, §9](../spec.md); code: `prism/mpc/recovery.py`.*
+*Everything about keeping access when things go wrong — the 12-word recovery phrase, optional trusted-contact mode, duress protections, and the dead-man switch. Binding spec: [`spec.md` §7.4–7.5, §7.8, §9](../spec.md) (Amendment A2); code: `prism/auth/keystore.py` (primary path), `prism/mpc/recovery.py` (legacy tier-B machinery).*
 
 ---
 
 ## How your key actually works (30 seconds)
 
-Your spending authority is a number split into **shares** (Shamir secret sharing with verifiable commitments). Any *threshold* subset can co-sign; fewer than threshold learn nothing and can do nothing:
+Since spec Amendment A2, custody is deliberately lean. Your spend key is a single number, **sealed at rest by your password** (scrypt-derived key, encrypt-then-MAC envelope, lockout after repeated failed unlocks) and mirrored by a **12-word recovery phrase** that regenerates the *exact same key and address* on any fresh install — pinned by tests. There is no ceremony, no quorum arithmetic, and nobody at Prism can reset or substitute your phrase (Decision D4: zero custodial legs).
 
-| Mode | Shares | Threshold | Who holds them |
-|---|---|---|---|
-| Solo MPC | 3 | 2 | Your own devices only |
-| Social MPC | 5 | 3 | Your devices + up to 4 chosen contacts |
+| Tier | Protection | Recovery path |
+|---|---|---|
+| **A. Phrase (default)** | Password-sealed local key | Type 12 words anywhere → same wallet restored |
+| **B. Trusted contacts (optional)** | Tier A + contact quorum | Quorum approval + loud **72-hour timelock**, cancellable by any stale credential |
+| **C. Legacy seed (opt-in)** | Classic mnemonic | Irreversible — big warning banner by design |
 
-Contacts hold opaque numbers — they cannot view balances, transactions, or anything else. Being a recovery contact costs them nothing but a rare approval tap. Per Decision D4, **Prism itself never holds any share** — there is no company backdoor leg to subpoena, leak, or mismanage.
-
-Shares **proactively refresh** every 90 days (or after any recovery): the underlying key stays the same while every share value changes — a stolen old share quietly becomes worthless over time.
+The retired multi-device MPC scheme (2-of-3 solo / 3-of-5 social shares) remains documented in git history and in unwired `prism/mpc/` modules as Phase-1 evidence.
 
 ## Losing a device (the everyday case)
 
-Nothing happens to your funds. Grab the replacement device, re-enroll biometrics, and the wallet starts re-sharing against your remaining quorum in the background. If you've dropped below comfort (e.g., lost one of two solo devices), the app says so plainly and walks you through adding legs.
+Nothing happens to your funds — the sealed key file is useless noise without your password. Install the wallet on a new machine, enter your password (or phrase), done. The app offers a **dry-restore test** so you can prove your backup works while everything is calm.
 
 ## Losing *access* — full social recovery flow
 
-1. **Start recovery** on a new device: identity attestation via fresh biometric enrollment (+ old-share challenge token if you have any fragment).
+*(Tier B only — Tier A users just type their 12 words.)*
+1. **Start recovery** on a new device: phrase entry plus contact-quorum attestation.
 2. **Quorum approves:** each contact gets a simple prompt — *"Confirm this is Maya recovering her wallet? Code: 4821"* — they verify out-of-band (a quick call beats trusting a screen).
 3. **The 72-hour timelock.** Even after quorum approval, recovered shares cannot move funds for 72 hours. Throughout: loud warnings on every registered device, push/email notifications, and a visible countdown. **Anyone holding any stale share can cancel the recovery** during the window. This kills the "stolen phone + rushed coerced friends" attack: theft needs silence, and Prism refuses to be silent.
 4. **Re-share & revoke:** a brand-new share set is generated; every old share dies. The attacker's fragment is now mathematically noise.

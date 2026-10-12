@@ -1,6 +1,6 @@
 # Release Process
 
-*How `prism` binaries and Python packages get built, verified, and published — including everything a Windows-first user should know about the files they download. Automation: [`.github/workflows/release.yml`](../.github/workflows/release.yml); scripts: [`packaging/`](../packaging/).*
+*How Prism's CLI binaries, desktop installers and Python packages get built, verified, signed, and published — including everything a Windows-first user should know about the files they download. Automation: [`.github/workflows/release.yml`](../.github/workflows/release.yml) (CLI + wheel), [`.github/workflows/desktop.yml`](../.github/workflows/desktop.yml) (Tauri installers), [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (per-push test matrix); scripts: [`packaging/`](../packaging/).*
 
 ---
 
@@ -47,11 +47,13 @@ git tag -a vX.Y.Z  ──▶ CI triggers on tag push
 
 ### Platform notes (honest ones)
 
-| Platform | Status today | What's coming |
+| Platform | Status today (v0.1.5+) | What's coming |
 |---|---|---|
-| **Windows x64** | ✅ zip w/ embedded checksums | Authenticode signing + documented SmartScreen guidance once code-signing identity completes |
-| **Linux x86_64** | ✅ tar.gz | GPG-signed manifests |
-| **macOS arm64** | ✅ tar.gz; unsigned dev builds trigger Gatekeeper — use *right-click → Open* once | Notarization with the same signing milestone |
+| **Windows x64** | ✅ portable zip + sleek `.msi`/`setup.exe` installers; SHA256SUMS + cosign/sigstore signatures on every asset | Authenticode via Azure Trusted Signing (CI step ready, activates with cert secrets) to silence SmartScreen |
+| **Linux x86_64** | ✅ tar.gz + `.deb` + `.AppImage`; signed as above | GPG-signed apt manifests |
+| **macOS arm64** | ✅ tar.gz + `.dmg`; right-click → Open once while unsigned | Apple Developer ID + notarization (CI step ready, activates with Apple secrets) — plan in [docs/ATTESTATION.md](../docs/ATTESTATION.md) |
+
+Every release asset since v0.1.5 carries a keyless **cosign/sigstore signature** (`.sig` + `.crt`) bound to this repository's GitHub Actions identity, plus aggregate `SHA256SUMS` — verify commands live in [docs/ATTESTATION.md](../docs/ATTESTATION.md).
 | **Intel Mac** | not yet built | add matrix entry when demand warrants |
 
 Signing/notarization gaps are stated here rather than hidden; the checksums exist precisely so an unsigned transport can still be integrity-verified by anyone.

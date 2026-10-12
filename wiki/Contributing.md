@@ -25,7 +25,7 @@ PR requirements:
 - **Tests accompany behavior changes.** Crypto/chain paths need completeness + soundness + malleability cases ([Testing & Quality](Testing-&-Quality.md)); "I'll add tests later" PRs don't merge.
 - **Consensus-affecting diffs cite the spec** (§ number / decision ID) in the description; anything changing monetary or privacy rules additionally needs an accepted RFC.
 - **CI green:** suite across OS/Python matrix, fuzz smoke passing.
-- **Reviewers by blast radius:** `chain/ crypto/ mpc/ zk/` → two approvals + spec cross-check; `wallet/ ai/ l2/` → one; docs → one fast review.
+- **Reviewers by blast radius:** `chain/ crypto/ auth/ zk/` → two approvals + spec cross-check; `wallet/ ai/ l2/` → one; docs → one fast review. (`mpc/` is frozen legacy — changes there need a spec-amendment justification.)
 - **Honest-language rule for user-facing copy:** never "revoked disclosure" (only *expired*), never "untraceable," never recovery guarantees beyond what cryptography provides ([FAQ](FAQ.md), [Security Model](Security-Model.md)). Marketing-adjacent wording gets held to the same bar as code here.
 
 ## House style (short version)
@@ -43,7 +43,7 @@ PR requirements:
 | RingCT transaction layer | primitives ✅, wiring 🚧 | tx build/sign/verify integration into `ChainState`, spend-loop property tests |
 | Daemon & Refraction testnet | next | P2P sync harnesses, Dandelion++ simulation, node ops feedback |
 | ZK circuits | reference-grade | constraint-level reviews, statement-encoding attack ideas, circuit test expansion |
-| MPC protocols | logic ✅ | ceremony edge cases, abort/resume fuzzing |
+| Lean auth (keystore + CAPTCHA gates) | shipped ✅ | adversarial token replay/expiry fuzzing, lockout UX studies |
 | Wallet UX specs & copy | planning | accessibility review of flows, plain-language drafts under honest-language rules |
 | Documentation | ongoing | translations, tutorials, wiki corrections (start [here](Home.md)) |
 

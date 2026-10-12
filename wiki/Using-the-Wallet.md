@@ -51,8 +51,8 @@ Every incoming output gets a local risk score from the on-device model ("from ne
 
 ## Custody & recovery screens
 
-- **Devices & contacts:** list every key share, its owner, last refresh date; add/remove legs triggers re-sharing ceremony.
-- **Recovery:** guided flow with visible 72-hour countdown, warnings broadcast to all devices, cancel button available to any share-holder ([Recovery & Inheritance Guide](Recovery-and-Inheritance-Guide.md)).
+- **Key & password (Settings → Security):** change password, view lockout state (5 wrong tries → cool-down), run a *dry-restore test* proving your 12 words work, rotate the sealed key file location.
+- **Recovery on a new device:** enter your 12-word phrase → same address restored, verified by tests before the app says so ([Recovery & Inheritance Guide](Recovery-and-Inheritance-Guide.md)). Optional trusted-contact mode shows a visible 72-hour countdown with loud warnings and a cancel path for stale credentials.
 - **Duress PIN:** set a second unlock code → opens plausible decoy wallet.
 - **Dead-man switch:** beneficiary + attestator setup, heartbeat status, grace-ping history.
 

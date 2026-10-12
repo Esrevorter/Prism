@@ -6,7 +6,7 @@
 
 ## Status snapshot (October 2026)
 
-**Phase 1 — Foundation: in progress, majority of core logic implemented.** The repository holds a pure-Python reference implementation with property tests and fuzz harnesses: crypto primitives (field/curve/hashing/Pedersen/stealth/CLSAG/Bulletproofs+), chain rules (params/emission/difficulty/block codec/node validation/CLI), MPC key management + recovery state machine, ZK disclosure circuits + PLONK-style verifier, wallet intent compiler + agent grants, and AI prototypes (fraud scoring, deterministic simulator, FL client). Remaining Phase-1 work centers on wiring the full RingCT transaction layer end-to-end inside `ChainState`, daemon networking, and the Refraction testnet milestone.
+**Phase 1 — Foundation: in progress, majority of core logic implemented.** The repository holds a pure-Python reference implementation with property tests and fuzz harnesses: crypto primitives (field/curve/hashing/Pedersen/stealth/CLSAG/Bulletproofs+), chain rules (params/emission/difficulty/block codec/node validation/CLI), MPC key management + recovery state machine, ZK disclosure circuits + PLONK-style verifier, wallet intent compiler + agent grants, and AI prototypes (fraud scoring, deterministic simulator, FL client). Phase-1 core work has landed — including the shipped lean-auth wallet (Amendment A2), GUI v2 installers for Windows/macOS/Linux, and production-parity Refraction testnet with faucet, mining and transaction soak coverage in CI. Remaining: full RingCT output-mixing depth inside `ChainState`, public multi-node networking, and the neuro-inclusive usability study.
 
 ```text
 Phase 1 ████████░░░░░░░░░░░░░░░░░░░░░░░░  Foundation (core logic done; tx layer + netcode next)
@@ -22,7 +22,9 @@ Phase 4 ░░░░░░░░░░░░░░░░░░░░░░░░
 | L1 daemon skeleton: RandomX PoW, 2-min adaptive blocks, Dandelion++ | 3 independent nodes sync & sustain 72 h on **Refraction** testnet | Rules engine ✅ · netcode 🚧 |
 | RingCT core: CLSAG rings, Pedersen commitments, stealth addresses, bulletproof-range integration | Spend-to-self loop passes property tests ≥10⁶ iterations | Primitives ✅ · tx-layer wiring 🚧 |
 | Disclosure Registry + scoped view-key mechanics | Off-chain verifier v0 works end-to-end | Circuits/encoding ✅ |
-| MPC wallet prototype: 2-of-3 solo + share ceremony | Ceremony completes abort-safe/resumable | ✅ logic (`mpc/`) |
+| MPC wallet prototype: 2-of-3 solo + share ceremony | Ceremony completes abort-safe/resumable | 📦 logic shipped, retired by A2 (kept unwired) |
+| Lean-auth wallet: sealed key + CAPTCHA gates + GUI v2 | 60-second setup; every payment human-gated | ✅ shipped v0.1.4–0.1.5 (`auth/`, `gui/`) |
+| Testnet parity (faucet, mining, tx soak) | Cross-validated blocks CLI↔GUI↔daemon | ✅ 10 pinned tests |
 | NL Intent Compiler v0 | 20-intent benchmark ≥95% correct compile-or-safe-fallback | Schema/compiler ✅ |
 
 ## Phase 2 — Intelligence (Months 7–12) 🗓️
@@ -54,7 +56,7 @@ Phase 4 ░░░░░░░░░░░░░░░░░░░░░░░░
 
 1. Formal audit of consensus + RingCT **before mainnet**.
 2. Separate ZKP circuit audits per release.
-3. Continuous fuzzing harnesses (chain parsing, MPC protocol) — already running in CI.
+3. Continuous fuzzing harnesses (chain parsing, wire formats) — already running in CI.
 4. Property-test thresholds per phase (e.g., RingCT spend-loop ≥10⁶ iterations).
 5. Release pipeline blocks on failing test suites ([Testing & Quality](Testing-&-Quality.md), [Release Process](Release-Process.md)).
 

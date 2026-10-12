@@ -6,9 +6,16 @@
 
 *Everything about Prism — from "what is this?" to "how do I audit the code?"*
 
+[![Release](https://img.shields.io/badge/release-v0.1.5-7c5cff?style=flat-square&logo=github&logoColor=white)](https://github.com/Esrevorter/Prism/releases/latest)
+[![Tests](https://img.shields.io/badge/tests-511%20passing-22c55e?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Esrevorter/Prism/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-f5c242?style=flat-square)](../LICENSE)
+
 </div>
 
 ---
+
+> [!TIP]
+> **Fastest route:** grab the wallet from [Releases](https://github.com/Esrevorter/Prism/releases/latest) → ~60-second setup (password + 12 words) → faucet → first private test payment. Details: [Getting Started as a User](Getting-Started-as-a-User.md).
 
 ## 👋 Which door should you walk through?
 
@@ -36,7 +43,7 @@
 ### 🧰 Using Prism
 - [Getting Started as a User](Getting-Started-as-a-User.md) — download to first payment
 - [Using the Wallet](Using-the-Wallet.md) — send, receive, contacts, notifications
-- [Recovery & Inheritance Guide](Recovery-and-Inheritance-Guide.md) — key shares, social recovery, dead-man switch
+- [Recovery & Inheritance Guide](Recovery-and-Inheritance-Guide.md) — recovery phrase, optional trusted-contact path, dead-man switch
 - [Fees & Payment Channels](Fees-and-Payment-Channels.md) — why it costs a tenth of a cent
 - [Preparing a Tax Disclosure](Preparing-a-Tax-Disclosure.md) — accountant-friendly proofs
 
@@ -59,7 +66,7 @@
 
 ## ⚠️ Current status, stated plainly
 
-This project is in **Phase 1: Foundation**. The code in this repository is a *reference implementation* — real, tested, but unaudited and not yet connected to a live public network. **There is no way to acquire, mine, or spend real PRSM today.** Any exchange, token sale, or "PRSM contract address" claiming otherwise is fraudulent.
+**Wallet v0.1.5 is released** — installers for Windows, macOS and Linux are in [Releases](https://github.com/Esrevorter/Prism/releases/latest), running the lean-auth wallet (password-sealed key + CAPTCHA-gated signing, GUI v2) against the production-parity *Refraction* testnet. The chain itself remains a *reference implementation*: real, tested (511 passing), unaudited, and **not yet a live public network**. There is no way to acquire, mine, or spend real PRSM today; any exchange, token sale, or "PRSM contract address" claiming otherwise is fraudulent. Custody note: since spec Amendment A2 the wallet uses a sealed local key + 12-word phrase — the original multi-device MPC ceremony design is retired (kept in-tree as historical evidence).
 
 Track actual progress on the [Roadmap](Roadmap.md). The binding technical source of truth is [`spec.md`](../spec.md) at the repository root; the wiki explains it, the spec governs it.
 

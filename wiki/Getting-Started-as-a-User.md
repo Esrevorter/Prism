@@ -1,17 +1,12 @@
 # Getting Started as a User
 
-*From download to first private payment — written for someone who has never touched a blockchain and should not need to. Note: Prism is pre-testnet; this page documents the *planned* flow plus what works today (the command-line demo).*
+*From download to first private payment — written for someone who has never touched a blockchain and should not need to. As of v0.1.5 the flow below is real: install the wallet from [Releases](https://github.com/Esrevorter/Prism/releases/latest) and it works end-to-end on the Refraction testnet.*
 
 ---
 
 ## ⏳ Reality check first
 
-There is **no live network yet** and no official wallet app. What exists today:
-
-1. **The reference implementation** in this repository — you can run the `prism` program from [Releases](https://github.com/prism-prsm/prism/releases) and explore chain rules, emission math, and demo mining locally. Great for curiosity, zero financial use.
-2. **The documented user experience below** — how the Phase-1+ wallet will work, per [`spec.md` §7](../spec.md). Read it now so that when Refraction (testnet) opens, you'll know exactly what you're doing.
-
-Beware: any site, app, or "PRSM sale" claiming otherwise right now is a scam.
+What exists today: a **working wallet app** (Windows `.msi`, macOS `.dmg`, Linux `.deb`/`.AppImage`) and a **portable CLI**, both published per release, driving the production-parity *Refraction* testnet — faucet, mining, transactions, recovery, persistence all exercised by CI. What does **not** exist: a mainnet. Test-PRSM has no value, and any site, app, or "PRSM sale" claiming otherwise is a scam. Never store real value in pre-release software.
 
 ---
 
@@ -34,21 +29,14 @@ Try these five commands like a guided tour:
 | `prism emit --heights 0,100,100000` | How many PRSM exist at any height |
 | `prism mine --blocks 3` | Watch blocks get mined & validated (demo PoW) |
 
-## 🚀 Step 1 — Wallet setup (Refraction testnet, Phase 1+)
+## 🚀 Step 1 — Wallet setup (works today, ~60 seconds)
 
-Target: under 5 minutes, **no seed phrase required**.
+1. **Install** the wallet for your OS and open it.
+2. **Pick a password.** It seals your key on your machine — it is never sent anywhere, and the strength meter tells you honestly how good it is.
+3. **Write down your 12 words.** One screen, big readable chips, a read-back check, and plain warnings: these words *are* your money on a new device; nobody at Prism can reset them. (They restore the exact same address — verified by tests.)
+4. **First drip:** the built-in faucet sends test-PRSM so you can practice sending/receiving with fake money.
 
-1. **Install & enroll biometrics.** Face ID / fingerprint / Windows Hello stays on your device forever. Nothing about it goes online.
-2. **Choose a custody mode** — the one real decision:
-
-   | Mode | Best for | How recovery works |
-   |---|---|---|
-   | **A. Solo MPC (default)** | Multi-device users | 2-of-3 shares across *your own* devices (phone + desktop + one more). Lose two? You'll be guided into Social mode for the future — the limitation is stated plainly up front (Decision D4: Prism holds no share ever). |
-   | **B. Social MPC (recommended)** | Most people | Your phone + desktop + **4 invited friends** = 5 shares; any 3 sign. Friends see nothing about your funds — they hold opaque numbers. |
-   | **C. Legacy seed** | Crypto veterans | Classic mnemonic. Big warning banner: *this is the irreversible option.* |
-
-3. **Share ceremony:** scan QR codes with each friend (or send invite links); every transfer end-to-end encrypted; liveness-checked; if anyone drops off mid-ceremony, resume safely.
-4. **First drip:** a faucet sends test-PRSM so you can practice sending/receiving with fake money.
+Optional tiers (Settings → Security): a trusted-contact recovery mode with quorum approval + 72 h timelock, or the classic legacy-seed route for crypto veterans — each explained in-app with its trade-offs stated plainly.
 
 ## 💰 Step 2 — Receiving money
 
@@ -68,8 +56,10 @@ What happens, visibly:
 ① Intent compiled     "Pay Alex Rivera  ≈12.4 PRSM ($50 @ $4.03, locked 60 s)"
 ② Simulator preview   Fee: 0.0001 PRSM (~$0.001) · Private to everyone but Alex
 ③ Fraud check         ✓ destination verified in person 3 times · risk low
-④ Confirm             fingerprint / face
-⑤ MPC signing         your phone + desktop (+ contact if needed) co-sign
+④ Human gate          3×3 picture puzzle bound to this exact transaction's
+                      fingerprint — single-use, expires in 2 minutes
+⑤ Key gate            your password unlocks the sealed key; signing happens
+                      locally, nothing leaves the machine
 ⑥ Broadcast           Dandelion++ relay → mempool → block ≤ 2 min
 ⑦ Receipt             copyable disclosure ID — proof this payment existed,
                       usable later if you ever need to show it
@@ -79,7 +69,7 @@ Ambiguity is asked about, never guessed ("Which Alex?" arrives as one tap-to-ans
 
 ## 🔐 Step 4 — Set up your safety net (do this day one)
 
-- **Add recovery contacts** if you chose Solo mode — 3-of-5 takes ten minutes and prevents the "lost both devices" dead end.
+- **Test your backup once** — the app offers a dry-run restore so you *know* the 12 words work before you ever need them; optionally add trusted contacts for the tier-B recovery mode.
 - **Turn on the dead-man switch** (optional): choose beneficiary + attestators; if you're unreachable 365 days, signed-heartbeat absence + attestator quorum starts their claim, with 30-day grace pings to you throughout. Full guide: [Recovery & Inheritance](Recovery-and-Inheritance-Guide.md).
 - **Set your comfort threshold** — amounts above it always wait out a veto window, even manual sends, if panic-lock is on.
 

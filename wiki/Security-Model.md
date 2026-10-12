@@ -15,7 +15,7 @@ A privacy product that oversells its guarantees creates two harms: users make ri
 | **Double-spend attempt** | Every spend publishes a unique *key image*; a second spend of the same coin shows the same image → consensus rejects it outright (E1). | None at protocol level; UI shows depth confidence anyway. |
 | **51% reorg / chain reversal** | 10-block spend maturity + depth-based confidence in the wallet; exchanges advised ≥30 blocks; channel closes protected by penalty transactions (E2). | Deep reorgs can reverse very-recent confirmations — normal PoW risk, priced into confirmation UX. |
 | **Transaction graph analysis** | Amounts hidden (commitments), senders hidden (rings ≥16, CLSAG), receivers one-time (stealth), origin IP hidden (Dandelion++). Analyst sees per-tx ≤1/16 odds, refreshed each spend. | Global passive adversaries with long horizons and quantum-scale compute degrade ring anonymity over decades — acknowledged, not hand-waved (§11.2). Mass-decoy attacks mitigated by recency-weighted sampling with age floors. |
-| **Stolen device (theft)** | Local key share is enclave-wrapped and biometric-gated; one below-threshold share is mathematically useless for 2-of-3+/3-of-5 schemes (E8). | Malware that reads live wallet memory is out of scope beyond OS protections — stated, not promised. |
+| **Stolen device (theft)** | The spend key is sealed by the user's password (scrypt + encrypt-then-MAC); without it the file is cryptographically noise, and 5 failed unlocks trigger lockout (E8, A2). Signing also needs a fresh human-presence token bound to the transaction bytes. | An unlocked session with screen-watching malware is out of scope beyond OS protections — stated, not promised. The CAPTCHA proves presence, not identity; the UI says so plainly. |
 | **Lost device** | Social recovery via quorum of your own shares/contacts; **72 h timelock**, loud warnings to all devices, any stale-share holder can cancel; then proactive re-sharing revokes old shares (E9). | Collusion of a full quorum of malicious contacts + timing luck is the main attack path — mitigated by requiring ≥1 device share in recovery subsets (user-configurable), still studied as R3. |
 | **Coercion / duress** | Duress PIN opens a plausible decoy wallet; forced recovery still takes 72 h in visible alarm state; optional "panic lock" freezes sends above comfort threshold even manually (E10). | No system defeats a determined armed adversary at the meat-puppet layer; decoys reduce incentive, delays create intervention windows. |
 | **Sanctioned inbound funds** | They arrive; local risk label flags them; spending them doesn't expose unrelated outputs. Flagging ≠ chain blacklist (E17). | Choosing to cooperate is the user's disclosure decision — provenance circuits exist exactly for that ([Prism Protocol](The-Prism-Protocol.md)). |
@@ -39,7 +39,7 @@ Spec §11.1 enumerates eighteen concrete scenarios (E1–E18) with handling — 
 
 ```text
   attacker wants your coins ──▶ must pass ALL of:
-    1. threshold of MPC shares        (single device stolen? below quorum = useless)
+    1. password-unsealed local key    (device stolen? sealed file = noise until unlocked)
     2. biometric gate on local share  (enclave-wrapped, never exported)
     3. 72 h recovery timelock         (every honest share-holder can cancel)
     4. your explicit sign-off         (AI cannot sign; policy engine outside the LLM)
@@ -50,7 +50,7 @@ Each layer fails open toward *delay and visibility*, never toward silent loss. T
 
 ## Bug bounty & disclosure
 
-Program launches Phase 2. Until then: security issues → private report through repository SECURITY contact; expect acknowledgment within 72 h, coordinated disclosure up to 90 days. Fuzzing harnesses (chain parsing, MPC protocol) run continuously in CI — see [Testing & Quality](Testing-&-Quality.md).
+Program launches Phase 2. Until then: security issues → private report through repository SECURITY contact; expect acknowledgment within 72 h, coordinated disclosure up to 90 days. Fuzzing harnesses (chain parsing, wire-format) run continuously in CI — see [Testing & Quality](Testing-&-Quality.md).
 
 ---
 
