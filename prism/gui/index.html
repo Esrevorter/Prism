@@ -68,7 +68,7 @@
   <section class="screen" id="screen-phrase" hidden>
     <div class="card glass form-card flip-in">
       <h2>Write these twelve words on paper</h2>
-      <div class="warn-strip">⚠️ This is shown <b>once</b>. It's the only way back in if you forget
+      <div class="warn-strip" id="phrase-warning">⚠️ This is shown <b>once</b>. It's the only way back in if you forget
         your password — Prism cannot restore it for you. Keep the paper somewhere safe, offline.
         <button class="help-dot" data-help="why-words" aria-label="Why twelve words?">?</button></div>
       <ol class="word-grid stagger" id="word-grid"></ol>
@@ -120,6 +120,7 @@
         <span class="chip devnet">devnet</span>
       </div>
       <p class="big-number count-up" id="balance">—</p>
+      <p class="muted" id="balance-note">on your local devnet</p>
       <p class="muted mono" id="my-address" title="Your receiving address"></p>
       <div class="row">
         <button class="btn secondary sm" id="faucet-btn">Get test PRSM</button>

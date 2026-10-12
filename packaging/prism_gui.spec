@@ -30,6 +30,7 @@ a = Analysis(
     ],
     hiddenimports=[
         'prism.rpc.launcher', 'prism.rpc.server', 'prism.rpc.service',
+        'prism.auth.captcha', 'prism.auth.keystore',
         'prism.chain.node', 'prism.chain.block', 'prism.chain.params',
         'prism.chain.emission', 'prism.chain.pow', 'prism.chain.difficulty',
         'prism.chain.denylist',
@@ -37,7 +38,6 @@ a = Analysis(
         'prism.crypto.pedersen', 'prism.crypto.clsag', 'prism.crypto.bulletproof',
         'prism.crypto.stealth',
         'prism.ai.fraud', 'prism.ai.simulator',
-        'prism.mpc.frost', 'prism.mpc.recovery', 'prism.mpc.sharing',
         'prism.wallet.agent_auth', 'prism.wallet.intent', 'prism.wallet.disclosure',
     ],
     hookspath=[],

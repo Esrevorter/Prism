@@ -1,6 +1,7 @@
-/* Prism GUI v0 — thin JSON-RPC client + UI wiring.
-   All risk/simulation/plain-language fields come from the server; this
-   file only renders them (honest-UX: the front end never invents reassurance). */
+/* Prism GUI v2 — lean-auth wallet controller (spec §9, Amendment A2-2026-10).
+   Honest-UX rule: every reassurance/risk sentence is rendered verbatim from
+   server-computed fields (`human`, `warning`, `explanation`). This file only
+   wires screens together and animates them — it never invents comfort text. */
 "use strict";
 
 const RPC_URL = "/jsonrpc";
@@ -24,56 +25,213 @@ const el = (tag, cls, text) => {
   if (text !== undefined) n.textContent = text;
   return n;
 };
+const fmtPRSM = (shard) => (shard / 1e9).toLocaleString(undefined,
+  { maximumFractionDigits: 9 });
 
+// ---------- screen router (spring-ish fade/slide via CSS keyframes) ----------
+const SCREENS = ["welcome", "create", "phrase", "restore", "unlock", "app"];
+function show(name) {
+  for (const s of SCREENS) {
+    const node = $(`#screen-${s}`);
+    if (!node) continue;
+    if (s === name) {
+      node.hidden = false;
+      node.classList.remove("screen-enter");   // restart animation
+      void node.offsetWidth;
+      node.classList.add("screen-enter");
+    } else node.hidden = true;
+  }
+  $("#lock-btn").hidden = !(name === "app");
+}
+
+// ---------- toast + plain-language status line ----------
+let _toastTimer = null;
+function toast(msg, ms = 3500) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove("show"), ms);
+}
+
+// ---------- boot: auth.status decides the first screen ----------
+let _pwCache = null;          // session-only; cleared on lock/close
 let currentIntent = null;
 let riskAcknowledged = false;
+let capState = null;          // {challenge, picks:Set, token, timer, deadline}
 
-// ---------- boot / status ----------
-async function refreshAll() {
+async function boot() {
   try {
-    const ping = await rpc("health.ping");
-    $("#net-status").textContent = `connected · ${ping.network} · block ${ping.tip_height}`;
-    const info = await rpc("chain.info");
-    $("#chain-info").textContent = JSON.stringify(info, null, 2);
-    // live chain state from the daemon's block store (not fixtures)
-    try {
-      const recent = await rpc("chain.blocks", { limit: 5 });
-      const list = el("ul", "effect-list");
-      recent.blocks.forEach(b => list.appendChild(el("li", null,
-        `#${b.height} · ${b.hash.slice(0, 12)}… · ${b.tx_count} tx`)));
-      $("#chain-info").appendChild(list);
-    } catch { /* older daemon without chain.blocks */ }
-    const bal = await rpc("wallet.balance");
-    $("#balance").textContent = `${bal.balance_prsm} PRSM`;
-    $("#balance-note").textContent = "on your local devnet";
-    const ct = await rpc("contacts.list");
-    const ul = $("#contacts");
-    ul.replaceChildren(...ct.contacts.map(c => el("li", null, c.display_name)));
-    const cer = await rpc("mpc.ceremony_status");
-    if (cer.status === "complete") renderCeremony(cer);
-    refreshRecovery();
-    refreshPlans();
-  } catch (e) {
-    $("#net-status").textContent = "node unreachable — start: python -m prism.rpc.server";
+    const st = await rpc("auth.status");
+    if (!st.exists) show("welcome");
+    else if (!st.unlocked) show("unlock");
+    else { show("app"); await refreshAll(); }
+  } catch {
+    $("#net-status").textContent = "node unreachable — start with: prism gui";
   }
 }
 
-// ---------- intent flow ----------
+// ---------- welcome / create ----------
+$("#start-btn").addEventListener("click", () => show("create"));
+$("#restore-btn").addEventListener("click", () => show("restore"));
+
+$("#pw1").addEventListener("input", () => {
+  const v = $("#pw1").value;
+  const m = $("#pw-meter");
+  const score = Math.min(1, v.length / 24);       // calm, non-judgy meter
+  m.style.setProperty("--fill", `${score * 100}%`);
+  m.parentElement.classList.toggle("weak", v.length > 0 && v.length < 10);
+});
+
+$("#create-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const p1 = $("#pw1").value, p2 = $("#pw2").value;
+  if (p1 !== p2) { $("#pw-hint").textContent = "The two passwords don't match yet."; return; }
+  try {
+    const r = await rpc("auth.create", { password: p1 });
+    _pwCache = p1;
+    const grid = $("#word-grid");
+    grid.replaceChildren(...r.recovery_phrase.split(" ").map((w, i) => {
+      const li = el("li", "word");
+      li.append(el("span", "num", String(i + 1)), el("span", null, w));
+      return li;
+    }));
+    $("#phrase-warning").textContent = r.warning;   // server copy, verbatim
+    $("#wrote-it").checked = false;
+    $("#phrase-done-btn").disabled = true;
+    show("phrase");
+  } catch (e) { toast(e.message); }
+});
+
+$("#wrote-it").addEventListener("change", (ev) => {
+  $("#phrase-done-btn").disabled = !ev.target.checked;
+});
+$("#phrase-done-btn").addEventListener("click", async () => {
+  show("app"); await refreshAll();
+  toast("Wallet ready. Your address is on the balance card.");
+});
+
+$("#restore-cancel").addEventListener("click", () => show("welcome"));
+$("#restore-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    const r = await rpc("auth.recover",
+      { phrase: $("#phrase-in").value.trim(), new_password: $("#rpw").value });
+    _pwCache = $("#rpw").value;
+    toast(r.human);
+    show("app"); await refreshAll();
+  } catch (e) { toast(e.message); }
+});
+
+// ---------- unlock / lock ----------
+$("#unlock-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    const r = await rpc("auth.unlock", { password: $("#upw").value });
+    _pwCache = $("#upw").value; $("#upw").value = "";
+    toast(r.human);
+    show("app"); await refreshAll();
+  } catch (e) {
+    $("#unlock-note").textContent = e.message;     // server-side lockout copy
+    $("#upw").select();
+  }
+});
+$("#forgot-btn").addEventListener("click", () => show("restore"));
+$("#lock-btn").addEventListener("click", async () => {
+  try {
+    const r = await rpc("auth.lock");
+    _pwCache = null; capState = null;
+    toast(r.human); show("unlock");
+  } catch (e) { toast(e.message); }
+});
+
+// ---------- app dashboard refresh ----------
+async function refreshAll() {
+  try {
+    const ping = await rpc("health.ping");
+    $("#net-status").textContent =
+      `connected · ${ping.network} · block ${ping.tip_height}`;
+    const bal = await rpc("wallet.balance");
+    animateNumber($("#balance"), bal.balance_prsm);
+    $("#my-address").textContent = bal.address || "";
+    const ct = await rpc("contacts.list");
+    $("#contacts").replaceChildren(
+      ...ct.contacts.map(c => el("li", null, c.display_name)));
+    const hist = await rpc("auth.history");
+    const card = $("#activity-card");
+    if (hist.count > 0) {
+      card.hidden = false;
+      $("#activity").replaceChildren(...hist.txs.map(t =>
+        el("li", null, `sent ${t.amount_prsm} PRSM · block ${t.height} · ${t.txid.slice(0, 10)}…`)));
+    } else card.hidden = true;
+    try {
+      const info = await rpc("chain.info");
+      $("#chain-info").textContent = JSON.stringify(info, null, 2);
+    } catch { /* advanced panel optional */ }
+    refreshPlans();
+  } catch (e) {
+    $("#net-status").textContent = "node unreachable — start: prism gui";
+  }
+}
+
+function animateNumber(node, target) {
+  const from = parseFloat((node.textContent || "0").replace(/[^\d.]/g, "")) || 0;
+  const t0 = performance.now(), dur = 650;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) { node.textContent = `${target} PRSM`; return; }
+  (function tick(now) {
+    const k = Math.min(1, (now - t0) / dur);
+    const eased = 1 - Math.pow(1 - k, 3);
+    node.textContent = `${(from + (target - from) * eased).toFixed(
+      String(target).includes(".") ? String(target).split(".")[1].length : 0)} PRSM`;
+    if (k < 1) requestAnimationFrame(tick);
+  })(t0);
+}
+
+// ---------- faucet ----------
+$("#faucet-btn").addEventListener("click", async () => {
+  $("#balance-note").textContent = "mining test blocks…";
+  try {
+    const r = await rpc("chain.mine", { count: 5 });
+    $("#balance-note").textContent = r.human || "on your local devnet";
+  } catch (e) { $("#balance-note").textContent = e.message; }
+  refreshAll();
+});
+$("#copy-addr-btn").addEventListener("click", async () => {
+  const a = $("#my-address").textContent;
+  if (!a) return;
+  try { await navigator.clipboard.writeText(a); toast("Address copied."); }
+  catch { toast(a); }
+});
+
+// ---------- intent flow (plain-words bar → review) ----------
 $("#intent-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const utterance = $("#utterance").value.trim();
   if (!utterance) return;
-  try {
-    const it = await rpc("intent.compile", { utterance });
-    showIntent(it);
-  } catch (e) { renderError(e.message); }
+  try { showIntent(await rpc("intent.compile", { utterance })); }
+  catch (e) { renderError(e.message); }
 });
+document.querySelectorAll(".chip.suggest").forEach(b =>
+  b.addEventListener("click", () => {
+    $("#utterance").value = b.dataset.say;
+    $("#intent-form").requestSubmit();
+  }));
+
+function setStepper(i) {
+  const st = $("#stepper");
+  st.hidden = false;
+  st.querySelectorAll(".step").forEach((s, idx) => {
+    s.classList.toggle("done", idx < i);
+    s.classList.toggle("active", idx === i);
+  });
+}
+function hideStepper() { $("#stepper").hidden = true; }
 
 function showIntent(it) {
   currentIntent = it;
   riskAcknowledged = false;
-  const chips = $("#chips");
-  const review = $("#review");
+  const chips = $("#chips"), review = $("#review");
   if (it.status === "draft" && it.clarify) {
     chips.hidden = false;
     chips.replaceChildren(
@@ -85,29 +243,24 @@ function showIntent(it) {
           catch (e) { renderError(e.message); }
         };
         return b;
-      })
-    );
-    review.hidden = true;
+      }));
+    review.hidden = true; hideStepper();
     return;
   }
   chips.hidden = true;
   review.hidden = false;
-  // fraud-simulator panel: live SigningGate review against real daemon state.
-  // Banner text + plain-english preview come from the server only (honest UX).
+  setStepper(0);
   renderReviewBody();
 }
 
 async function renderReviewBody() {
   if (!currentIntent) return;
-  const body = $("#review-body");
-  const banner = $("#fraud-banner");
+  const body = $("#review-body"), banner = $("#fraud-banner");
   let rv = null;
   try {
     rv = await rpc("intent.review", {
-      intent_id: currentIntent.intent_id,
-      acknowledged_risk: riskAcknowledged,
-    });
-  } catch (e) { /* fall back to the plain compile payload below */ }
+      intent_id: currentIntent.intent_id, acknowledged_risk: riskAcknowledged });
+  } catch { /* fall back to compile payload below */ }
   body.replaceChildren();
   banner.hidden = true;
   banner.className = "risk-banner";
@@ -119,29 +272,25 @@ async function renderReviewBody() {
       banner.hidden = false;
       banner.classList.add(rv.ui_band);
       banner.textContent = rv.interruption && !riskAcknowledged
-        ? `⏸ ${rv.human}`
-        : `⚠ ${rv.risk.reasons.join(" · ")}`;
+        ? `⏸ ${rv.human}` : `⚠ ${(rv.risk?.reasons || []).join(" · ")}`;
     }
     if (rv.interruption && !riskAcknowledged) {
       $("#sleep-btn").hidden = false;
-      $("#confirm-btn").disabled = true;   // gate owns proceed; UI mirrors it
+      $("#confirm-btn").disabled = true;    // gate owns proceed; UI mirrors it
     }
-    // Template-pack copy (sim_explain_v1): band-specific plain-language
-    // rendered verbatim from the server — honest-UX, nothing invented here.
     body.appendChild(el("p", null, rv.explanation || rv.plain_english || rv.human));
     if (!rv.proceed && !rv.interruption)
       body.appendChild(el("div", "warning-card",
-        rv.reasons.join(" — ") || "This can't be confirmed yet."));
+        (rv.reasons || []).join(" — ") || "This can't be confirmed yet."));
     if (rv.sim_digest)
       body.appendChild(el("p", "muted",
         `Preview fingerprint: ${rv.sim_digest.slice(0, 12)}… ` +
         `(what you see is exactly what gets signed)`));
     return;
   }
-  const sim = (currentIntent.simulation) || {};
-  const effects = sim.predicted_effects || [];
+  const sim = currentIntent.simulation || {};
   const list = el("ul", "effect-list");
-  effects.forEach(ef => list.appendChild(el("li", null,
+  (sim.predicted_effects || []).forEach(ef => list.appendChild(el("li", null,
     typeof ef === "string" ? ef : JSON.stringify(ef))));
   body.appendChild(list);
   (sim.warnings || []).forEach(w =>
@@ -151,176 +300,197 @@ async function renderReviewBody() {
 }
 
 $("#sleep-btn").addEventListener("click", () => {
-  // calm interruption (§7.3 step 4): never pressure the user onward
-  $("#review").hidden = true;
-  currentIntent = null;
-  $("#net-status").textContent = "paused safely — nothing was sent";
+  $("#review").hidden = true; currentIntent = null; hideStepper();
+  toast("Paused safely — nothing was sent.");
 });
 
 function suggestChips(clarify) {
-  // Server never guesses; these are *answers the user might mean*, offered
-  // as one-tap chips per §7.3 step 4. Contacts list drives recipient chips.
   if (/who|which/i.test(clarify)) return ["Alex Rivera", "Mom"];
   if (/how much/i.test(clarify)) return ["$10", "$20", "1 PRSM"];
-  if (/did you mean/i.test(clarify)) return [clarify.match(/mean (.+)\?/)?.[1] || "yes"];
+  if (/did you mean/i.test(clarify))
+    return [clarify.match(/mean (.+)\?/)?.[1] || "yes"];
   return ["yes", "no"];
 }
 
 function renderError(msg) {
-  const body = $("#review-body");
   $("#review").hidden = false;
-  body.replaceChildren(el("div", "warning-card", msg));
+  $("#review-body").replaceChildren(el("div", "warning-card", msg));
 }
 
+// ---------- stage 1→2: confirm, then CAPTCHA ----------
 $("#confirm-btn").addEventListener("click", async () => {
   if (!currentIntent) return;
   try {
-    const done = await rpc("intent.confirm", { intent_id: currentIntent.intent_id });
-    const sign = await rpc("mpc.sign_preview", { intent_id: currentIntent.intent_id })
-      .catch(() => null);
-    const body = $("#review-body");
-    body.replaceChildren(
-      el("p", null, "Confirmed ✓"),
-      el("p", "muted", done.confirmation_envelope?.canonical_digest_hex
-        ? `Audit digest: ${done.confirmation_envelope.canonical_digest_hex.slice(0, 16)}…`
-        : ""),
-      sign ? el("p", null, sign.human) : el("p", "muted",
-        "Tip: run “Set up device keys” to see threshold signing.")
-    );
-    refreshAll();
+    await rpc("intent.confirm", { intent_id: currentIntent.intent_id });
+    $("#review").hidden = true;
+    await startCaptcha();
   } catch (e) { renderError(e.message); }
 });
-
 $("#cancel-btn").addEventListener("click", () => {
-  $("#review").hidden = true;
-  $("#chips").hidden = true;
-  currentIntent = null;
-  riskAcknowledged = false;
+  $("#review").hidden = true; $("#chips").hidden = true;
+  currentIntent = null; riskAcknowledged = false; hideStepper(); resetStages();
 });
 
-// ---------- faucet + ceremony ----------
-$("#faucet-btn").addEventListener("click", async () => {
-  $("#balance-note").textContent = "mining test blocks…";
-  try { await rpc("chain.mine", { count: 5 }); } catch (e) { /* budget cap */ }
-  refreshAll();
-});
-
-$("#ceremony-btn").addEventListener("click", async () => {
-  $("#ceremony-status").textContent = "Setting up your 2-of-3 device keys…";
-  try {
-    const st = await rpc("mpc.ceremony_start");
-    renderCeremony(st);
-  } catch (e) { $("#ceremony-status").textContent = e.message; }
-});
-
-function renderCeremony(st) {
-  // share-handling UX: show only what's safe + honest — device labels and
-  // short fingerprints, never raw share values; every reassurance line is
-  // server-computed text (this file adds none of its own).
-  $("#ceremony-status").textContent = `${st.stage} (${st.percent}%)`;
-  const card = $("#devices-card");
-  if (st.status !== "complete" || !st.devices) { card.hidden = true; return; }
-  card.hidden = false;
-  $("#devices-human").textContent = st.human || "";
-  const ul = $("#devices");
-  ul.replaceChildren(...st.devices.map(d => {
-    const li = el("li", "device-item");
-    li.appendChild(el("strong", null, d.label));
-    li.appendChild(el("span", "fingerprint", `share ${d.share_fingerprint}`));
-    li.appendChild(el("span", "muted", d.role));
-    return li;
-  }));
-  const help = st.share_handling || {};
-  $("#share-help-body").textContent =
-    [help.never_shown, help.backup_ready, help.what_if_lost]
-      .filter(Boolean).join(" ");
+function resetStages() {
+  stopCapTimer();
+  capState = null;
+  $("#captcha-stage").hidden = true;
+  $("#sign-stage").hidden = true;
+  $("#receipt").hidden = true;
 }
 
-$("#ceremony-redo-btn").addEventListener("click", async () => {
+async function startCaptcha() {
   try {
-    await rpc("mpc.ceremony_reset");
-    $("#devices-card").hidden = true;
-    $("#ceremony-status").textContent = "";
-    const st = await rpc("mpc.ceremony_start");   // fresh shares via reshare
-    renderCeremony(st);
-  } catch (e) { $("#ceremony-status").textContent = e.message; }
+    const ch = await rpc("auth.challenge", { intent_id: currentIntent.intent_id });
+    capState = { ch, picks: new Set(), token: null, timer: null,
+                 deadline: ch.expires_at * 1000 };
+    $("#cap-prompt").textContent = ch.prompt;
+    $("#cap-img").src = `data:image/png;base64,${ch.png_base64}`;
+    const taps = $("#cap-taps");
+    taps.replaceChildren(...Array.from({ length: 9 }, (_, i) => {
+      const b = el("button", "tap");
+      b.type = "button";
+      b.setAttribute("aria-label", `tile ${i + 1}`);
+      b.addEventListener("click", () => {
+        if (capState.picks.has(i)) capState.picks.delete(i);
+        else capState.picks.add(i);
+        b.classList.toggle("picked");
+        $("#cap-next").disabled = capState.picks.size === 0;
+      });
+      return b;
+    }));
+    $("#cap-next").disabled = true;
+    $("#cap-burst").hidden = true;
+    $("#cap-hint").textContent = ch.human;
+    $("#captcha-stage").hidden = false;
+    setStepper(1);
+    startCapTimer(ch.ttl_s || 120);
+  } catch (e) { toast(e.message); }
+}
+
+function startCapTimer(ttl) {
+  stopCapTimer();
+  const ring = $("#cap-ring");
+  const C = 2 * Math.PI * 20;
+  ring.style.strokeDasharray = `${C}`;
+  const tick = () => {
+    const left = Math.max(0, capState.deadline - Date.now()) / 1000;
+    ring.style.strokeDashoffset = `${C * (1 - left / ttl)}`;
+    if (left <= 0) {
+      stopCapTimer();
+      $("#cap-hint").textContent = "That picture expired — get a fresh one.";
+      $("#cap-next").disabled = true;
+    }
+  };
+  tick();
+  capState.timer = setInterval(tick, 250);
+}
+function stopCapTimer() { if (capState?.timer) clearInterval(capState.timer); }
+
+$("#cap-refresh").addEventListener("click", startCaptcha);
+
+$("#cap-next").addEventListener("click", async () => {
+  if (!capState) return;
+  try {
+    const solved = await rpc("auth.solve", {
+      challenge_id: capState.ch.challenge_id,
+      picks: [...capState.picks],
+      digest_hex: capState.ch.digest_hex });
+    stopCapTimer();
+    capState.token = solved.token;
+    const burst = $("#cap-burst");
+    burst.hidden = false; burst.textContent = solved.human;
+    setTimeout(() => {
+      $("#captcha-stage").hidden = true;
+      $("#sign-stage").hidden = false;
+      setStepper(2);
+      $("#spw").focus();
+    }, 700);
+  } catch (e) {
+    toast(e.message);
+    startCaptcha();                       // fresh picture, calm retry
+  }
 });
+
+// ---------- stage 3: password signs THIS payment ----------
+$("#sign-back").addEventListener("click", () => {
+  $("#sign-stage").hidden = true;
+  $("#review").hidden = false;
+  setStepper(0);
+});
+$("#sign-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!capState?.token) { toast("Picture check first."); return; }
+  try {
+    const r = await rpc("auth.sign", {
+      intent_id: currentIntent.intent_id,
+      password: $("#spw").value,
+      token: capState.token });
+    $("#spw").value = "";
+    $("#sign-stage").hidden = true;
+    $("#receipt-line").textContent = r.human;
+    $("#receipt-detail").textContent =
+      `tx ${r.txid.slice(0, 16)}… · block ${r.height} · ` +
+      `balance now ${fmtPRSM(r.balance_shard)} PRSM`;
+    $("#receipt").hidden = false;
+    setStepper(3);
+    confettiBurst();
+    refreshAll();
+  } catch (e) {
+    toast(e.message);                     // wrong password / stale token
+    if (/expired|does not match/.test(e.message)) {
+      $("#sign-stage").hidden = true; startCaptcha();
+    }
+  }
+});
+
+$("#receipt-done").addEventListener("click", () => {
+  $("#receipt").hidden = true; resetStages(); hideStepper();
+  currentIntent = null; $("#utterance").value = "";
+});
+$("#receipt-another").addEventListener("click", () => {
+  $("#receipt").hidden = true; resetStages(); hideStepper();
+  currentIntent = null; $("#utterance").value = ""; $("#utterance").focus();
+});
+
+// ---------- confetti (tiny, dependency-free, respects reduced motion) ----------
+function confettiBurst() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const host = $("#confetti");
+  host.replaceChildren();
+  const colors = ["#8b85ff", "#5eead4", "#fbbf24", "#f472b6", "#60a5fa"];
+  for (let i = 0; i < 28; i++) {
+    const c = el("i");
+    c.style.left = `${8 + Math.random() * 84}%`;
+    c.style.background = colors[i % colors.length];
+    c.style.animationDelay = `${Math.random() * 0.25}s`;
+    c.style.transform = `rotate(${Math.random() * 360}deg)`;
+    host.appendChild(c);
+  }
+  setTimeout(() => host.replaceChildren(), 1800);
+}
 
 // ---------- contacts ----------
 $("#contact-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   try {
-    await rpc("contacts.add", { name: $("#ct-name").value, address: $("#ct-addr").value });
+    await rpc("contacts.add",
+      { name: $("#ct-name").value, address: $("#ct-addr").value });
     $("#ct-name").value = ""; $("#ct-addr").value = "";
     refreshAll();
-  } catch (e) { alert(e.message); }
+  } catch (e) { toast(e.message); }
 });
 
-// ---------- recovery (Phase 3 GA): status, veto, restore — server copy only ----------
-async function refreshRecovery() {
-  const card = $("#recovery-card");
-  let st;
-  try { st = await rpc("recovery.status"); }
-  catch { card.hidden = true; return; }   // no ceremony yet — stay calm/hidden
-  card.hidden = false;
-  $("#recovery-human").textContent = st.human || "";
-  const facts = [
-    `Scheme: any ${st.quorum} of ${st.legs} helpers can restore access`,
-    `Waiting period before anything unlocks: ${st.timelock_hours} hours`,
-    `Break between recoveries: ${st.cooldown_days} days`,
-  ];
-  if (st.phase === "pending" && st.window_remaining_s > 0) {
-    facts.unshift(`Unlocking in ${Math.ceil(st.window_remaining_s / 3600)} hour(s) · ` +
-                  `${st.veto_legs_armed} device(s) can still stop it`);
-  }
-  $("#recovery-facts").replaceChildren(...facts.map(t => el("li", null, t)));
-  const actions = $("#recovery-actions");
-  actions.replaceChildren();
-  if (st.phase === "pending") {
-    const cancel = el("button", "btn danger", "Cancel this recovery");
-    cancel.onclick = async () => {
-      try { const r = await rpc("recovery.cancel", { share_index: 1 });
-            $("#recovery-human").textContent = r.human; refreshRecovery(); }
-      catch (e) { $("#recovery-human").textContent = e.message; }
-    };
-    const fin = el("button", "btn primary", "Finish recovery now");
-    fin.onclick = async () => {
-      try { await rpc("recovery.finalize"); refreshRecovery(); }
-      catch (e) { $("#recovery-human").textContent = e.message; }
-    };
-    actions.append(cancel, fin);
-  } else {
-    const demo = el("button", "btn secondary", "Practice a recovery (devnet)");
-    demo.title = "Runs the full 72-hour flow on your local devnet only";
-    demo.onclick = async () => {
-      try {
-        await rpc("recovery.initiate", { collectors: [1, 2], stale_legs: [3] });
-        await rpc("recovery.advance_window", { hours: 73 });
-        await rpc("recovery.finalize");
-        refreshRecovery();
-      } catch (e) { $("#recovery-human").textContent = e.message; }
-    };
-    const social = el("button", "btn secondary", "Add trusted contacts (3-of-5)");
-    social.onclick = async () => {
-      try { const r = await rpc("recovery.attach_social");
-            $("#recovery-human").textContent = r.human; refreshRecovery(); }
-      catch (e) { $("#recovery-human").textContent = e.message; }
-    };
-    actions.append(demo, social);
-  }
-}
-
-// ---------- plans (agent runtime): pending digest, one-tap veto/revoke ----------
-let _activeGrant = null;   // grant id from the last plan we created this session
-
+// ---------- plans (agent runtime) ----------
+let _activeGrant = null;
 async function refreshPlans() {
-  const pend = await rpc("agent.pending");
+  let pend;
+  try { pend = await rpc("agent.pending"); } catch { return; }
   const card = $("#plans-card");
   if (!_activeGrant && pend.count === 0) { card.hidden = true; return; }
   card.hidden = false;
   $("#plans-human").textContent = pend.human || "";
-  const box = $("#pending-digests");
-  box.replaceChildren(...pend.pending.map(p => {
+  $("#pending-digests").replaceChildren(...(pend.pending || []).map(p => {
     const c = el("div", "digest-card");
     c.appendChild(el("p", "digest-line", p.line));
     const row = el("div", "row");
@@ -330,7 +500,7 @@ async function refreshPlans() {
         const r = await rpc("agent.veto", { action_id: p.short_id });
         c.querySelector(".digest-line").textContent = r.human || "Stopped.";
         refreshAll();
-      } catch (e) { alert(e.message); }
+      } catch (e) { toast(e.message); }
     });
     const rBtn = el("button", "btn danger", "Stop the whole plan");
     rBtn.addEventListener("click", async () => {
@@ -338,14 +508,12 @@ async function refreshPlans() {
         const r = await rpc("agent.revoke", {});
         $("#plans-human").textContent = r.human || "Plan stopped.";
         refreshAll();
-      } catch (e) { alert(e.message); }
+      } catch (e) { toast(e.message); }
     });
-    row.append(vBtn, rBtn);
-    c.appendChild(row);
+    row.append(vBtn, rBtn); c.appendChild(row);
     return c;
   }));
 }
-
 $("#plan-form")?.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   try {
@@ -354,8 +522,7 @@ $("#plan-form")?.addEventListener("submit", async (ev) => {
       _activeGrant = g.grant_id;
     }
     const r = await rpc("agent.propose",
-                        { utterance: $("#plan-utterance").value,
-                          grant_id: _activeGrant });
+      { utterance: $("#plan-utterance").value, grant_id: _activeGrant });
     $("#plans-card").hidden = false;
     $("#plans-human").textContent = r.ok !== false
       ? (r.human || "Queued. You have 24 hours to change your mind.")
@@ -365,15 +532,68 @@ $("#plan-form")?.addEventListener("submit", async (ev) => {
   } catch (e) { $("#plans-human").textContent = e.message; }
 });
 
+// ---------- context help (help-dot → dialog, all static copy) ----------
+const HELP = {
+  "what-is-prism": ["What is Prism?",
+    "A private, human-first coin. You say what you want in plain words; Prism " +
+    "re-states it literally, checks it against fraud patterns, and only sends " +
+    "money after YOU approve it twice — once with a picture check, once with " +
+    "your password. Everything runs on your own computer."],
+  "why-password": ["Why a password?",
+    "Your spending key lives only on this machine, sealed with this password. " +
+    "Prism's servers never see it — there are no servers. Forget it and you " +
+    "still have your 12 recovery words; lose both and the wallet is truly " +
+    "yours alone: nobody can recover it, including us."],
+  "why-words": ["Why twelve words?",
+    "They are your wallet in paper form. Anyone holding the whole computer " +
+    "might read your password, but the words recreate the key even if this " +
+    "machine burns. Write them offline; never photograph or email them."],
+  "locked": ["Why is my wallet locked?",
+    "Locking wipes the decrypted key from memory. The encrypted copy stays on " +
+    "disk, so unlocking is instant — but nothing can be signed while locked. " +
+    "It's the seatbelt of the wallet."],
+  "balance": ["About your balance",
+    "Balances live on your local devnet chain — real blocks, real mining, " +
+    "your computer only. 'Get test PRSM' mines five blocks so you can try " +
+    "sending without risk."],
+  "nl-bar": ["Plain words, checked twice",
+    "Type an instruction like 'send 2 PRSM to Alex'. Prism compiles it into a " +
+    "literal intent, asks clarifying questions instead of guessing, and shows " +
+    "a full preview before anything is signed."],
+  "captcha": ["What does the picture prove?",
+    "That a human is present right now, at THIS payment. The answer is " +
+    "cryptographically bound to the exact transaction fingerprint you just " +
+    "approved — a solved check can never authorize a different payment. It " +
+    "expires in two minutes and works once. It proves presence, not identity: " +
+    "that's why the password step follows."],
+  "signing": ["How signing works",
+    "Your password unlocks the key just long enough to sign this one payment " +
+    "digest, then the signature is broadcast to your local chain. The signed " +
+    "bytes are exactly what the review screen showed you — same fingerprint."],
+  "plans": ["Standing plans",
+    "A plan is something you allowed once ('buy $50 weekly'). Before anything " +
+    "runs you get 24 hours to veto; stopping a plan cancels everything waiting " +
+    "under it. Nothing ever happens silently."],
+};
+document.querySelectorAll(".help-dot").forEach(d =>
+  d.addEventListener("click", () => {
+    const h = HELP[d.dataset.help]; if (!h) return;
+    $("#help-title").textContent = h[0];
+    $("#help-body").textContent = h[1];
+    $("#help-modal").showModal();
+  }));
+
 // ---------- theme ----------
 $("#theme-toggle").addEventListener("click", () => {
   const b = document.body;
   b.dataset.theme = b.dataset.theme === "dark" ? "light" : "dark";
   localStorage.setItem("prism-theme", b.dataset.theme);
 });
-const saved = localStorage.getItem("prism-theme");
-if (saved) document.body.dataset.theme = saved;
-else if (matchMedia("(prefers-color-scheme: dark)").matches) document.body.dataset.theme = "dark";
+const savedTheme = localStorage.getItem("prism-theme");
+if (savedTheme) document.body.dataset.theme = savedTheme;
+else if (matchMedia("(prefers-color-scheme: light)").matches)
+  document.body.dataset.theme = "light";
 
-refreshAll();
-setInterval(refreshAll, 5000);
+// ---------- go ----------
+boot();
+setInterval(() => { if (!$("#screen-app").hidden) refreshAll(); }, 5000);
