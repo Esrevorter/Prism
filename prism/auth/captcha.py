@@ -431,19 +431,11 @@ class CaptchaEngine:
             "intent_digest_hex": intent_digest_hex,
             "attempts": 0,
         }
-        # `answer` is NOT the answer key — it is the deterministic set of tile
-        # indices whose visible shape equals the strict visual majority (the
-        # same rule the honest-solve tests and the GUI rely on; the generator
-        # guarantees the target IS that strict majority).  Shipping it lets
-        # every client verify picture/prompt/tiles agree before asking a human
-        # to click.  The true key (`grid["target"]`) stays server-side only.
-        want = [i for i, s in enumerate(grid["tiles"]) if s == grid["target"]]
         return {
             "challenge_id": cid,
             "prompt": grid["prompt"],
             "svg": render_grid_svg(grid["tiles"], grid["target"]),
             "tiles": list(grid["tiles"]),
-            "answer": want,
             "palette": shape_palette(),
             "ttl_s": self.ttl_s,
             "human": ("Prove you're human: look at the picture and tap the "
