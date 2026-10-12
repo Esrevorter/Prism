@@ -3,7 +3,7 @@
 **Project:** Prism
 **Ticker:** PRSM
 **Tagline:** "Clarity on your terms"
-**Document Version:** 1.1 (Amendment A1-2026-10: Client UX & Multi-Device Signing mandate — see §7.9, §9.1; decision log in §14)
+**Document Version:** 1.2 (Amendment A2-2026-10: Lean CAPTCHA-Gated Authentication replaces the MPC ceremony stack; Visual-Excellence & Context-Help mandate — see §7.9, §9; prior A1-2026-10 UX findings remain binding where not superseded; decision log in §14)
 **Status:** Implementation-ready. All blocking questions resolved by founder decisions D1–D5 (2026-10-08); remaining items tracked as research areas (§15C), not blockers.
 
 ---
@@ -16,9 +16,9 @@
 4. Monetary Policy & Consensus (L1)
 5. Privacy Model & The Prism Protocol (Selective Disclosure)
 6. Data Model
-7. User Flows (incl. §7.9 Client UX Baseline & Multi-Device Signing — Amendment A1-2026-10)
+7. User Flows (incl. §7.9 Client UX Baseline & Visual Excellence — Amendments A1/A2-2026-10)
 8. AI Integration Layer (L2)
-9. Wallet, Key Management & Recovery (L3) (incl. §9.1 Key-Management UX Rules)
+9. Wallet, Key Management & Recovery (L3) (**Amendment A2-2026-10:** lean CAPTCHA-gated auth; MPC retired)
 10. Fees, Economics & L2 Channels
 11. Edge Cases, Threat Model & Failure Modes
 12. Regulatory & Compliance Posture
@@ -337,14 +337,17 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
 
 ## 7. User Flows
 
-### 7.1 First Run & Wallet Creation (Target: <5 min, zero seed required)
-1. Download wallet → biometric enrollment (device-local).
-2. Choose custody mode:
-   - **A. Solo MPC (default):** 2-of-3 shares across **user-owned devices only** (phone + desktop + one additional user device or user-held hardware token). **Per Decision D4, Prism operates no recovery leg of any kind** — there is no vendor-held share, blind or otherwise. If the user loses both quorum devices with no third user device, Solo mode falls back to guiding the user into Social MPC setup for future protection; this limitation is disclosed at wallet creation in plain language.
-   - **B. Social MPC (recommended for single-device users):** user invites 4 trusted contacts; 3-of-5 threshold. Contacts only ever hold opaque key shares — no visibility into funds. All legs are user-chosen; recovery remains purely user-owned by construction.
-   - **C. Legacy seed:** 25-word mnemonic (advanced; explicitly warned as non-recoverable).
-3. Share generation ceremony: each share transfer over EE2EE (QR or invite link); liveness check per signer; abort-safe resumable protocol.
-4. Tutorial funded by test drip faucet; first inbound transfer demo.
+### 7.1 First Run & Wallet Creation (Target: <5 min, zero seed required) (**Amendment A2-2026-10 — lean auth**)
+1. Download wallet → double-click install → app opens to a calm welcome screen (no terminal, ever).
+2. **Create your wallet** = pick one password (strength meter + plain-language explainer: "This password protects the key that lives on this computer. We cannot reset it — that's what makes it yours."). The app generates the spend key locally (Ed25519-group Schnorr), seals it with scrypt-KDF + encrypt-then-MAC (`prism/auth/keystore.py`), and shows a **12-word recovery phrase exactly once**, with an explicit "write it down offline" prompt and a confirm-read-back step. Target: address usable in **under 60 seconds**.
+3. Custody tiers (plain outcome language, per §7.9.3):
+   - **A. This device + your password (default):** one sealed key, CAPTCHA-gated signing (§9). Losing the password *and* the device means losing funds — stated honestly at creation, never hidden behind marketing copy.
+   - **B. Add trusted people later (optional upgrade):** social-recovery shares over the same pairing primitive (§7.4); contacts hold opaque shares with zero fund visibility.
+   - **C. Legacy seed:** BIP39-compatible 25-word mnemonic (advanced; explicitly warned as non-recoverable by any means).
+4. Tutorial funded by test drip faucet ("Get test PRSM" is one tap on Refraction); first inbound transfer demo ends on a summary card ("You're set up. Your key lives on: this computer, protected by your password.").
+5. Abort-safe: closing the window mid-setup resumes exactly where it stopped; nothing half-written ever touches the chain.
+
+*(Retired by A2-2026-10: former multi-device MPC share-ceremony first-run flow — see §14 decision-log row for rationale.)*
 
 ### 7.2 Receiving
 1. User taps "Receive" → picks account/sub-address → shows QR + `prsmr:` URI (optionally with requested amount).
@@ -358,14 +361,16 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
    - Fiat amount → live oracle quote shown with locked 60-second rate window and max-slippage guard.
 3. **Simulator** renders plain-English preview: "This sends ≈12.4 PRSM ($50) to Alex. Fee: $0.001. It will appear private to everyone except Alex and you. Confirm?"
 4. **Fraud model** scores destination/history; if score > threshold, adds a calm interruption card with reasons and a 10-second pause option ("sleep on it").
-5. Biometric confirm → MPC signing round (2–3 signers online) → broadcast via Dandelion++.
+5. **Confirm with the two-step human gate (§9, Amendment A2-2026-10):** (a) a 3×3 image-grid CAPTCHA bound cryptographically to *this exact payment digest* — pick the matching tiles within the countdown window; solving yields a single-use token that is worthless for any other payment; (b) your wallet password unlocks the sealed spend key in memory and signs locally. No network round-trips to third parties, no second device required, nothing leaves the machine except the final ring transaction via Dandelion++.
 6. Receipt with copyable disclosure ID (so user can later prove this payment existed, if desired).
 
-### 7.4 Social Recovery
-1. User loses primary device → starts recovery from new device with identity attestation (biometric re-enrollment + old-share challenge token if available).
-2. Needs quorum (3-of-5): contacts approve via simple app prompt ("Confirm this is Maya recovering her wallet? Code: 4821").
-3. **72-hour timelock** before recovered shares can move funds; user's remaining devices + email/push get loud warnings throughout; anyone holding a stale share can cancel the recovery during the window (prevents stolen-phone + coerced-contact attack).
-4. New share set re-generated (proactive refresh); old shares revoked.
+### 7.4 Recovery (**Amendment A2-2026-10 — phrase-first**)
+1. **Recovery phrase path (primary):** on a new device the user enters the 12-word phrase (§7.1) + chooses a password; the sealed key is re-derived and **the address is provably unchanged** (address-invariant recovery — tested, §13). No contacts, no waiting, no ceremony.
+2. **Social path (optional tier B wallets only):** users who enrolled trusted people can initiate contact recovery: quorum approves via simple prompt ("Confirm this is Maya recovering her wallet? Code: 4821").
+3. **72-hour timelock** before socially-recovered keys can move funds; loud warnings throughout; any holder of a stale share can cancel during the window (prevents stolen-phone + coerced-contact attack). Phrase-based recovery has no timelock because it requires the offline secret itself — stated honestly in-app.
+4. After any recovery event the app recommends rotating the password (re-seal) and, for tier-B, refreshing contact shares.
+
+*(Retired by A2-2026-10: MPC share-quorum device recovery ceremony as the default path.)*
 
 ### 7.5 Coercion / Duress Flow
 - Duress PIN unlocks a **decoy wallet** (plausible low balance) instead of signaling failure.
@@ -386,9 +391,11 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
 ### 7.8 Inheritance (Dead Man's Switch)
 - Beneficiary holds a share that activates only after N days (default 365) without liveness AND M-of-K attestator confirmation (attestators are contacts or lawyer/oracle service). Grace ping to user every 30 days before activation. Per §14 (Q6): the v1 liveness signal is **signed heartbeat messages** from the user's wallet (privacy-preserving; no on-chain activity inference); on-chain inactivity remains a fallback for users who never send heartbeats.
 
-### 7.9 Client UX Baseline & Multi-Device Signing Experience (**Amendment A1-2026-10 — binding**)
+### 7.9 Client UX Baseline & Signing Experience (**Amendments A1-2026-10 + A2-2026-10 — binding**)
 
 > **Founder review (2026-10-12):** *"I find the clients very meager in UX/UI design, and quite complex to use, there's no context help, the whole multi-device signing is shit, really disappointed in this."* The prior "GUI/MPC product requirement" note (§13 Phase 1) declared UX beauty a hard acceptance requirement, but the shipped client violated it in practice. This amendment converts that aspiration into concrete, testable requirements grounded in published usability research (Nielsen Norman heuristics, NN/g empty-state and wizard research, Material Design progressive disclosure, Apple HIG onboarding guidance, WCAG 2.1 AA, and reference flows from Bitwarden, 1Password, MuJo/Status/Sparrow pairing UX). It applies to **every client surface** (`prism/gui` web bundle, `prism-gui.exe`, the Tauri shell, and the CLI where unavoidable).
+
+> **Founder follow-up mandate (2026-10-12, Amendment A2-2026-10 — binding):** *"The UI/UX must be beautiful, graphically stunning as per modern capabilities. Add animations where possible and lots of context help."* Visual excellence is therefore not decoration but an acceptance criterion: every screen uses the §7.9.5 motion/visual system at modern-browser quality (gradients, glassmorphism depth, spring physics, choreographed transitions), every async moment gets purposeful animation feedback, and context help is pervasive (three tiers, §7.9.2) — while `prefers-reduced-motion` and WCAG AA remain non-negotiable (beauty never overrides accessibility). Simultaneously, **the multi-device MPC ceremony is retired as the user-facing signing model** and replaced by the lean CAPTCHA+password gate (§7.9.4, §9); all former ceremony/pairing requirements below are superseded wherever they conflict.
 
 #### 7.9.1 Information architecture — one job per screen
 The current single-scroll page mixing balance, NL bar, review, device keys, recovery, plans, and contacts is replaced by a **persistent left navigation rail** (collapsible to icon rail <1024 px; bottom tab bar at mobile widths) with exactly five primary destinations, each with one clear job:
@@ -396,10 +403,9 @@ The current single-scroll page mixing balance, NL bar, review, device keys, reco
 | Destination | Job | Contains |
 |---|---|---|
 | **Wallet** | See money, move money | Balance hero + fiat estimate, recent activity list, Send / Receive buttons |
-| **Devices** | Key custody | Device roster, ceremony wizard, reshares, "why can't I see my shares?" inline |
-| **Recovery** | Safety net | Recovery setup state, pending-recovery alarm, contact leg management |
+| **People** | Contacts & optional recovery leg management | Verified contacts, add/verify flow, "Add trusted people" (tier-B upgrade) |
 | **Plans** | Automation | Agent digest cards, veto/revoke, audit log |
-| **Settings** | Everything else | Theme, notification intensity dials, node details (advanced, collapsed), disclosure registry |
+| **Settings** | Everything else | Theme, notification intensity dials, key & password management (§9), node details (advanced, collapsed), disclosure registry |
 
 Rules: no more than one primary action button per screen region; destructive actions live under their own confirm step, never adjacent to their benign counterpart; the review card (§7.3) renders as a **modal sheet over the originating screen**, not a section further down the page (users must not scroll to find what they just asked for — NN/g finding: split-attention is the top failure mode of single-page financial forms).
 
@@ -410,33 +416,31 @@ Every visible screen/panel MUST carry contextual help at three levels so nobody 
 3. **In-app guide (Help center)** — searchable task-based articles ("How do I pay someone?", "I lost my phone", "What are device keys?"), each written as numbered steps mirroring the actual UI labels. Reachable via persistent Help button (bottom of nav rail) and `?` keyboard shortcut from anywhere. First-run app also drops contextual coach-mark bubbles on first visit to each destination (dismissible forever, restorable in Settings).
 CLI parity: every `prism` command supports `--help` with a worked example line and a "next step" pointer; unknown commands suggest the closest match.
 
-#### 7.9.3 First-run onboarding — guided, resumable, zero jargon
-A 4-step wizard (progress indicator, Back always available, Skip allowed except for custody choice):
-1. **Welcome + what Prism is** in 3 sentences with an illustration; expected-time badge ("≈3 minutes").
-2. **Custody choice (§7.1)** presented as two cards in plain outcome language — "Protect with your devices (recommended if you have 2+)" vs "Protect with people you trust (recommended if you have one)" — each card states in one line what happens when the option is lost. Legacy seed hidden behind "Advanced options".
-3. **Device-key ceremony** (see 7.9.4) runs inside the wizard.
-4. **First money**: faucet drip demo + "Receive" QR shown with a copyable address; ends with a calm summary card ("You're set up. Your key lives on: Phone, Laptop, Backup.").
-Wizard state persists server-side; closing the window mid-ceremony resumes exactly where it stopped (abort-safe per §7.1 step 3). Empty states everywhere ship with illustration + one-line explanation + the primary CTA (e.g., activity list before first payment: "No payments yet — get test PRSM or show your receive QR").
+#### 7.9.3 First-run onboarding — guided, resumable, zero jargon (**A2: 4 steps, ≈60 seconds to a usable address**)
+A 4-step wizard (progress indicator, Back always available):
+1. **Welcome + what Prism is** in 3 sentences with an animated illustration; expected-time badge ("≈1 minute").
+2. **Create your password** — strength meter with live feedback, plain-language explainer of exactly what the password does and does not do (protects the key at rest; the company cannot reset it). "I already have a wallet" branch → 12-word phrase restore screen (§7.4).
+3. **Recovery phrase, shown once** — 12 words rendered as tappable chips with read-back confirmation, copy disabled by default (long-press "Advanced: allow copy" reveals the honest risk sentence), animated checkmark when verification passes.
+4. **First money**: one-tap faucet drip demo on Refraction + "Receive" QR with copyable address; ends on a calm summary card ("You're set up. Your key lives on this computer, protected by your password.").
+Wizard state persists locally; closing the window mid-flow resumes exactly where it stopped (abort-safe per §7.1 step 5). Empty states everywhere ship with illustration + one-line explanation + the primary CTA (e.g., activity list before first payment: "No payments yet — get test PRSM or show your receive QR").
 
-#### 7.9.4 Multi-device signing ceremony — redesigned end-to-end (**the flagship fix**)
-Current failure modes to correct: one-button "Set up device keys" that silently fabricates all three legs in-process (an illusion of security the user can neither verify nor extend); no way to add a second real device; no pairing transport; stage text ("legs 1..3 polynomials") is crypto jargon; nothing tells the user what to physically do with their phone.
+#### 7.9.4 Signing experience — lean CAPTCHA gate (**the flagship fix, A2-2026-10 supersedes the multi-device ceremony redesign**)
+The retired model failed users: a 2-of-3 device ceremony demanded pairing hardware most single-device users don't have, exposed crypto stage text ("legs 1..3 polynomials"), and its in-process demo mode was an illusion of security the user could neither verify nor extend. The replacement keeps *two independent human signals* and nothing else:
 
-Target experience (research baselines: Bitwarden/1Password device pairing, Sparrow/Electrum QR wallet sync, Signal linked-devices liveness):
-1. **Name your devices.** First leg = the current device, auto-detected friendly name ("This laptop · Maya's MacBook Pro"), editable. Subsequent legs are added by **pairing**, never by assumption.
-2. **Pairing transport, same room:** initiating device shows a large QR containing a short-lived invite (EE2EE session URL + 6-char human check code, TTL 5 min, single-use). Second device scans it → both screens show the check code and the peer's device name; user taps "Yes, this is my device" on **both** sides (mutaneous confirmation kills evil-maid QR-swap attacks). Invite link fallback for same-machine browser sessions; NFC tap-to-pair optional later.
-3. **Live ceremony dashboard:** each leg is a card (icon, name, fingerprint, status chip: waiting → committed → verified → done). Feldman-VSS verification results shown as "Share verified ✓ — mathematically checked against the group key, never revealed". Progress = completed legs, not fake percentages. Abort/resume at any commit boundary; "Start over" regenerates everything and explicitly revokes old commitments.
-4. **Liveness model, stated honestly:** signing requires quorum devices to be *online together*. The UI must therefore distinguish, per §5 honesty rules: (a) **demo/simulated mode** — all legs run in-process on this machine; clearly badged "Simulated — all shares on one device right now"; (b) **paired mode** — ≥2 legs on distinct enrolled devices with signed heartbeats ≤60 s old. Sending in paired mode shows "Waiting for Laptop to approve… (it has 5 minutes)" with per-leg status; the signer enforces quorum policy at signing time (§8.4 belt-and-braces) so the UI can never claim more protection than exists.
-5. **Recovery contacts (Social mode)** reuse the same pairing primitive: contact scans invite QR → holds an opaque share, sees only "You hold a recovery share for Maya — no visibility into funds"; approval during recovery is a single yes/no prompt showing the 4-digit match code (§7.4).
-6. **Reshare** is presented as "Rotate keys (recommended yearly)": one click, progress dashboard identical to keygen, completion card explains "Your old devices' shares no longer work".
+1. **Step 1 — Review:** modal sheet (§7.9.1) with simulator numbers + fraud band, verbatim server copy. One primary action: "Confirm this payment."
+2. **Step 2 — Prove you're here (CAPTCHA):** an animated 3×3 image-grid challenge bound by HMAC to **this exact payment digest**. Countdown ring shows the 120 s window; wrong picks trigger a calm auto-refresh, never blame copy. Solving yields a **single-use token**; replaying it against any other intent fails cryptographically (tested). Copy states the honest trust model: *"This picture check proves a human is present right now — it is not identity verification. Your password is what protects the key."*
+3. **Step 3 — Unlock & sign:** password field unlocks the sealed spend key in memory; signature is self-verified before broadcast; success screen bursts into an animated receipt (txid, height, fee, disclosure ID).
+4. **Optional tier-B layer:** users who enrolled trusted people keep the social-recovery path (§7.4) and, later, optional per-send approval pushes — strictly opt-in, never required for a first payment.
 
-Acceptance criteria (testable): (i) a first-time user completes Solo setup across two physical devices with no terminal and no external docs, guided only by in-app help — validated in the Phase-3 study; (ii) no ceremony screen contains unexplained jargon (glossary terms always behind a `?`); (iii) simulated-vs-paired custody state is visible on the Wallet home strip at all times ("Key protection: Simulated ⚠ / 2 devices ✓"); (iv) ceremony survives mid-flow process restart and resumes leg-consistently.
+Acceptance criteria (testable): (i) a first-time user goes from fresh install to a signed testnet payment in ≤3 minutes with no terminal and no external docs, guided only by in-app help — validated in the Phase-3 study; (ii) no screen contains unexplained jargon (glossary terms always behind a `?`); (iii) the CAPTCHA token is provably bound to the intent digest and single-use (negative tests shipped); (iv) keystore survives daemon restart via sealed file; recovery phrase restores the identical address (pinned in `test_testnet_parity.py`).
 
-#### 7.9.5 Visual & interaction design system (upgrades §2 principle 4, makes it measurable)
-- Design tokens in `theme.css`: 8-pt spacing grid, type scale (≥16 px body, ≥44 px touch targets), semantic color set incl. risk-band colors (calm/caution/pause) that pass WCAG AA contrast in both themes; light/dark/system.
+#### 7.9.5 Visual & interaction design system (**A2-2026-10: "graphically stunning" is a measurable acceptance criterion**)
+- Design tokens in `theme.css`: 8-pt spacing grid, type scale (≥16 px body — shipped at 17 px, ≥44 px touch targets), semantic color set incl. risk-band colors (calm/caution/pause) that pass WCAG AA contrast in both themes; light/dark/system.
+- **Visual quality bar (founder mandate):** every surface renders at modern flagship-app quality — animated aurora/gradient backdrop layers, glassmorphism card depth with soft inner glow and layered shadows, spring-physics entrance/exit choreography on screen changes, gradient-text hero numerals with count-up animation, confetti-burst success moment on the first signed payment of a session, skeleton shimmer loaders during any RPC round trip >150 ms. No static, dead-feeling screens: hover/tap micro-interactions (scale + shadow lift) on every interactive element; page transitions cross-fade/slide ≤200 ms.
+- **Motion budget:** purposeful animation only — each animated moment must communicate state (progress, success, attention, refresh). Honors `prefers-reduced-motion` with full static fallbacks (every animation has an equivalent non-animated presentation; verified by automated check). GPU-composited properties only (transform/opacity/filter); no layout-thrash animations; 60 fps target on mid-range hardware.
 - Status feedback everywhere: async actions show optimistic-disabled buttons + inline spinners; RPC failures render a human sentence + retry, never raw JSON or stack traces; global toast queue respects notification-intensity dial.
 - Keyboard: Tab order matches visual order, `Enter` submits the focused card, `Esc` closes modals/popovers, `/` focuses the NL bar, `?` opens Help. Full screen-reader labels on every interactive element (existing `aria-live` usage extended to all lists).
-- Motion: ≤200 ms transitions, honors `prefers-reduced-motion`.
-- Neuro-inclusive gates remain: calm defaults, no dark patterns, adjustable notification intensity, undo/veto windows surfaced in UI copy.
+- Neuro-inclusive gates remain: calm defaults, no dark patterns, adjustable notification intensity, undo/veto windows surfaced in UI copy. Beauty never trades against clarity: animation duration/strength dials in Settings ("Calm" reduces to fades only).
 
 #### 7.9.6 Scope discipline for clients
 The GUI is the product; the CLI is a developer tool. Nothing in the end-user flow may require reading documentation to finish a task — if help is needed to proceed, that is a spec bug: fix the flow or the microcopy, not the user.

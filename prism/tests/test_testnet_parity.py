@@ -41,18 +41,19 @@ def _full_flow(svc: PrismService, amount_prsm: float) -> dict:
     password sign. Returns the signed-tx receipt."""
     r = svc.intent_compile(f"send {amount_prsm} PRSM to Mom")
     iid = r["intent_id"]
-    while not r.get("ready"):
-        q = next(iter(r["questions"]))
-        r = svc.intent_answer(iid, q["options"][0]["value"] if q.get("options")
-                              else "yes")
-    svc.intent_simulate(iid)
-    svc.intent_review(iid)
+    if r.get("clarify"):                     # vague utterance path (not used here)
+        while not r.get("ready"):
+            q = next(iter(r["questions"]))
+            r = svc.intent_answer(iid, q["options"][0]["value"] if q.get("options")
+                                  else "yes")
+    assert r["status"] == "awaiting_confirm", r["status"]
+    svc.intent_confirm(iid)
     ch = svc.auth_challenge(iid)
     picks = [i for i, t in enumerate(ch["tiles"]) if t == ch["target"]]
     solved = svc.auth_solve(ch["challenge_id"], picks, ch["digest_hex"])
     sig = svc.auth_sign(iid, PW, solved["token"])
-    assert sig["verified"], "signature self-check failed"
-    return sig
+    assert sig["ok"], sig                       # auth_sign self-verifies the
+    return sig                                  # signature before returning ok
 
 
 class TestParityValidatorStack:
@@ -73,7 +74,9 @@ class TestCliConsensusParity:
     def test_p2_cli_blocks_match_service_blocks(self):
         """`prism mine --blocks 3` output headers must equal the genesis+3
         chain the service produces under identical synthetic timestamps."""
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root
+        # prism/tests/../.. == repo root (prism/ is a package dir, not the repo)
+        root = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
         out = subprocess.run(
             [sys.executable, "-m", "prism.chain.cli", "mine", "--blocks", "3",
              "--network", "refraction"],
@@ -131,7 +134,7 @@ class TestEndToEndSoak:
         assert len(phrase.split()) == 12
         # faucet: mine enough blocks to fund 10 payments + fees
         svc.mine(12)
-        assert svc.balance()["balance_prsm"] > 10
+        assert float(svc.balance()["balance_prsm"]) > 10
         heights = []
         for i in range(10):
             sig = _full_flow(svc, 0.5)
@@ -144,7 +147,7 @@ class TestEndToEndSoak:
             blk = svc.store[svc.height_index[h]]
             checker.validate_and_apply(blk)
         assert checker.tip.header.hash() == svc.chain.tip.header.hash()
-        hist = svc.auth_history()["transactions"]
+        hist = svc.auth_history()["txs"]
         assert len(hist) >= 10
         # recovery still works after heavy use (address invariant)
         addr_before = svc.receive_address()
@@ -152,7 +155,7 @@ class TestEndToEndSoak:
         svc2.auth_recover(phrase, PW)
         assert svc2.receive_address() == addr_before
 
-    def test_p6_keystore_survives_restart(tmp_path):
+    def test_p6_keystore_survives_restart(self, tmp_path):
         d = str(tmp_path / "wallet")
         s1 = PrismService(network="refraction", data_dir=d)
         s1.auth_create(PW)
