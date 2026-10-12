@@ -1,11 +1,1 @@
-build/
-buildtest/
-dist/
-disttest/
-prism-*-*/
-*.toc
-*.pyz
-*.pkg
-__pycache__/
-*.pyc
-.git/.pushurl
+(empty
