@@ -10,7 +10,7 @@
 
 *Private by default · Forgiving by design · Intelligent, never intrusive*
 
-[![Release](https://img.shields.io/badge/release-v0.1.11-7c5cff?style=flat-square&logo=github&logoColor=white)](https://github.com/Esrevorter/Prism/releases/latest)
+[![Release](https://img.shields.io/badge/release-v0.1.12-7c5cff?style=flat-square&logo=github&logoColor=white)](https://github.com/Esrevorter/Prism/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f5c242?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3b82f6?style=flat-square&logo=python&logoColor=white)](pyproject.toml)
 [![Dependencies](https://img.shields.io/badge/runtime%20deps-none-22c55e?style=flat-square)](pyproject.toml)
