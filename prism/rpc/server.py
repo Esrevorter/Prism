@@ -166,6 +166,12 @@ class RPCRequestHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        if getattr(self, "_no_cache", False):
+            # WebView2 (Tauri Windows shell) caches aggressively; without this
+            # a reinstalled fixed build can still render the old cached UI.
+            self.send_header("Cache-Control", "no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
         origin = self.headers.get("Origin", "")
         if origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1"):
             self.send_header("Access-Control-Allow-Origin", origin)
@@ -186,6 +192,12 @@ class RPCRequestHandler(BaseHTTPRequestHandler):
             body = json.dumps({"status": "ok", "version": __version__,
                                "gui_bundle": gui_bundle_fingerprint()}).encode()
             return self._send(200, body, "application/json")
+        # No-store on the GUI bundle: WebView2 (the Tauri Windows shell) caches
+        # aggressively; without this, users who ran an old build keep seeing the
+        # stale UI even after reinstalling a fixed version — exactly the
+        # "v0.1.10 looks identical" report of 2026-10-12 (rules v1.3 §6).
+        self._no_cache = self.path in ("/", "/index.html") or \
+            self.path.startswith("/static/")
         if self.path in ("/", "/index.html"):
             return self._serve_static("index.html")
         if self.path.startswith("/static/"):

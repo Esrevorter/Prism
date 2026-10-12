@@ -698,15 +698,56 @@ async function showBuildStamp() {
   const node = $("#build-version");
   if (!node) return;
   try {
-    const res = await fetch("/health");
+    // cache:'no-store' — WebView2 can serve a cached /health from a previous
+    // install, which would make the stamp lie about which build is running.
+    const res = await fetch("/health", { cache: "no-store" });
     const h = await res.json();
-    node.textContent = `v${h.version} · ui ${h.gui_bundle}`;
+    const parts = [`v${h.version}`, `ui ${h.gui_bundle}`];
+    if (h.build_commit) parts.push(`git ${h.build_commit.slice(0, 8)}`);
+    node.textContent = parts.join(" · ");
+    node.dataset.expected = h.version;
   } catch {
     node.textContent = "version unknown (node unreachable)";
   }
 }
 
+// ---------- stale-bundle tripwire ----------
+// The footer stamp proves the BACKEND version, but if an installer ever ships
+// old static assets again (the v0.1.6–v0.1.10 failure mode), this page's own
+// HTML predates the check — so app.js compares its OWN source against what the
+// server actually serves at /static/app.js and screams if they differ.
+async function staleBundleCheck() {
+  const stamp = document.getElementById("build-version");
+  const expected = stamp && stamp.dataset.expected;
+  if (!expected) return;                       // /health unreachable: nothing to compare
+  let mine;
+  try {
+    const here = document.querySelector('script[src*="app.js"]');
+    const url = here ? here.src : "/static/app.js";
+    mine = await (await fetch(url, { cache: "no-store" })).text();
+  } catch { return; }
+  let served;
+  try {
+    served = await (await fetch("/static/app.js", { cache: "no-store" })).text();
+  } catch { return; }
+  if (served === mine) return;                 // fresh bundle — nothing to report
+  const banner = document.createElement("div");
+  banner.id = "stale-build-banner";
+  banner.setAttribute("role", "alert");
+  banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;" +
+    "padding:10px 16px;background:#b91c1c;color:#fff;font:600 14px system-ui;" +
+    "text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.4)";
+  banner.textContent =
+    `Stale GUI build detected: backend is v${expected} but the front-end in ` +
+    "your webview cache is older. Close the wallet, delete %LOCALAPPDATA%\\Prism " +
+    "(WebView2 cache), and reopen.";
+  document.body.prepend(banner);
+}
+
 // ---------- go ----------
-showBuildStamp();
+(async () => {
+  await showBuildStamp();
+  staleBundleCheck();
+})();
 boot();
 setInterval(() => { if (!$("#screen-app").hidden) refreshAll(); }, 5000);
