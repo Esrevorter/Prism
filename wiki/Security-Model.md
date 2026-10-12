@@ -1,6 +1,6 @@
 # Security Model & Honest Limits
 
-*Who we defend against, what actually protects you, and — most importantly — what we do NOT claim. Binding spec: [`spec.md` §11](https://github.com/Esrevorter/Prism/wiki/spec).*
+*Who we defend against, what actually protects you, and — most importantly — what we do NOT claim. Binding spec: [`spec.md` §11](https://github.com/Esrevorter/Prism/blob/main/spec.md).*
 
 ---
 
@@ -18,20 +18,20 @@ A privacy product that oversells its guarantees creates two harms: users make ri
 | **Stolen device (theft)** | The spend key is sealed by the user's password (scrypt + encrypt-then-MAC); without it the file is cryptographically noise, and 5 failed unlocks trigger lockout (E8, A2). Signing also needs a fresh human-presence token bound to the transaction bytes. | An unlocked session with screen-watching malware is out of scope beyond OS protections — stated, not promised. The CAPTCHA proves presence, not identity; the UI says so plainly. |
 | **Lost device** | Social recovery via quorum of your own shares/contacts; **72 h timelock**, loud warnings to all devices, any stale-share holder can cancel; then proactive re-sharing revokes old shares (E9). | Collusion of a full quorum of malicious contacts + timing luck is the main attack path — mitigated by requiring ≥1 device share in recovery subsets (user-configurable), still studied as R3. |
 | **Coercion / duress** | Duress PIN opens a plausible decoy wallet; forced recovery still takes 72 h in visible alarm state; optional "panic lock" freezes sends above comfort threshold even manually (E10). | No system defeats a determined armed adversary at the meat-puppet layer; decoys reduce incentive, delays create intervention windows. |
-| **Sanctioned inbound funds** | They arrive; local risk label flags them; spending them doesn't expose unrelated outputs. Flagging ≠ chain blacklist (E17). | Choosing to cooperate is the user's disclosure decision — provenance circuits exist exactly for that ([Prism Protocol](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol)). |
+| **Sanctioned inbound funds** | They arrive; local risk label flags them; spending them doesn't expose unrelated outputs. Flagging ≠ chain blacklist (E17). | Choosing to cooperate is the user's disclosure decision — provenance circuits exist exactly for that ([Prism Protocol](./The-Prism-Protocol.md)). |
 | **Malicious smart-contract-style traps** | v1 has no general contract VM — nothing to approve blind. The simulator previews every send before signing. | Fiat-quote oracles are display-only with slippage guards; phishing still possible socially — fraud model assists, humans decide. |
 | **Supply-chain attacks (models, updates)** | Signed model bundles, transparency log of hashes, pinned versions; unsigned refuses to load (E16). Poisoned federated updates countered by clipping + robust aggregation + reputation decay (E15). | Signing-key compromise would be serious — key custody and ceremony design covered in audits. |
 | **Broken ZK circuit post-release** | Circuit IDs versioned; verifiers reject deprecated IDs; anchored proofs carry their ID so affected disclosures are auditable (E6). | Pre-mainnet audits by ≥2 external firms for v1 circuits; separate per-release circuit audits. |
 
 ## The failure-mode catalog
 
-Spec §11.1 enumerates eighteen concrete scenarios (E1–E18) with handling — from decoy exhaustion (E4) and denylist disputes (E5) to NL miscompilation ("send 50" vs "$50", E13) and LLM hallucinated explanations (E14). When auditing or threat-modeling, read [that table directly in spec.md](https://github.com/Esrevorter/Prism/wiki/spec); every row maps to code paths and tests.
+Spec §11.1 enumerates eighteen concrete scenarios (E1–E18) with handling — from decoy exhaustion (E4) and denylist disputes (E5) to NL miscompilation ("send 50" vs "$50", E13) and LLM hallucinated explanations (E14). When auditing or threat-modeling, read [that table directly in spec.md](https://github.com/Esrevorter/Prism/blob/main/spec.md); every row maps to code paths and tests.
 
 ## What we explicitly do NOT claim
 
 - ❌ **"Untraceable to anyone."** Against a global passive adversary recording everything forever, ring-based systems weaken over long time horizons. We mitigate; we don't promise omniscience-proof anonymity.
 - ❌ **"Quantum-safe."** Discrete-log assumptions (Ed25519, Pedersen, CLSAG) are broken by a large fault-tolerant quantum computer. Migration path is research area R1; today's design is classically-hard only.
-- ❌ **"Recallable disclosures."** Expire-and-rotate, nothing more (Decision D3) — see [Prism Protocol](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol).
+- ❌ **"Recallable disclosures."** Expire-and-rotate, nothing more (Decision D3) — see [Prism Protocol](./The-Prism-Protocol.md).
 - ❌ **"Compromise-immune endpoints."** Your device and your choices (seed mode! phishing!) remain the weakest links; the wallet exists to soften them, not delete them.
 - ❌ **"Audited."** Not yet. Phase-1 code is pre-audit; mainnet gates on formal audits of consensus + RingCT plus ≥2 independent ZKP circuit reviews. Until then: reference implementation, test nets, zero real value.
 
@@ -50,8 +50,8 @@ Each layer fails open toward *delay and visibility*, never toward silent loss. T
 
 ## Bug bounty & disclosure
 
-Program launches Phase 2. Until then: security issues → private report through repository SECURITY contact; expect acknowledgment within 72 h, coordinated disclosure up to 90 days. Fuzzing harnesses (chain parsing, wire-format) run continuously in CI — see [Testing & Quality](https://github.com/Esrevorter/Prism/wiki/Testing-&-Quality).
+Program launches Phase 2. Until then: security issues → private report through repository SECURITY contact; expect acknowledgment within 72 h, coordinated disclosure up to 90 days. Fuzzing harnesses (chain parsing, wire-format) run continuously in CI — see [Testing & Quality](./Testing-&-Quality.md).
 
 ---
 
-**Next:** [Recovery & Inheritance Guide](https://github.com/Esrevorter/Prism/wiki/Recovery-and-Inheritance-Guide) · [Monetary Policy Rationale](https://github.com/Esrevorter/Prism/wiki/Monetary-Policy-Rationale)
+**Next:** [Recovery & Inheritance Guide](./Recovery-and-Inheritance-Guide.md) · [Monetary Policy Rationale](./Monetary-Policy-Rationale.md)

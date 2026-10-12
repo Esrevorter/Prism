@@ -1,6 +1,6 @@
 # AI Layer Explained
 
-*What Prism's intelligence layer does, what it refuses to do, and the walls that make "the AI can't steal your money" a cryptographic statement rather than a promise. Binding spec: [`spec.md` §8](https://github.com/Esrevorter/Prism/wiki/spec).*
+*What Prism's intelligence layer does, what it refuses to do, and the walls that make "the AI can't steal your money" a cryptographic statement rather than a promise. Binding spec: [`spec.md` §8](https://github.com/Esrevorter/Prism/blob/main/spec.md).*
 
 ---
 
@@ -65,7 +65,7 @@ Fraud patterns evolve faster than any team ships updates, so wallets learn colle
 - ❌ Sends your financial content anywhere. On-device or nothing.
 - ❌ Makes numeric claims from its own generation. That's the simulator's job.
 
-If marketing copy ever promises more than this list allows, the copy is wrong — [Governance](https://github.com/Esrevorter/Prism/wiki/Governance) covers how to hold us to it.
+If marketing copy ever promises more than this list allows, the copy is wrong — [Governance](./Governance.md) covers how to hold us to it.
 
 ---
 
@@ -80,4 +80,4 @@ If marketing copy ever promises more than this list allows, the copy is wrong �
 | DP federated-update client | `prism/ai/fl_client.py` | ✅ Implemented |
 | Actual distilled LLM weights | shipped separately, signed | 🗓️ Phase 2 |
 
-**Next:** [Using the Wallet](https://github.com/Esrevorter/Prism/wiki/Using-the-Wallet) · [Security Model](https://github.com/Esrevorter/Prism/wiki/Security-Model)
+**Next:** [Using the Wallet](./Using-the-Wallet.md) · [Security Model](./Security-Model.md)

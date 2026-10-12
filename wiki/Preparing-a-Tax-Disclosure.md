@@ -1,6 +1,6 @@
 # Preparing a Tax Disclosure
 
-*How to satisfy real-world reporting obligations from Prism privacy tools — for users and for the accountants/verifiers receiving their proofs. Built on [The Prism Protocol](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol).*
+*How to satisfy real-world reporting obligations from Prism privacy tools — for users and for the accountants/verifiers receiving their proofs. Built on [The Prism Protocol](./The-Prism-Protocol.md).*
 
 ---
 
@@ -30,7 +30,7 @@ The verifier checks the proof against public chain state with their own node or 
 
 ### Practical tips
 
-- **Use sub-addresses per income source** (platform A vs. agency B vs. direct clients) from day one — attribution proofs become dramatically cleaner and can be scoped per-source later ([Using the Wallet](https://github.com/Esrevorter/Prism/wiki/Using-the-Wallet)).
+- **Use sub-addresses per income source** (platform A vs. agency B vs. direct clients) from day one — attribution proofs become dramatically cleaner and can be scoped per-source later ([Using the Wallet](./Using-the-Wallet.md)).
 - **Generate early.** Proofs bind to chain state; if your 2026 activity somehow continues changing (late payments), regenerate rather than stretching an old proof.
 - **Anchor only if asked.** Optional on-chain anchoring creates a consensus-recorded attestation — useful for disputes, unnecessary for ordinary filings, and itself a small disclosure event (the fact-of-anchoring becomes public). Default: off.
 - **One-time artifacts.** Reuse requires regeneration by design (D3 semantics); if two parties need the same figure, each gets their own nonce-bound copy.
@@ -54,9 +54,9 @@ Jurisdiction interoperability (making statements map onto local forms) is active
 ## Frequently asked here
 
 **"Can I prove taxes were paid but hide the amounts?"** You prove *what you choose*: e.g., solvency ≥ threshold without totals. Exact figures require choosing the exact-figure statement — the dial is yours per disclosure.
-**"What if the auditor demands my full view key?"** Then selective disclosure isn't solving your case; the scoped tools exist precisely so full-key requests should look disproportionate. Rotating scoped keys bound any leak ([Prism Protocol](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol) §rotation).
+**"What if the auditor demands my full view key?"** Then selective disclosure isn't solving your case; the scoped tools exist precisely so full-key requests should look disproportionate. Rotating scoped keys bound any leak ([Prism Protocol](./The-Prism-Protocol.md) §rotation).
 **"Does the IRS/government get automatic access?"** No. Nothing is automatic. Disclosures are user-generated artifacts — that's the entire design point.
 
 ---
 
-**Next:** [The Prism Protocol](https://github.com/Esrevorter/Prism/wiki/The-Prism-Protocol) · [FAQ](https://github.com/Esrevorter/Prism/wiki/FAQ) · [Glossary](https://github.com/Esrevorter/Prism/wiki/Glossary)
+**Next:** [The Prism Protocol](./The-Prism-Protocol.md) · [FAQ](./FAQ.md) · [Glossary](./Glossary.md)
