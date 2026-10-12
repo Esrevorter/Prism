@@ -39,7 +39,7 @@ Prism is a privacy-first, AI-native Layer-1 cryptocurrency that combines:
 
 **Primary persona (v1 focus):** Independent creative professionals (e.g., designers, writers, photographers, musicians, video editors) who receive irregular global income, pay collaborators frequently, value privacy, and are underserved by hostile crypto UX.
 
-**In scope for v1:** Base chain, RingCT + ZKP layer, MPC wallet with social recovery, AI-assisted native wallet app, micro-fee economy, scoped auditor view keys.
+**In scope for v1:** Base chain, RingCT + ZKP layer, lean self-custody wallet (password-sealed key + CAPTCHA-gated signing, per Amendment A2-2026-10 — MPC ceremony stack retired), AI-assisted native wallet app, micro-fee economy, scoped auditor view keys.
 
 **Out of scope for v1:** General-purpose smart-contract VM, permissioned enterprise ledger mode, exchange/custodial services, mobile-only limitation (desktop daemon supported).
 
@@ -66,10 +66,14 @@ Prism is a privacy-first, AI-native Layer-1 cryptocurrency that combines:
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  L3 — Accessibility Layer (Wallet Apps / SDK)           │
-│   • MPC key shares (GG20-style threshold ECDSA/EdDSA)   │
-│   • Social recovery coordinator, dead-man switch        │
-│   • Biometric unlock (device-bound, never on-chain)     │
-│   • Neuro-inclusive UI system                           │
+│   • Lean auth: password-sealed local spend key (scrypt │
+│     KDF + encrypt-then-MAC) + image-grid CAPTCHA gate  │
+│     on every signature (Amendment A2-2026-10; former   │
+│     GG20/FROST MPC share stack retired)               │
+│   • 12-word recovery phrase (address-invariant)        │
+│   • Optional biometric convenience unlock (device-     │
+│     bound, never on-chain; retires as a hard gate)     │
+│   • Neuro-inclusive UI system                          │
 ├─────────────────────────────────────────────────────────┤
 │  L2 — Intelligence Layer (On-Device AI)                 │
 │   • NL Transaction Compiler (LLM → intent JSON → tx)    │
@@ -91,7 +95,7 @@ Prism is a privacy-first, AI-native Layer-1 cryptocurrency that combines:
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Trust boundaries:** The chain trusts only consensus. The wallet trusts the device OS (biometrics), MPC signers (threshold), and the user's disclosure decisions. The AI layer is advisory except within explicitly granted agent scopes.
+**Trust boundaries:** The chain trusts only consensus. The wallet trusts the device OS, the user's password (which seals the local spend key), and the user's disclosure decisions; every signature additionally requires a fresh human-presence check (image-grid CAPTCHA bound to the exact payment digest). The AI layer is advisory except within explicitly granted agent scopes.
 
 ---
 
@@ -133,7 +137,7 @@ Prism is a privacy-first, AI-native Layer-1 cryptocurrency that combines:
 ### 5.2 Key Taxonomy
 | Key | Purpose | Revealed to user? | On-chain artifact? |
 |---|---|---|---|
-| Spend key `a` | Authorize spends | Yes (MPC shares) | Public spend key `A` in payment address |
+| Spend key `a` | Authorize spends | Yes — sealed at rest under the user's password (never leaves the device) | Public spend key `A` in payment address |
 | View key `b` | Scan chain for incoming outputs | Yes | Public view key `B` in payment address |
 | Payment address | Receiving | Yes | n/a (user-shared) |
 | Scoped view key `V(s,t)` | Auditor access to subset | Only when disclosed | n/a (off-chain, shared out-of-band) |
@@ -231,10 +235,9 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
 {
   "account_id": "uuid",
   "name": "Client income",
-  "scheme": "mpc_threshold",          // | "seed_legacy"
-  "threshold": 3, "total_shares": 5,
-  "signer_registry": [ { "share_id": "...", "device|contact": "...", "transport": "ee2ee" } ],
-  "recovery_policy": { "quorum": 3, "timelock_hours": 72, "cooldown_days": 30 },
+  "scheme": "lean_sealed_key",        // | "seed_legacy" (A2-2026-10: was "mpc_threshold")
+  "key_store": { "kdf": "scrypt|pbkdf2_sha256", "envelope": "aes-encrypt-then-hmac", "lockout_after": 5 },
+  "recovery_phrase_words": 12,         // address-invariant restore (pinned by tests)
   "inheritance": { "mode": "dead_man_switch", "beneficiary_pubkey": "...", "inactivity_days": 365 },
   "created_at": "...", "last_sync_height": 123456
 }
@@ -274,7 +277,7 @@ Each is a **PLONK (ultra-honk) circuit** — Decision D2: zk-SNARKs chosen over 
     "fee": "base_only"
   },
   "simulation": { "predicted_effects": "...", "risk_score": 0.01, "warnings": [] },
-  "confirmation": { "required": true, "method": "biometric", "signed_at": null },
+  "confirmation": { "required": true, "method": "captcha_plus_password", "signed_at": null },
   "status": "draft|awaiting_confirm|broadcast|confirmed|failed|cancelled"
 }
 

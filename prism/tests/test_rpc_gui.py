@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.request
 
 import pytest
@@ -314,6 +315,93 @@ class TestRPCOverHTTP:
         assert "What would you like to do?" in html
         with urllib.request.urlopen(live + "/static/app.js", timeout=5) as r:
             assert b"jsonrpc" in r.read()
+
+
+class TestGUIv2WireContract:
+    """GUI v2 lean-auth journey over a real socket, exactly as app.js drives
+    it: static bundle -> auth.create -> recover (address-invariant) -> unlock
+    -> intent flow -> CAPTCHA challenge/solve -> sign -> history. Pins the
+    new response fields the animated front end relies on (expires_at, tiles,
+    target, png_b64, human copy)."""
+
+    @pytest.fixture()
+    def live(self, monkeypatch):
+        monkeypatch.setattr(rpc_server, "SERVICE", PrismService())
+        httpd = rpc_server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                               rpc_server.RPCRequestHandler)
+        th = threading.Thread(target=httpd.serve_forever, daemon=True)
+        th.start()
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+        httpd.shutdown()
+        th.join(timeout=2)
+
+    def _call(self, base, method, params=None):
+        req = urllib.request.Request(
+            base + "/jsonrpc",
+            data=json.dumps({"jsonrpc": "2.0", "method": method,
+                             "params": params or {}, "id": 1}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+
+    def test_static_bundle_is_gui_v2(self, live):
+        with urllib.request.urlopen(live + "/", timeout=5) as r:
+            html = r.read().decode()
+        # anchors the v2 controller expects (added during the redesign)
+        assert 'id="phrase-warning"' in html
+        assert 'id="balance-note"' in html
+        with urllib.request.urlopen(live + "/static/app.js", timeout=5) as r:
+            js = r.read().decode()
+        assert "auth.challenge" in js and "auth.sign" in js
+        assert "mpc.ceremony_start" not in js          # MPC fully retired
+
+    def test_full_lean_auth_payment_journey(self, live):
+        PW2 = "brand new passphrase 99#"
+        c = self._call(live, "auth.create", {"password": PW})["result"]
+        assert len(c["recovery_phrase"].split()) == 12
+        assert "ONLY way back" in c["warning"]         # honest phrase copy
+        addr = c["address"]
+        # forgot-password path: the 12 words restore the SAME address
+        r = self._call(live, "auth.recover",
+                       {"phrase": c["recovery_phrase"],
+                        "new_password": PW2})["result"]
+        assert r["address"] == addr and r["ok"]
+        u = self._call(live, "auth.unlock", {"password": PW2})["result"]
+        assert u["address"] == addr
+        bal = self._call(live, "wallet.balance")["result"]
+        assert bal["address"] == addr                 # hero needs it
+        self._call(live, "chain.mine", {"count": 5})
+        it = self._call(live, "intent.compile",
+                        {"utterance": "send 1 PRSM to Alex"})["result"]
+        # challenge must refuse an UNCONFIRMED intent (honest gate order)
+        bad = self._call(live, "auth.challenge",
+                         {"intent_id": it["intent_id"]})
+        assert "error" in bad and "not ready to sign" in bad["error"]["message"]
+        self._call(live, "intent.confirm", {"intent_id": it["intent_id"]})
+        ch = self._call(live, "auth.challenge",
+                        {"intent_id": it["intent_id"]})["result"]
+        # fields the animated GUI relies on:
+        assert ch["expires_at"] > time.time()          # countdown ring
+        assert ch["png_base64"]                         # picture
+        picks = [i for i, t in enumerate(ch["tiles"]) if t == ch["target"]]
+        sol = self._call(live, "auth.solve",
+                        {"challenge_id": ch["challenge_id"],
+                         "picks": picks,
+                         "digest_hex": ch["digest_hex"]})["result"]
+        signed = self._call(live, "auth.sign",
+                            {"intent_id": it["intent_id"],
+                             "password": PW2,
+                             "token": sol["token"]})["result"]
+        assert signed["ok"] and "Sent" in signed["human"]
+        # solved token is single-use: replay must fail
+        replay = self._call(live, "auth.sign",
+                            {"intent_id": it["intent_id"],
+                             "password": PW2,
+                             "token": sol["token"]})
+        assert "error" in replay
+        h = self._call(live, "auth.history")["result"]
+        assert h["count"] == 1 and h["txs"][0]["amount_prsm"] in ("1", "1.0")
+
 
 
 class TestExplanationTemplatePack:

@@ -2,7 +2,8 @@
 
 Stdlib-only (http.server) so the core stays dependency-free. The daemon
 wraps a single in-process PrismService (chain node + intent compiler +
-MPC ceremony state) and exposes it to the GUI over JSON-RPC 2.0:
+lean CAPTCHA/password auth stack) and exposes it to the GUI over
+JSON-RPC 2.0:
 
     POST /jsonrpc   {"jsonrpc":"2.0","method":"...","params":{...},"id":1}
     GET  /health    liveness probe for the GUI bootstrap
@@ -12,14 +13,14 @@ Methods (v0):
     chain.info             -> {height, difficulty, total_shards, tip_hash,
                                cadence_s, virtual_mode}
     chain.mine             -> mine one devnet block (Refraction faucet)
-    wallet.balance         -> {balance_shard, balance_prsm}
+    wallet.balance         -> {balance_shard, balance_prsm, address}
     contacts.list          -> [{contact_id, display_name, address}]
     contacts.add           -> add a Contact from the GUI form
     intent.compile         -> NL utterance -> Intent draft/confirm payload
     intent.answer          -> fold a clarification-chip answer into a draft
     intent.simulate        -> plain-language simulation preview of a draft
     intent.confirm         -> mark confirmed; returns signed-pending envelope
-    auth.status            -> {has_wallet, unlocked, address, ...} (spec §9 A2)
+    auth.status            -> {exists, unlocked, address, scheme, human} (spec §9 A2)
     auth.create            -> password-seal a new spend key; returns 12-word phrase once
     auth.unlock / lock     -> open/close the sealed key in memory
     auth.recover           -> restore from the 12-word phrase (address-invariant)
