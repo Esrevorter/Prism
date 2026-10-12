@@ -20,14 +20,24 @@ PW = "correct horse battery staple 42!"   # devnet test password (>= policy len)
 
 
 def _full_auth_sign(svc: PrismService, intent_id: str) -> dict:
-    """Drive the exact GUI happy path for one payment: CAPTCHA challenge ->
-    honest client-side solve (read the grid spec from the engine's pending
-    record, like a screen-reader test harness would) -> token -> password
-    sign. Returns auth_sign's result."""
+    """Drive the EXACT GUI happy path for one payment: CAPTCHA challenge ->
+    solve using ONLY the fields that cross the wire (`ch["tiles"]`, what the
+    user literally sees in the picture) -> token -> password sign.
+
+    Regression pin (v0.1.7): an earlier version of this helper cheated by
+    reaching into svc.captcha._pending for the answer key, so it stayed green
+    even after the release broke real users' captcha ("not quite — tap every
+    matching shape" forever).  Reading only the wire payload makes this test
+    fail loudly the moment the contract regresses.  Returns auth_sign's
+    result."""
     ch = svc.auth_challenge(intent_id)
     digest = ch["digest_hex"]
-    rec = svc.captcha._pending[ch["challenge_id"]]
-    tiles, target = rec["grid"]["tiles"], rec["grid"]["target"]
+    # The server never ships `target`; the harness "looks at the picture":
+    # pick the most-frequent shape, which new_image_grid() guarantees to be
+    # the unique majority (3-4 copies vs <=2 of any decoy).
+    tiles = ch["tiles"]
+    target = max(set(tiles), key=tiles.count)
+    assert tiles.count(target) >= 3, "majority tile must be the visible answer"
     picks = [i for i, s in enumerate(tiles) if s == target]
     solved = svc.auth_solve(ch["challenge_id"], picks, digest)
     return svc.auth_sign(intent_id, PW, solved["token"])
@@ -184,6 +194,36 @@ class TestLeanAuth:
         assert ch["svg"].startswith("<svg") and ch["digest_hex"]
         assert ch["palette"] and "star" in ch["palette"]
 
+    def test_captcha_wire_contract(self, svc):
+        """Regression pin for the broken v0.1.7 captcha release.
+
+        The GUI renders tiles from `ch["tiles"]` and submits taps against it;
+        if that field ever disappears from the wire payload, EVERY payment
+        fails with "not quite — tap every matching shape" and users cannot
+        send money.  This test solves challenges using only what crosses the
+        RPC boundary (never engine internals) so the whole class of bug is
+        caught in CI before tagging.  Also pins fail-closed behaviour: wrong
+        picks are refused, and the answer key (`target`) must NEVER leak."""
+        svc.auth_create(PW); svc.mine(5)
+        required = ("challenge_id", "prompt", "svg", "tiles", "palette",
+                    "ttl_s", "expires_at", "intent_id", "digest_hex", "human")
+        for _ in range(10):                       # cover many random grids
+            it = svc.intent_compile("send 1 PRSM to Alex")
+            svc.intent_confirm(it["intent_id"])
+            ch = svc.auth_challenge(it["intent_id"])
+            for key in required:
+                assert key in ch, f"captcha contract field {key!r} missing"
+            assert len(ch["tiles"]) == 9, "grid must ship all 9 visible tiles"
+            assert "target" not in ch, "answer key must never cross the wire"
+            # honest solve: derive the answer from the visible picture only
+            target = max(set(ch["tiles"]), key=ch["tiles"].count)
+            good = [i for i, s in enumerate(ch["tiles"]) if s == target]
+            bad = [i for i in range(9) if i not in good][:2]
+            with pytest.raises(ValueError, match="not quite"):
+                svc.auth_solve(ch["challenge_id"], bad, ch["digest_hex"])
+            solved = svc.auth_solve(ch["challenge_id"], good, ch["digest_hex"])
+            assert svc.auth_sign(it["intent_id"], PW, solved["token"])["ok"]
+
     def test_wrong_captcha_picks_refused_then_fresh_solve_ok(self, svc):
         svc.auth_create(PW); svc.mine(5)
         it = svc.intent_compile("send 1 PRSM to Alex")
@@ -199,9 +239,8 @@ class TestLeanAuth:
         it = svc.intent_compile("send 1 PRSM to Alex")
         svc.intent_confirm(it["intent_id"])
         ch = svc.auth_challenge(it["intent_id"])
-        rec = svc.captcha._pending[ch["challenge_id"]]
-        picks = [i for i, s in enumerate(rec["grid"]["tiles"])
-                 if s == rec["grid"]["target"]]
+        target = max(set(ch["tiles"]), key=ch["tiles"].count)   # wire-only
+        picks = [i for i, s in enumerate(ch["tiles"]) if s == target]
         solved = svc.auth_solve(ch["challenge_id"], picks, ch["digest_hex"])
         assert svc.auth_sign(it["intent_id"], PW, solved["token"])["ok"]
         it2 = svc.intent_compile("send 1 PRSM to Alex")
@@ -214,9 +253,8 @@ class TestLeanAuth:
         it = svc.intent_compile("send 1 PRSM to Alex")
         svc.intent_confirm(it["intent_id"])
         ch = svc.auth_challenge(it["intent_id"])
-        rec = svc.captcha._pending[ch["challenge_id"]]
-        picks = [i for i, s in enumerate(rec["grid"]["tiles"])
-                 if s == rec["grid"]["target"]]
+        target = max(set(ch["tiles"]), key=ch["tiles"].count)   # wire-only
+        picks = [i for i, s in enumerate(ch["tiles"]) if s == target]
         tok = svc.auth_solve(ch["challenge_id"], picks, ch["digest_hex"])["token"]
         with pytest.raises(ValueError):
             svc.auth_sign(it["intent_id"], "totally wrong password 1!", tok)

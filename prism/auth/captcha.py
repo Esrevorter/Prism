@@ -404,6 +404,14 @@ class CaptchaEngine:
         """
         grid = new_image_grid()
         cid = grid["challenge_id"]
+        # Regression pin (v0.1.7 broken-captcha post-mortem): the client can
+        # only answer honestly if the wire payload carries what is VISIBLE in
+        # the picture — the tile shapes themselves.  The GUI composes its tap
+        # overlay from `tiles` (see prism/gui/app.js renderCapSvg); when a
+        # release dropped this field, every payment failed with "not quite —
+        # tap every matching shape" and users could never sign.  Never remove
+        # or rename these display-only fields without updating the GUI and
+        # test_captcha_wire_contract below in the same commit.
         self._pending[cid] = {
             "grid": grid,
             "intent_digest_hex": intent_digest_hex,
@@ -413,6 +421,7 @@ class CaptchaEngine:
             "challenge_id": cid,
             "prompt": grid["prompt"],
             "svg": render_grid_svg(grid["tiles"], grid["target"]),
+            "tiles": list(grid["tiles"]),
             "palette": shape_palette(),
             "ttl_s": self.ttl_s,
             "human": ("Prove you're human: look at the picture and tap the "

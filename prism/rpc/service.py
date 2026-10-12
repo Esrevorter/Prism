@@ -468,14 +468,14 @@ class PrismService:
             # vector-first since v0.1.5: the GUI composes ONE inline SVG that
             # contains both the picture and its own tap targets, so there is
             # never a second visual element (the old bug: <img> plus an
-            # unstyled overlay circle).  The answer key lives only server-side
-            # in _pending; tiles/target here are display-only and leak nothing
-            # a human can't see by looking at the picture itself.
-            rec = self.captcha._pending.get(ch["challenge_id"])
-            if rec is not None:
-                g = rec["grid"]
-                ch["tiles"] = g["tiles"]
-                ch["target"] = g["target"]
+            # unstyled overlay circle).  `tiles` ships from captcha.issue()
+            # itself now — the v0.1.7 regression happened because this RPC
+            # layer reached into engine internals (_pending) to backfill it,
+            # so any refactor of the engine silently broke every payment.
+            # Display-only fields (tiles/palette/svg) leak nothing a human
+            # can't see by looking at the picture; the answer key (`target`)
+            # deliberately NEVER crosses the wire.
+            assert ch.get("tiles"), "captcha wire contract broken: no tiles"
             return ch
 
     def auth_solve(self, challenge_id: str, picks: list[int],
