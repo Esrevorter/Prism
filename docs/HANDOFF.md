@@ -38,6 +38,7 @@ keyless signatures on every asset).
 | Packaging | `packaging/` | PyInstaller specs, `build_release.sh`, `sync_gui.py` |
 | CI | `.github/workflows/{ci,release,desktop}.yml` | 3-OS test matrix; installer builds gated on tag; attestation steps credential-gated |
 | Docs source of truth | `README.md`, `wiki/*.md`, `docs/` | hosted wiki is a *rendered copy* — see §8 |
+| Internal governance (moved 2026-10-12) | `docs/internal/{rules,ethics,qwen}.md` + `README.md` index | agent-session binding files; out of repo root per founder request — update any references you add to point at `docs/internal/` |
 | Attestation plan | `docs/ATTESTATION.md` | cosign live; Apple/Microsoft cert steps pending secrets |
 | Tests | `tests/` | current state: **511 passed / 7 skipped**; incl. `test_testnet_parity.py` |
 
