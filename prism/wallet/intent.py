@@ -388,6 +388,9 @@ class Intent:
             raise IntentError(f"cannot confirm from {self.status}")
         if self.confirmation.required and self.confirmation.signed_at is None:
             self.confirmation.signed_at = now_unix
+        # explicit machine-readable state: intent is ready for the CAPTCHA-
+        # gated signer (prism.rpc.service.auth_sign), spec §9 Amendment A2.
+        self.status = "confirmed"
         self.validate()
         return self
 

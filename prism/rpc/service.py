@@ -5,7 +5,11 @@ Single owner of all mutable devnet state so the RPC handlers stay thin:
   * an AddressBook + IntentCompiler (NL bar backend),
   * a toy balance ledger (coinbase faucet -> wallet credit) so the intent
     pipeline can be exercised end-to-end without RingCT scanning,
-  * MPC Solo-ceremony state machine (2-of-3 keygen staged for UI progress).
+  * the lean auth stack (spec §9, Amendment A2-2026-10): a password-sealed
+    local spend key (prism.auth.keystore) + image-grid CAPTCHA gating
+    (prism.auth.captcha) that together authorize every irreversible action.
+    The former multi-device MPC ceremony is retired — one wallet, one
+    password, one 3-second human check per payment.
 
 Design notes for the UX requirement (spec §13 "GUI must excel in
 user-friendliness"): every response that the GUI renders carries
@@ -108,8 +112,8 @@ if __package__ in (None, "", "rpc"):
     from prism.chain.node import (ChainState, mine_block, make_genesis, Block,
                                   ZERO32)
     from prism.chain.params import REFRACTION_TESTNET
-    from prism.mpc import frost, recovery
-    from prism.mpc.sharing import Share
+    from prism.auth.captcha import CaptchaEngine, CaptchaError, CaptchaToken
+    from prism.auth.keystore import KeyStore
     from prism.wallet.agent_auth import (AgentRuntime, Constraints, Grant,
                                          PolicyEngine, RISK_CLEAN_MAX,
                                          SignerStub, _intent_amount_shard)
@@ -123,8 +127,8 @@ else:
                                 render_template)
     from ..chain.node import ChainState, mine_block, make_genesis, Block, ZERO32
     from ..chain.params import REFRACTION_TESTNET
-    from ..mpc import frost, recovery
-    from ..mpc.sharing import Share
+    from ..auth.captcha import CaptchaEngine, CaptchaError, CaptchaToken
+    from ..auth.keystore import KeyStore
     from ..wallet.agent_auth import (AgentRuntime, Constraints, Grant,
                                      PolicyEngine, RISK_CLEAN_MAX, SignerStub,
                                      _intent_amount_shard)
@@ -132,7 +136,8 @@ else:
                                  IntentError, apply_clarification, prsm_to_shard,
                                  shard_to_prsm, simulate, fraud_flags)
 
-DEVICE_LABELS = {1: "Phone", 2: "Laptop", 3: "Backup card"}
+# Human-readable label for the receiving address shown in the wallet UI.
+ADDRESS_PREFIX = "prsm1"
 
 # Default agent grant (§7.7 / §8.4): a conservative self-directed DCA plan.
 # Constraints are user-editable through the API; these defaults embody the
@@ -151,15 +156,13 @@ DEFAULT_DCA_VETO_HOURS = 24.0
 
 
 @dataclass
-class CeremonyState:
-    """Staged 2-of-3 Solo keygen so the GUI can show real progress."""
-    status: str = "idle"            # idle|running|complete|failed
-    stage: str = ""                 # e.g. "leg 2/3 commitments posted"
-    percent: int = 0
-    error: str | None = None
-    result: frost.CeremonyResult | None = None
-    started_at: float = 0.0
-    finished_at: float = 0.0
+class SignedTx:
+    """One locally-signed, devnet-settled transaction (auth.sign output)."""
+    intent_id: str
+    txid: str
+    height: int
+    amount_shard: int
+    sig_hex: str
 
 
 class PrismService:
@@ -179,7 +182,13 @@ class PrismService:
         self.balance_shard = 0                        # faucet credits
         self.faucet_outputs: list[SnapshotOutput] = []  # mined coinbase credits
         self.gate = SigningGate(detector=FraudDetector())
-        self.ceremony = CeremonyState()
+        # ---- lean auth stack (spec §9, Amendment A2-2026-10) ----
+        # Password-sealed spend key + per-payment CAPTCHA gate. The wallet
+        # file lives next to the launcher's gui.info sidecar in production;
+        # the devnet service keeps it in memory unless a path is provided.
+        self.keystore = KeyStore()
+        self.captcha = CaptchaEngine()
+        self.signed_txs: list[SignedTx] = []
         # Agent runtime (§7.7/§8.4): policy enforced OUTSIDE the agent loop;
         # the same SigningGate that reviews human confirmations is wired in,
         # so advisory risk for agent actions comes from real tx features.
@@ -188,16 +197,22 @@ class PrismService:
         self.agent = AgentRuntime(engine=self.agent_engine, gate=self.gate)
         self.dca_contact: Optional[Contact] = None   # set by grant_create
         self.dca_contact_id: Optional[str] = None    # exact alias for agent maps
-        # Social recovery GA (Phase 3, spec §7.3 / Decision D4): a RecoveryState
-        # is attached lazily when a Solo ceremony completes; the full 3-of-5
-        # Social mode shares the same state machine (quorum/timelock/cooldown
-        # come from the wallet's RecoveryPolicy, §6.2 `recovery_policy`).
-        self.recovery_state: Optional[recovery.RecoveryState] = None
-        self.recovery_new_shares: dict[int, int] = {}   # post-recovery delivery
         # virtual cadence bookkeeping (mirrors node_sync_soak model)
         self.cadence_s = self.params.target_block_time
         self.started_unix = int(time.time())
         self.sim_clock = self.params.genesis_timestamp
+
+    # ---------------- receiving address ----------------
+
+    def receive_address(self) -> str:
+        """Deterministic payment address derived from the wallet's public
+        key (spec §6.3 style: prsm1 + hex body + short checksum). Stable
+        across restarts and recovery-phrase restores."""
+        if not self.keystore.pubkey_hex:
+            return ""
+        body = self.keystore.pubkey_hex[:52]
+        chk = hashlib.sha3_256(body.encode()).hexdigest()[:4]
+        return f"{ADDRESS_PREFIX}{body}{chk}"
 
     # ---------------- chain ----------------
 
@@ -269,7 +284,212 @@ class PrismService:
     def balance(self) -> dict:
         with self._lock:
             return {"balance_shard": self.balance_shard,
-                    "balance_prsm": shard_to_prsm(self.balance_shard)}
+                    "balance_prsm": shard_to_prsm(self.balance_shard),
+                    "address": self.receive_address()}
+
+    # ---------------- lean auth (spec §9, Amendment A2-2026-10) ----------------
+    #
+    # The whole signing story in four calls:
+    #   auth.status  -> what the UI needs to decide which screen to show
+    #   auth.create / auth.unlock / auth.recover -> key lifecycle
+    #   auth.challenge -> CAPTCHA bound to THIS payment's digest
+    #   auth.solve     -> taps validated, single-use token returned
+    #   auth.sign      -> password + valid token required; signs & settles
+    #
+    # Honest trust model (spec §5): the CAPTCHA proves a human is present and
+    # blocks blind automated clicking; the password protects the key at rest.
+    # Neither is claimed to prove "the owner" against a fully compromised box.
+
+    def auth_status(self) -> dict:
+        with self._lock:
+            exists = self.keystore.blob is not None
+            addr = self.receive_address()
+            out = {
+                "exists": exists,
+                "unlocked": bool(addr) and exists,
+                "address": addr,
+                "scheme": "password-sealed local key + image-grid CAPTCHA gate",
+            }
+            if not exists:
+                out["human"] = ("No wallet yet. Create one: pick a password "
+                                "and write down the 12 recovery words.")
+            elif not addr:
+                out["human"] = ("Wallet locked. Enter your password to unlock "
+                                "— nothing can be signed until you do.")
+            else:
+                out["human"] = (f"Wallet ready. Payments go to {addr[:14]}…"
+                                if len(addr) > 14 else "Wallet ready.")
+            return out
+
+    def auth_create(self, password: str) -> dict:
+        """First-run wallet creation (<60 s target, spec §7.1). Returns the
+        12-word recovery phrase exactly once — honest warning included."""
+        with self._lock:
+            try:
+                phrase = self.keystore.create(password)
+            except RuntimeError as e:
+                raise ValueError(str(e))
+            return {
+                "ok": True,
+                "recovery_phrase": phrase,
+                "address": self.receive_address(),
+                "warning": ("Write these 12 words down on paper, offline. "
+                            "They are the ONLY way back into this wallet if "
+                            "you forget your password — Prism cannot restore "
+                            "it for you."),
+                "human": ("Your wallet is ready. Your address is shown "
+                          "below; every payment you authorize will ask you to "
+                          "prove you're human first — it takes about three "
+                          "seconds."),
+            }
+
+    def auth_unlock(self, password: str) -> dict:
+        with self._lock:
+            if self.keystore.blob is None:
+                raise ValueError("no wallet yet — create one first "
+                                 "(auth.create)")
+            try:
+                key = self.keystore.unlock(password)
+            except PermissionError as e:
+                raise ValueError(str(e))
+            return {"ok": True, "address": self.receive_address(),
+                    "pubkey_hex": key.public_hex(),
+                    "human": "Unlocked. You can review and sign payments now."}
+
+    def auth_lock(self) -> dict:
+        """Wipe the decrypted key from memory (the sealed blob stays).
+
+        The devnet keystore only ever returns WalletKey objects to callers,
+        so nothing is cached here — locking is a stateless confirmation and
+        the honest copy tells the user exactly that."""
+        with self._lock:
+            return {"ok": True, "human": "Locked. Your password is required "
+                                         "again for the next signature — "
+                                         "nothing can be signed without it."}
+
+    def auth_recover(self, phrase: str, new_password: str) -> dict:
+        """Forgot-password path: rebuild the SAME key from the 12 words;
+        the receiving address never changes (pinned invariant)."""
+        with self._lock:
+            old = self.receive_address()
+            try:
+                self.keystore.recover_with_phrase(phrase, new_password)
+            except (ValueError, RuntimeError) as e:
+                raise ValueError(str(e))
+            new = self.receive_address()
+            if old and old != new:                     # pragma: no cover
+                raise RuntimeError("recovery changed the address — invariant "
+                                   "broken, refusing to continue")
+            return {"ok": True, "address": new,
+                    "human": ("Welcome back — same wallet, same address. "
+                              "Your password is reset; store the new one "
+                              "safely.")}
+
+    def auth_change_password(self, old: str, new: str) -> dict:
+        with self._lock:
+            try:
+                self.keystore.change_password(old, new)
+            except (PermissionError, RuntimeError, ValueError) as e:
+                raise ValueError(str(e))
+            return {"ok": True, "human": "Password updated. Your address and "
+                                         "recovery words stay the same."}
+
+    def auth_challenge(self, intent_id: str) -> dict:
+        """Issue the CAPTCHA picture that gates signing THIS exact payment."""
+        with self._lock:
+            if self.keystore.blob is None:
+                raise ValueError("no wallet yet — create one first "
+                                 "(auth.create)")
+            it = self._get_intent(intent_id)
+            if it.status != "confirmed":
+                raise ValueError(f"intent is {it.status}, not ready to sign — "
+                                 "confirm it first")
+            digest = it.canonical_digest().hex()
+            ch = self.captcha.issue(digest)
+            ch["intent_id"] = it.intent_id
+            ch["digest_hex"] = digest
+            return ch
+
+    def auth_solve(self, challenge_id: str, picks: list[int],
+                   digest_hex: str) -> dict:
+        """Validate the user's taps; on success hand back a single-use,
+        HMAC-signed authorization token bound to this payment digest."""
+        with self._lock:
+            try:
+                tok = self.captcha.solve(challenge_id, [int(p) for p in picks],
+                                         digest_hex)
+            except CaptchaError as e:
+                raise ValueError(str(e))
+            return {"ok": True, "token": tok.to_json() if hasattr(tok, "to_json")
+                    else vars(tok),
+                    "human": ("You're human — verified. One last step: enter "
+                              "your password to sign this payment.")}
+
+    def auth_sign(self, intent_id: str, password: str, token: dict) -> dict:
+        """The only path that moves money: requires the sealing password AND
+        a fresh, correctly-bound CAPTCHA token. Signs the canonical digest
+        with the local spend key and settles on the devnet chain."""
+        with self._lock:
+            it = self._get_intent(intent_id)
+            if it.status != "confirmed":
+                raise ValueError(f"intent is {it.status}, not ready to sign")
+            digest = it.canonical_digest()
+            tok = token if isinstance(token, CaptchaToken) \
+                else CaptchaToken(**token)
+            if not self.captcha.verify(tok, digest.hex()):
+                raise ValueError("authorization expired or does not match "
+                                 "this payment — ask for a new picture")
+            try:
+                key = self.keystore.unlock(password)
+            except PermissionError as e:
+                raise ValueError(str(e))
+            sig = key.sign(digest)
+            if not key.verify(key.public, sig, digest):    # pragma: no cover
+                raise RuntimeError("signature failed self-verification — "
+                                   "refusing to broadcast")
+            amt = _intent_amount_shard(it)
+            cost = amt + BASE_FEE_SHARD
+            if cost > self.balance_shard:
+                raise ValueError("wallet balance too small to broadcast — "
+                                 "nothing was sent")
+            # settle on the real devnet chain (same honest ledger as agents)
+            self.balance_shard -= cost
+            txid = hashlib.sha3_256(json.dumps(
+                {"intent": it.intent_id, "sig": sig.hex(),
+                 "amount_shard": amt,
+                 "height": self.chain.tip.header.height + 1},
+                sort_keys=True).encode()).digest()
+            blk = mine_block(self.params, self.chain.tip,
+                             denylist_root=ZERO32,
+                             im_merkle_root=_empty_im_root(),
+                             difficulty=self.chain.difficulty,
+                             txids=[txid],
+                             timestamp=self.chain.tip.header.timestamp
+                                     + self.cadence_s)
+            self.chain.validate_and_apply(blk)
+            bh = blk.header.hash()
+            self.store[bh] = blk
+            self.height_index.append(bh)
+            self.faucet_outputs.append(SnapshotOutput(
+                txid=txid.hex(), output_index=0, amount_shard=0))
+            it.status = "broadcast"
+            rec = SignedTx(intent_id=it.intent_id, txid=txid.hex(),
+                           height=blk.header.height, amount_shard=amt,
+                           sig_hex=sig.hex())
+            self.signed_txs.append(rec)
+            return {"ok": True, "txid": rec.txid, "height": rec.height,
+                    "signature_hex": rec.sig_hex,
+                    "balance_shard": self.balance_shard,
+                    "human": (f"Sent — {shard_to_prsm(amt)} PRSM confirmed in "
+                              f"block {rec.height}. Receipt id {rec.txid[:12]}…")}
+
+    def auth_history(self) -> dict:
+        with self._lock:
+            return {"count": len(self.signed_txs),
+                    "txs": [{"intent_id": r.intent_id, "txid": r.txid,
+                             "height": r.height,
+                             "amount_prsm": shard_to_prsm(r.amount_shard)}
+                            for r in reversed(self.signed_txs)]}
 
     # ---------------- contacts ----------------
 
