@@ -1,4 +1,4 @@
-# Prism Release Checklist (v0.1.9+)
+# Prism Release Checklist (v0.1.10+)
 
 A tag is only cut AFTER the tree passes every gate below. v0.1.7/v0.1.8 shipped
 broken because tags were cut before version bumps landed and artifacts were

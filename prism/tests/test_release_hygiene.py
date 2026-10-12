@@ -241,3 +241,20 @@ class TestGuiClassContract(unittest.TestCase):
                                 [i for i, s in enumerate(tiles) if s == shape],
                                 ch["digest_hex"])
         self.assertTrue(solved["ok"])
+
+    def test_captcha_svg_carries_wire_stamp(self):
+        # v0.1.9 post-mortem: the shipped GUI bundle can lag the server build
+        # inside a frozen binary (stale static/ copy).  The tile list is now
+        # ALSO stamped inside the SVG picture itself (`<!--prism-tiles:...-->`)
+        # so app.js can always recover it; if the stamp ever disappears the
+        # client shows a clear version-mismatch error instead of an endless
+        # "not quite — tap every matching shape" loop.
+        from prism.auth.captcha import new_image_grid, render_grid_svg
+        g = new_image_grid()
+        svg = render_grid_svg(g["tiles"], g["target"])
+        import re
+        m = re.search(r"<!--prism-tiles:([a-z,]+)-->", svg)
+        self.assertIsNotNone(m, "SVG must carry the prism-tiles wire stamp")
+        self.assertEqual(m.group(1).split(","), g["tiles"])
+        # stamp contains every tile and nothing more: exactly 9 shapes
+        self.assertEqual(len(m.group(1).split(",")), 9)

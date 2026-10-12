@@ -1,6 +1,6 @@
 [package]
 name = "prism-gui-shell"
-version = "0.1.9"
+version = "0.1.10"
 description = "Tauri installer shell for the Prism desktop wallet. Bundles the PyInstaller-frozen `prism-gui` sidecar (embedded CPython) so end users never see a terminal (spec §13 double-click installer mandate)."
 authors = ["Project Prism contributors"]
 license = "MIT"

@@ -91,6 +91,26 @@ def check_captcha_wire(fail):
         if n < 3 or second >= n:
             fail.append(f"captcha grid ambiguous ({dict(c)}): prompt target is not "
                         "the strict visual majority — honest users will fail")
+    # v0.1.9 post-mortem: frozen binaries can ship a STALE GUI bundle that
+    # predates server fixes. The tile list must therefore also be stamped
+    # inside the picture (SVG comment) so app.js can always recover it, and
+    # app.js must actually parse that stamp. Pin both halves here.
+    import re as _re
+    m = _re.search(r"<!--prism-tiles:([a-z]+(?:,[a-z]+){8})-->", ch.get("svg", ""))
+    if not m:
+        fail.append("captcha wire contract: SVG missing prism-tiles stamp "
+                    "(stale bundled GUI cannot recover tiles -> unsolvable puzzle)")
+    elif m.group(1).split(",") != ch.get("tiles"):
+        fail.append("captcha wire contract: SVG tile stamp disagrees with wire 'tiles'")
+    appjs = os.path.join(ROOT, "prism", "rpc", "static", "app.js")
+    try:
+        with open(appjs, encoding="utf-8") as f:
+            src = f.read()
+        if "prism-tiles" not in src:
+            fail.append("GUI regression: app.js does not parse the prism-tiles "
+                        "stamp — old bundled clients break on any field drift")
+    except OSError as e:  # pragma: no cover
+        fail.append(f"cannot read {appjs}: {e}")
 
 
 def main():

@@ -23,12 +23,16 @@ prism-*-*/
 
 # Tauri / node
 node_modules/
-packaging/tauri/prism-gui/target/
-packaging/tauri/prism-gui/dist/
+target/
 
-# OS / editor noise
+# OS / editor cruft
 .DS_Store
 Thumbs.db
-*.swp
 .idea/
 .vscode/
+
+# Test / tooling output
+.pytest_cache/
+.coverage
+htmlcov/
+*.log

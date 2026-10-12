@@ -234,6 +234,13 @@ def render_grid_svg(tiles: list[str], target: str) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
         f'width="{w}" height="{h}" role="img" aria-label="Puzzle image: nine '
         f'tiles of simple shapes">',
+        # Wire-contract stamp (v0.1.9 post-mortem): display-only tile list,
+        # embedded IN the picture so it can never drift from what is drawn.
+        # The GUI parses this comment and renders its tap overlay from it;
+        # if a stale binary or drifted field ever breaks the contract again,
+        # the user sees a clear error instead of an unsolvable puzzle.
+        # Contains only what a human can already see — never `target`.
+        f'<!--prism-tiles:{",".join(tiles)}-->',
         f'<rect width="{w}" height="{h}" rx="20" fill="{pal["page"]}"/>',
     ]
     for i, shape in enumerate(tiles):
@@ -434,6 +441,11 @@ class CaptchaEngine:
         return {
             "challenge_id": cid,
             "prompt": grid["prompt"],
+            # Self-verifying picture (v0.1.9 post-mortem): the SVG carries an
+            # HTML comment with the exact tile list ("tiles:star,circle,...").
+            # The GUI parses it and renders from THAT string, so a binary that
+            # predates this fix (or any future field drift) shows a loud error
+            # instead of silently failing every payment like v0.1.7/v0.1.9 did.
             "svg": render_grid_svg(grid["tiles"], grid["target"]),
             "tiles": list(grid["tiles"]),
             "palette": shape_palette(),

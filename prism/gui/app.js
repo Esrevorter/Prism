@@ -339,9 +339,26 @@ function resetStages() {
   $("#receipt").hidden = true;
 }
 
+// v0.1.9 post-mortem hardening: a frozen binary can ship a stale GUI bundle
+// that predates server fixes (missing `tiles` on the wire => every payment
+// looped "not quite — tap every matching shape" forever). The server now also
+// stamps the tile list INSIDE the picture as an SVG comment
+// (`<!--prism-tiles:star,circle,...-->`). Recover tiles from the wire field
+// when present, else parse the stamp from the SVG; if both are missing show a
+// loud version-mismatch error instead of an unsolvable puzzle.
+function capTiles(ch) {
+  if (Array.isArray(ch.tiles) && ch.tiles.length === 9) return ch.tiles;
+  const m = /<!--prism-tiles:([a-z]+(?:,[a-z]+){8})-->/.exec(ch.svg || "");
+  if (m) return m[1].split(",");
+  throw new Error(
+    "Puzzle data missing — this build is out of date. Please download the " +
+    "latest release (tiles are no longer delivered to the app).");
+}
+
 async function startCaptcha() {
   try {
     const ch = await rpc("auth.challenge", { intent_id: currentIntent.intent_id });
+    ch.tiles = capTiles(ch);   // normalize once; renderCapSvg uses ch.tiles
     capState = { ch, picks: new Set(), token: null, timer: null,
                  deadline: ch.expires_at * 1000 };
     $("#cap-prompt").textContent = ch.prompt;
