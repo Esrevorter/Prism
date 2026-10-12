@@ -1,9 +1,16 @@
 # Tool Calling and Execution Rules
 
-> **Rules file version: v1.4 (2026-10-12).** This version stamp exists because releases
+> **Rules file version: v1.5 (2026-10-12).** This version stamp exists because releases
 > v0.1.6–v0.1.10 kept shipping "fixed" claims while the user saw an unchanged app — a rules
 > file with no version cannot be proven to have been loaded by any given session. If a fix
 > session's plan does not cite this number, its rules were probably not read at all.
+>
+> **v1.5 changelog:** v0.1.13 brand pass — the shipped icon files were a uniform near-black
+> tile (verified: single colour #0D1117 across all 262k pixels, zero glyph), which is why the
+> Windows taskbar showed a black square. Brand is now generated from `scripts/make_icon.py`
+> (golden serif P on dark rounded tile, SVG master rasterised at 1024px); every icon file
+> (.ico multi-res, .icns, Tauri PNG set, Store tiles) comes from that one source, and
+> `release_gate.check_brand_icon` fails any release whose icons regress to a blank tile.
 >
 > **v1.4 changelog:** §7 added — confirmed root cause of the multi-release "nothing changed"
 > saga (stale per-user data dir + cached GUI/lock), the real cross-platform data-directory

@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prism-prsm"
-version = "0.1.12"            # single source of truth; keep in sync with chain.__version__ tag suffix
+version = "0.1.13"            # single source of truth; keep in sync with chain.__version__ tag suffix
 description = "Prism — a privacy-first, AI-native cryptocurrency (reference implementation)"
 readme = "README.md"
 requires-python = ">=3.10"
