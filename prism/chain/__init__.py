@@ -5,5 +5,5 @@ Implements spec.md v1.0 §4 (monetary policy & consensus) and §6.1
 PLACEHOLDER is an integration boundary with a defined ABI, not a design gap.
 """
 
-__version__ = "0.1.7"
+__version__ = "0.1.9"
 SPEC_VERSION = "1.0"

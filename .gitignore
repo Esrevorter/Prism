@@ -1,5 +1,34 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Secrets
 .env
 .env.local
 .env.*
+
+# Build artifacts — NEVER commit these (v0.1.7 shipped 28 committed PyInstaller
+# files; v0.1.8 release failed over artifact/version mess). The release gate
+# (scripts/release_gate.py) fails CI if any of these reappear in `git ls-files`.
+build/
+buildtest/
+dist/
+disttest/
+prism-*-*/
+*.manifest
+
+# Tauri / node
+node_modules/
+packaging/tauri/prism-gui/target/
+packaging/tauri/prism-gui/dist/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

@@ -359,3 +359,34 @@ footer { text-align: center; padding: 26px; position: relative; z-index: 1; }
 .app-grid { display: grid; gap: var(--gap); }
 .balance-card .bal-head { display: flex; align-items: center; justify-content: space-between; }
 .nl-card .big-number { margin: 0; }
+
+/* ─── recovery phrase grid (12 words) ─── */
+.word-grid {
+  list-style: none; margin: 18px 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px; counter-reset: word;
+}
+.word-grid li {
+  display: flex; align-items: baseline; gap: 10px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border: 1px solid var(--border); border-radius: calc(var(--radius) * .6);
+  padding: 10px 14px; font-size: 1.05rem; letter-spacing: .02em;
+}
+.word-grid li::before {
+  counter-increment: word; content: counter(word) ".";
+  color: var(--muted); font-variant-numeric: tabular-nums; font-size: .85rem;
+  min-width: 1.6em;
+}
+
+/* ─── review card (intent preview before signing) ─── */
+.review-card h2 { margin-bottom: 12px; }
+.review-card .risk-banner { margin-bottom: 14px; }
+.review-card .ctx-help { margin-top: 16px; }
+.review-card .btn + .btn { margin-left: 10px; }
+
+/* ─── captcha card (human-presence check) ─── */
+.captcha-card { text-align: center; }
+.captcha-card h2 { margin-bottom: 8px; }
+.captcha-card .captcha-prompt { color: var(--muted); margin: 0 0 16px; font-size: 1.05rem; }
+.captcha-card .cap-frame { max-width: 420px; margin: 0 auto; }
+.captcha-card .btn { margin-top: 16px; }
