@@ -55,6 +55,13 @@ jobs:
       - name: Release gate (artifacts / versions / captcha contract)
         run: python scripts/release_gate.py
 
+      # Rules v1.3 §5/§6: the asset smoke gate asserted `target` presence
+      # while release_gate failed on `target` leakage — mutually unsatisfiable,
+      # so it was silently absent from CI and never protected a release.
+      # Wired in here (runs BEFORE any installer build job).
+      - name: GUI asset smoke (served HTML/CSS/JS + build stamp)
+        run: python scripts/gui_asset_smoke.py
+
   installer-dryrun:
     # Validates the desktop pipeline as far as possible WITHOUT a tag:
     # GUI bundle sync + PyInstaller freeze of both binaries. The Tauri bundling

@@ -183,7 +183,7 @@ class RPCRequestHandler(BaseHTTPRequestHandler):
     # ---- routes ----
     def do_GET(self):
         if self.path == "/health":
-            body = json.dumps({"status": "ok",
+            body = json.dumps({"status": "ok", "version": __version__,
                                "gui_bundle": gui_bundle_fingerprint()}).encode()
             return self._send(200, body, "application/json")
         if self.path in ("/", "/index.html"):
