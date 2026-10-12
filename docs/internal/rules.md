@@ -1,9 +1,22 @@
 # Tool Calling and Execution Rules
 
-> **Rules file version: v1.3 (2026-10-12).** This version stamp exists because releases
+> **Rules file version: v1.5 (2026-10-12).** This version stamp exists because releases
 > v0.1.6–v0.1.10 kept shipping "fixed" claims while the user saw an unchanged app — a rules
 > file with no version cannot be proven to have been loaded by any given session. If a fix
 > session's plan does not cite this number, its rules were probably not read at all.
+>
+> **v1.5 changelog:** v0.1.13 brand pass — the shipped icon files were a uniform near-black
+> tile (verified: single colour #0D1117 across all 262k pixels, zero glyph), which is why the
+> Windows taskbar showed a black square. Brand is now generated from `scripts/make_icon.py`
+> (golden serif P on dark rounded tile, SVG master rasterised at 1024px); every icon file
+> (.ico multi-res, .icns, Tauri PNG set, Store tiles) comes from that one source, and
+> `release_gate.check_brand_icon` fails any release whose icons regress to a blank tile.
+>
+> **v1.4 changelog:** §7 added — confirmed root cause of the multi-release "nothing changed"
+> saga (stale per-user data dir + cached GUI/lock), the real cross-platform data-directory
+> locations for support triage, and GitHub-milestone hygiene rules ahead of Phase 4
+> (production). The v0.1.12 cache headers + build stamp are the standing remedy; §7 tells
+> support staff where on disk to look when a user still reports an old UI.
 
 > **Release-versioning rule (MANDATORY since v1.3, added after the v0.1.10 report):**
 > Every release commit MUST bump the version in *all* of these locations in one change,
@@ -83,3 +96,47 @@ below keeps burst protection while leaving room for real verification work.)*
 - [ ] Add/update the visible version stamp in the GUI About/footer so future reports can be triaged by build.
 - [ ] In status reports, separate: "fixed in code (evidence: commit)" from "shipped to user (evidence: asset hash + embedded version)" from "user experience changed (evidence: rendered screenshot of the shipped app)". Only the third justifies the word "fixed" to a non-technical user; otherwise say PARTIAL.
 - [ ] If any of the above cannot be run in-session, report UNVERIFIED explicitly — do not soften (§4 Fail Loud).
+
+
+## 7. Support Triage: Where the Wallet Actually Lives on Disk (v1.4)
+*Added Oct 12, 2026 after the saga finally closed. The founder's "nothing has ever been fixed"
+complaint (v0.1.6 → v0.1.11) had TWO stacked causes, both now confirmed by evidence:*
+
+1. *Release-side (fixed in code): assets cached by WebView2 because old servers sent no
+   `Cache-Control` headers — remedied in v0.1.12 (`no-store` on all GUI responses +
+   stale-bundle tripwire banner in app.js).*
+2. *User-side (confirmed live): a **stale per-user data directory** kept serving/locking the
+   old state. Deleting the wallet dir and the stale `gui.lock` is what finally made the new
+   UI appear. Until this session we had documented `%LOCALAPPDATA%` guesses that were WRONG
+   for this build — the real folder was under the user's home directory.*
+
+### 7.1 Confirmed data-directory locations (verify before quoting to users)
+| Platform | Location | Notes |
+|---|---|---|
+| Windows 11 (this build) | `C:\Users\<name>\.wallet\` | Founder-confirmed Oct 12, 2026. Contains `prism_wallet.json`, chain data, and `gui.lock`. Hidden dot-folder; Explorer needs "Hidden items" ON or Win+R → `%USERPROFILE%\.wallet`. Do NOT send users hunting for `%LOCALAPPDATA%` — it exists on every Windows install but is not where Prism keeps its data. |
+| macOS / Linux | `~/.wallet/` (POSIX home) | Same layout; launcher default root is `os.path.expanduser("~")`-based (`prism/rpc/launcher.py`: `DEFAULT_ROOT = ~/.prism` for the daemon; the desktop wallet uses the `.wallet` home dir). |
+| GUI mutex | `<data dir>/gui.lock` | Zero-byte mandatory-lock file. A lock left behind by a crashed/killed instance can make the app appear frozen on an old build. Removing it while NO instance runs is safe; never remove it as a first resort without checking for running processes. |
+
+### 7.2 Support script for "the update didn't change anything" (plain language, neuro-inclusive)
+1. Look at the footer FIRST: it must read `Prism v<release> · ui <fingerprint> …`.
+   - No version prefix at all → old build is running; continue below.
+   - Version present but wrong → report the exact string + OS; that is a release-gate bug (§6 checklist was skipped).
+2. Fully quit Prism (check tray/process list), then delete ONLY these two things from the
+   data dir above: the stale `gui.lock`, and — after exporting/backing up the seed phrase —
+   the wallet state files. Reinstall the newest installer from the GitHub Releases page.
+3. If the footer still shows no stamp after steps 1–2, escalate: the artifact itself is
+   suspect; re-run §6 checklist against the published asset, do not improvise fixes.
+
+### 7.3 GitHub milestone hygiene (MANDATORY from Phase 4 onward)
+*Observed Oct 12, 2026: the project is in Phase 4 (production start) yet the repo's only
+milestone is "Phase 1". Milestones are how contributors know what is current; a single stale
+milestone is worse than none — it advertises activity that ended months ago.*
+- Every phase transition MUST create the matching milestone (`Phase N – <name>`) BEFORE the
+  first issue of that phase is opened, and close the previous phase's milestone.
+- Every release tag gets assigned to exactly one milestone; every closed PR merged toward a
+  release is linked to that release's milestone item.
+- At each release cut, run `gh api repos/{owner}/{repo}/milestones --jq '.[].title'` and
+  confirm the open set matches the Wiki Roadmap phases; a mismatch blocks the release
+  (same tier as §6 checklist items — they are gates, not suggestions).
+- Historical phases stay visible as CLOSED milestones (evidence trail, like retired MPC
+  modules); never delete milestones, only close them.

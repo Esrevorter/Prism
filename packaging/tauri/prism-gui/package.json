@@ -1,7 +1,7 @@
 {
   "name": "prism-wallet-shell",
   "private": true,
-  "version": "0.1.11",
+  "version": "0.1.13",
   "description": "npm plumbing for the Tauri installer shell (spec §13 double-click mandate). The Rust side lives in src-tauri/.",
   "scripts": {
     "tauri": "tauri",
