@@ -55,7 +55,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      # macOS: use the GitHub-hosted framework build of CPython, NOT the
+      # action's default standalone python-build-standalone distribution.
+      # Reason (learned from the v0.1.3 release failure): PyInstaller's
+      # macoS phase resolves the interpreter via find_library('python3')
+      # and expects an Xcode-style Python.framework layout; the standalone
+      # build ships a lib/python3.12/... layout instead, so Analysis dies
+      # with "Unable to find .../packaging/Python.framework/Versions/3.12/Python".
+      # cpython-py3x images are pre-installed framework builds on the runner.
+      - name: "Setup Python (macOS: framework build)"
+        if: matrix.artifact_os == 'macos'
+        uses: actions/setup-python@v5
+        with:
+          python-version: 'cpython-3.12'
+          check-latest: true
+
+      - name: Setup Python
+        if: matrix.artifact_os != 'macos'
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
