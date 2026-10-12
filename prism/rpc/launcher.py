@@ -29,6 +29,34 @@ import sys
 import time
 import webbrowser
 
+
+def _force_utf8_stdio() -> None:
+    """Make the daemon's stdout/stderr UTF-8 regardless of OS locale.
+
+    Bug v0.1.5 (Windows): the Tauri shell reads the sidecar's stdout as
+    UTF-8, but Python opened it with the ANSI code page (e.g. cp1252 on
+    en-US), so the em-dash in 'Prism wallet is already running —' encoded
+    as a lone 0x97 byte and Rust failed with
+    'invalid utf-8 sequence of 1 bytes from index 32'.
+
+    Two independent layers:
+      * reconfigure the streams to UTF-8 when they are plain TextIOWrapper;
+      * PYTHONUTF8=1 for any child process we ever spawn.
+    Belt-and-braces: all user-facing print() strings were also scrubbed to
+    ASCII (tests/test_release_hygiene.py pins both)."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass                                # frozen windowed mode: stdout is None
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass
+    os.environ["PYTHONUTF8"] = "1"
+
+
+_force_utf8_stdio()
+
 if os.name == "nt":                       # Windows: msvcrt locking (see below)
     import msvcrt
 else:                                     # POSIX: flock
@@ -340,7 +368,7 @@ def main(argv=None) -> int:
                  "healthy daemon was found. Close it and try again.")
         time.sleep(0.2)
     if not acquired:
-        print(f"Prism wallet is already running — opening it at {live_url}")
+        print(f"Prism wallet is already running. Opening it at {live_url}")
         if json_status:
             print(json.dumps({"url": live_url, "data_dir": data_dir,
                               "already_running": True}), flush=True)
