@@ -104,6 +104,9 @@ jobs:
     # Only tag pushes publish a GitHub Release; manual dispatch just uploads artifacts.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write   # sigstore/cosign keyless signing (docs/ATTESTATION.md §4)
     steps:
       # Full history needed so we can diff against the previous tag and read
       # real commit messages / merged PR bodies for the changelog.
@@ -127,6 +130,29 @@ jobs:
           pattern: 'prism-*'
           merge-multiple: true
 
+      # Free cross-platform provenance for CLI binaries + wheel (docs/ATTESTATION.md §4).
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign release assets (cosign keyless)
+        shell: bash
+        run: |
+          set -uo pipefail
+          ok=0; fail=0
+          for f in prism-*.zip *.whl *.tar.gz; do
+            [ -e "$f" ] || continue
+            if cosign sign-blob --yes \
+                 --output-signature "$f.sig" \
+                 --output-certificate "$f.crt" \
+                 "$f"; then
+              ok=$((ok+1))
+            else
+              echo "::warning::cosign failed for $f — shipping unsigned"
+              rm -f "$f.sig" "$f.crt"; fail=$((fail+1))
+            fi
+          done
+          echo "cosigned=$ok failed=$fail" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -134,6 +160,8 @@ jobs:
             prism-*.zip
             *.whl
             *.tar.gz
+            *.sig
+            *.crt
           body_path: RELEASE_NOTES.md
           draft: false
           prerelease: true   # Phase-1 reference implementation — flip to false at mainnet candidate

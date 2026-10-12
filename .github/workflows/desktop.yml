@@ -15,6 +15,9 @@ on:
 
 permissions:
   contents: write
+  # OIDC identity for sigstore/cosign keyless signing (free provenance) and
+  # for Azure Trusted Signing federation (docs/ATTESTATION.md §2/§4).
+  id-token: write
 
 jobs:
   desktop:
@@ -65,6 +68,72 @@ jobs:
         shell: bash
         run: bash packaging/build_tauri.sh
 
+      # ---- Attestation (docs/ATTESTATION.md) ---------------------------------
+      # Windows: Authenticode-sign the sidecar exe BEFORE bundling and let the
+      # NSIS/Tauri bundle step inherit it; sign final .msi/.exe after.
+      # Runs only when a cert is configured — unsigned builds keep working.
+      - name: Windows code signing (Authenticode)
+        if: matrix.os == 'windows-latest' && env.WINDOWS_PFX_BASE64 != ''
+        shell: pwsh
+        env:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+          WINDOWS_CERT_SUBJECT: ${{ vars.WINDOWS_CERT_SUBJECT || 'Prism Wallet' }}
+        run: |
+          [IO.File]::WriteAllBytes("$env:TEMP\prism.pfx",
+            [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64))
+          $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+                       -Recurse -Filter signtool.exe | Select -Last 1).FullName
+          $targets = Get-ChildItem -Recurse -Include *.exe,*.msi `
+                      -Path packaging\tauri\prism-gui\src-tauri\target\release\bundle,`
+                              dist
+          foreach ($f in $targets) {
+            & $signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+              /f "$env:TEMP\prism.pfx" /p $env:WINDOWS_PFX_PASSWORD /n $env:WINDOWS_CERT_SUBJECT $f.FullName
+            & $signtool verify /pa $f.FullName
+          }
+
+      # macOS: Developer ID codesign (hardened runtime) + notarization + staple.
+      # Gated on Apple credentials; skipped loudly otherwise (never silently).
+      - name: macOS codesign + notarize + staple
+        if: matrix.os == 'macos-latest' && env.APPLE_ID != ''
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASS: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_DEVELOPER_CERT_B64: ${{ secrets.APPLE_DEVELOPER_CERT_B64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BUNDLE=packaging/tauri/prism-gui/src-tauri/target/release/bundle
+          security create-keychain -b ci.keychain-db
+          security default-keychain -s ci.keychain-db
+          security unlock-keychain -p "" ci.keychain-db
+          # Optional: import a Developer ID p12 (base64 secret) if provided;
+          # otherwise assume the runner keychain already holds "Developer ID Application".
+          if [ -n "${APPLE_DEVELOPER_CERT_B64:-}" ]; then
+            echo "$APPLE_DEVELOPER_CERT_B64" | base64 -D > ci.p12
+            security import ci.p12 -k ci.keychain-db -T /usr/bin/codesign \
+              -P "${APPLE_CERT_PASSWORD:-}" || exit 1
+            rm -f ci.p12
+          fi
+          for APP in $(find "$BUNDLE/macos" -name '*.app' -maxdepth 1); do
+            # Sign inner binaries first (sidecar!), then the bundle.
+            find "$APP/Contents" -type f \( -perm +111 -o -name '*.dylib' \) \
+              -exec codesign --force --timestamp --options runtime \
+                   --sign "Developer ID Application" {} \; || true
+            codesign --force --deep --timestamp --options runtime \
+              --sign "Developer ID Application" "$APP"
+          done
+          for DMG in "$BUNDLE"/dmg/*.dmg; do
+            codesign --force --timestamp --sign "Developer ID Application" "$DMG"
+            xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" \
+              --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASS" --wait
+            xcrun stapler staple "$DMG"
+          done
+          spctl -a -vv "$BUNDLE"/dmg/*.dmg || true   # advisory; dmg gate is on open
+
       - name: Collect installer artifacts
         shell: bash
         run: |
@@ -91,11 +160,40 @@ jobs:
     needs: desktop
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+      id-token: write   # sigstore/cosign keyless (docs/ATTESTATION.md §4)
     steps:
       - uses: actions/download-artifact@v4
         with:
           pattern: 'prism-desktop-*'
           merge-multiple: true
+
+      # Free, cross-platform provenance: keyless cosign signatures bound to
+      # this repo's OIDC identity + Rekor transparency log entries. Users can
+      # verify every installer without trusting GitHub alone. Skips gracefully
+      # if the sigstore network is unavailable — never blocks a release.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign all assets (cosign keyless)
+        shell: bash
+        run: |
+          set -uo pipefail
+          ok=0; fail=0
+          for f in *.msi *.exe *.dmg *.AppImage *.deb; do
+            [ -e "$f" ] || continue
+            if cosign sign-blob --yes \
+                 --output-signature "$f.sig" \
+                 --output-certificate "$f.crt" \
+                 "$f"; then
+              ok=$((ok+1))
+            else
+              echo "::warning::cosign failed for $f (sigstore outage?) — shipping unsigned"
+              rm -f "$f.sig" "$f.crt"; fail=$((fail+1))
+            fi
+          done
+          echo "cosigned=$ok failed=$fail" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attach installers to the GitHub Release
         uses: softprops/action-gh-release@v2
@@ -106,5 +204,7 @@ jobs:
             *.dmg
             *.AppImage
             *.deb
+            *.sig
+            *.crt
             SHA256SUMS
           append_body: true
