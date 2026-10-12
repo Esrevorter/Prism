@@ -111,7 +111,7 @@ if __package__ in (None, "", "rpc"):
                                     render_template)
     from prism.chain.node import (ChainState, mine_block, make_genesis, Block,
                                   ZERO32)
-    from prism.chain.params import REFRACTION_TESTNET
+    from prism.chain.params import NETWORKS
     from prism.auth.captcha import CaptchaEngine, CaptchaError, CaptchaToken
     from prism.auth.keystore import KeyStore
     from prism.wallet.agent_auth import (AgentRuntime, Constraints, Grant,
@@ -126,7 +126,7 @@ else:
     from ..ai.simulator import (ChainSnapshot, SigningGate, SnapshotOutput,
                                 render_template)
     from ..chain.node import ChainState, mine_block, make_genesis, Block, ZERO32
-    from ..chain.params import REFRACTION_TESTNET
+    from ..chain.params import NETWORKS
     from ..auth.captcha import CaptchaEngine, CaptchaError, CaptchaToken
     from ..auth.keystore import KeyStore
     from ..wallet.agent_auth import (AgentRuntime, Constraints, Grant,
@@ -166,13 +166,30 @@ class SignedTx:
 
 
 class PrismService:
-    def __init__(self):
+    def __init__(self, network: str = "refraction", data_dir=None):
         self._lock = threading.Lock()
-        self.params = REFRACTION_TESTNET
+        # Testnet == production consensus path (spec §13 testnet parity):
+        # one real ChainState validator for every network; devnet-only
+        # conveniences (fast cadence, faucet credit) live in NetworkParams,
+        # never in a forked validation stack. MAINNET is accepted here so
+        # integration tests can exercise the exact production parameter set
+        # locally — assert_miner_backend still refuses placeholder PoW there.
+        if network not in NETWORKS:
+            raise ValueError(f"unknown network {network!r}")
+        self.params = NETWORKS[network]
         genesis = make_genesis(self.params)
         self.chain = ChainState(params=self.params, tip=genesis, difficulty=1)
         self.store: dict[bytes, Block] = {genesis.header.hash(): genesis}
         self.height_index: list[bytes] = [genesis.header.hash()]
+        # Persistent wallet file (testnet soak durability): when a data dir
+        # is given, the sealed keystore survives daemon restarts exactly
+        # like the shipped desktop binary's wallet file.
+        self.data_dir = data_dir
+        self.wallet_path = None
+        if data_dir:
+            import os as _os
+            _os.makedirs(str(data_dir), exist_ok=True)
+            self.wallet_path = _os.path.join(str(data_dir), "prism_wallet.json")
         self.book = AddressBook([
             Contact("c-alex", "Alex Rivera", "prsm1alexdev00000000000000000000000000"),
             Contact("c-mom", "Mom", "prsm1momdev000000000000000000000000000000"),
@@ -201,6 +218,7 @@ class PrismService:
         self.cadence_s = self.params.target_block_time
         self.started_unix = int(time.time())
         self.sim_clock = self.params.genesis_timestamp
+        self._load_wallet()             # sealed keystore survives restarts
 
     # ---------------- receiving address ----------------
 
@@ -336,6 +354,7 @@ class PrismService:
                 phrase = self.keystore.create(password)
             except RuntimeError as e:
                 raise ValueError(str(e))
+            self._save_wallet()
             return {
                 "ok": True,
                 "recovery_phrase": phrase,
@@ -387,6 +406,7 @@ class PrismService:
             if old and old != new:                     # pragma: no cover
                 raise RuntimeError("recovery changed the address — invariant "
                                    "broken, refusing to continue")
+            self._save_wallet()
             return {"ok": True, "address": new,
                     "human": ("Welcome back — same wallet, same address. "
                               "Your password is reset; store the new one "
@@ -398,8 +418,34 @@ class PrismService:
                 self.keystore.change_password(old, new)
             except (PermissionError, RuntimeError, ValueError) as e:
                 raise ValueError(str(e))
+            self._save_wallet()
             return {"ok": True, "human": "Password updated. Your address and "
                                          "recovery words stay the same."}
+
+    # ---- wallet persistence (testnet soak durability, §13 parity) ----
+    def _save_wallet(self):
+        """Write the SEALED keystore (never plaintext keys) to the data dir.
+        Called under self._lock from every key-mutating auth path."""
+        if not self.wallet_path:
+            return
+        import json as _json, os as _os
+        tmp = self.wallet_path + ".tmp"
+        with open(tmp, "w") as fh:
+            _json.dump(self.keystore.to_json(), fh)
+        _os.replace(tmp, self.wallet_path)          # atomic on all platforms
+
+    def _load_wallet(self):
+        """Restore a sealed keystore from disk at startup; best-effort so a
+        corrupt file can never brick the daemon (fresh wallet instead)."""
+        if not self.wallet_path:
+            return
+        import json as _json, os as _os
+        try:
+            if _os.path.isfile(self.wallet_path):
+                with open(self.wallet_path) as fh:
+                    self.keystore = KeyStore.from_json(_json.load(fh))
+        except Exception:                            # pragma: no cover
+            pass
 
     def auth_challenge(self, intent_id: str) -> dict:
         """Issue the CAPTCHA picture that gates signing THIS exact payment."""
