@@ -408,6 +408,19 @@ class PrismService:
             ch = self.captcha.issue(digest)
             ch["intent_id"] = it.intent_id
             ch["digest_hex"] = digest
+            # the picture check expires after CAPTCHA_TTL_S seconds — give the
+            # GUI an absolute unix deadline so its countdown ring stays in
+            # lock-step with the server (honest UX: no fake timers).
+            ch["expires_at"] = int(time.time()) + self.captcha.ttl_s
+            # honest UX: the GUI renders a 3x3 tap grid over the PNG, so it
+            # needs to know WHICH cells are target tiles (the answer lives
+            # only server-side in _pending; this view is display-only and
+            # leaks nothing the user can't see by looking at the picture).
+            rec = self.captcha._pending.get(ch["challenge_id"])
+            if rec is not None:
+                g = rec["grid"]
+                ch["tiles"] = g["tiles"]
+                ch["target"] = g["target"]
             return ch
 
     def auth_solve(self, challenge_id: str, picks: list[int],
