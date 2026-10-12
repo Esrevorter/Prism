@@ -9,7 +9,7 @@
 > update this file *in the same commit* as the work — status, open threads, and
 > evidence pointers. Stale handoffs are bugs. See `wiki/Contributing.md`.
 
-Last updated: 2026-10-12 (evening) · by: Qwen agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
+Last updated: 2026-10-12 (evening, rev2 — milestone-attach limitation documented) · by: Qwen agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
 
 ---
 
@@ -94,7 +94,12 @@ or `GIT_ASKPASS`.
 **Current truth:** https://github.com/Esrevorter/Prism/releases/tag/v0.1.13 is
 the ONLY published release (v0.1.9–0.1.12 purged per founder request). GitHub
 Milestones: #1–#3 closed, **#4 "Phase 4 – Production" open** and assigned to
-this release. Forensic verification performed before publishing: downloaded
+this release. Phase-4 tracked issues #121–#124 are listed in milestone #4's
+description; they could NOT be attached via API (fine-grained PAT gets 403 on
+issue-milestone writes — a GitHub platform limitation, not a scope setting; the
+classic token sent later was already revoked, HTTP 401). Founder must click
+"Milestone → Phase 4" on #121–#124 once in the web UI. Forensic verification
+performed before publishing: downloaded
 Windows artifact, extracted embedded bundle, confirmed fixed footer stamp,
 sealed answer key (`target` absent from wire), vector-first captcha, non-blank
 golden-P icons; all three workflows green for the tag (after fixing a
