@@ -16,7 +16,13 @@ Checks (all against a live server, exactly as the webview would load them):
   C. The captcha markup is vector-first: #cap-svg container exists, no
      <img id="captcha-img"> second picture anywhere.
   D. auth.challenge response carries the fields app.js needs to paint one
-     coherent SVG (tiles/target/expires_at/digest_hex/challenge_id/prompt).
+     coherent SVG (tiles/prompt/svg/expires_at/digest_hex/challenge_id).
+     NOTE: `target` is the ANSWER KEY and must NEVER appear in the response —
+     asserting its presence here contradicts release_gate.check_captcha_wire
+     and was the reason this gate failed on every honest build (fixed v1.3).
+  E. /health exposes version + gui_bundle fingerprint AND the served page has
+     a #build-version stamp wired in app.js (rules v1.3 §5: the running build
+     must be identifiable by the user, or "fixed" claims are unfalsifiable).
 """
 from __future__ import annotations
 
@@ -63,11 +69,13 @@ def main() -> int:
             raise RuntimeError(f"{method}: {out['error']}")
         return out["result"]
 
-    # --- health reports the bundle fingerprint -----------------------------
+    # --- health reports the bundle fingerprint AND the running version ------
     st, _, body = get("/health")
     hp = json.loads(body)
     if st != 200 or "gui_bundle" not in hp:
         fail("/health must expose gui_bundle fingerprint (got %r)" % hp)
+    if "version" not in hp:
+        fail("/health must expose backend version (rules v1.3 §5 build stamp)")
 
     # --- A. index + every referenced local asset resolves ------------------
     st, ctype, htmlb = get("/")
@@ -124,14 +132,29 @@ def main() -> int:
     call("intent.confirm", {"intent_id": it["intent_id"]})
     ch = call("auth.challenge", {"intent_id": it["intent_id"]})
     for field in ("challenge_id", "prompt", "digest_hex", "expires_at",
-                  "tiles", "target"):
+                  "tiles"):
         if field not in ch:
             fail(f"auth.challenge response missing '{field}' the GUI needs")
     if len(ch["tiles"]) != 9:
         fail(f"expected 9 tiles, got {len(ch['tiles'])}")
+    # 'target' is the answer key: it must NEVER cross the wire.  The old
+    # assertion demanded it here while release_gate.check_captcha_wire failed
+    # the build for leaking it — mutually unsatisfiable, so no honest build
+    # could ever pass CI and releases shipped gated-out or hand-forced.
+    if "target" in ch:
+        fail("auth.challenge LEAKED the captcha answer key 'target' to the client")
 
-    print(f"GUI-ASSET-SMOKE OK  (bundle {hp['gui_bundle']}, "
-          f"{len(refs)} assets, captcha vector-first, wire fields pinned)")
+    # --- E. user-visible build stamp (rules v1.3 §5) ------------------------
+    if 'id="build-version"' not in html:
+        fail("served index.html has no #build-version stamp — users cannot "
+             "tell which build they are running (root cause of the "
+             "'nothing looks fixed' reports)")
+    if "#build-version" not in js or "/health" not in js:
+        fail("served app.js does not paint #build-version from /health")
+
+    print(f"GUI-ASSET-SMOKE OK  (v{hp['version']}, bundle {hp['gui_bundle']}, "
+          f"{len(refs)} assets, captcha vector-first + answer-key sealed, "
+          f"build stamp visible)")
     httpd.shutdown()
     return 0
 

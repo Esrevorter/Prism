@@ -60,7 +60,48 @@ def check_versions(tag, fail):
     if tag and found and values != {tag}:
         fail.append(f"release tag v{tag} but tree versions are {sorted(values)} "
                     "(bump ALL locations in the same commit as the tag)")
+    check_visible_version(found, fail)
     return found
+
+
+def check_visible_version(found, fail):
+    """Rules v1.3 §5: the version must be VISIBLE IN THE RUNNING APP.
+
+    Root cause of the 'nothing looks fixed' complaints: installers carried no
+    user-visible build stamp, so a stale front end inside a new-tagged binary
+    was indistinguishable from the fix.  The gate now requires:
+      1. index.html has a #build-version element (footer stamp),
+      2. app.js populates it from /health (version + gui_bundle fingerprint),
+      3. server.py's /health exposes both fields,
+      4. README release badge equals the version in the tree (no stale v0.1.5).
+    """
+    idx = os.path.join(ROOT, "prism", "gui", "index.html")
+    js = os.path.join(ROOT, "prism", "gui", "app.js")
+    srv = os.path.join(ROOT, "prism", "rpc", "server.py")
+    for path, needle, what in (
+        (idx, 'id="build-version"', "user-visible version stamp element"),
+        (js, "#build-version", "app.js wiring that paints the version stamp"),
+        (js, "/health", "app.js fetching /health for the running build's stamp"),
+        (srv, '"version": __version__', "/health exposing backend version"),
+        (srv, '"gui_bundle"', "/health exposing the served-bundle fingerprint"),
+    ):
+        text = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        if needle not in text:
+            fail.append(f"MISSING {what}: '{needle}' not found in {path} "
+                        "(rules v1.3 §5 — releases without a visible stamp "
+                        "cannot prove to users which build they run)")
+    readme = os.path.join(ROOT, "README.md")
+    if os.path.isfile(readme):
+        m = re.search(r'\[!\[Release\]\(https://img\.shields\.io/badge/release-v([0-9.]+)',
+                      open(readme, encoding="utf-8").read())
+        badge = m.group(1) if m else "<missing>"
+        tree = {v for v in found.values() if v != "<missing>"}
+        if tree and badge not in tree:
+            fail.append(f"STALE README BADGE: badge says v{badge} but tree is "
+                        f"{sorted(tree)} — update the badge in the version-bump commit")
 
 
 def check_captcha_wire(fail):

@@ -690,6 +690,23 @@ if (savedTheme) document.body.dataset.theme = savedTheme;
 else if (matchMedia("(prefers-color-scheme: light)").matches)
   document.body.dataset.theme = "light";
 
+// ---------- build stamp (release_gate.py rule: version must be user-visible) ----------
+// Shows the BACKEND version + the fingerprint of the GUI bundle actually being
+// served. If a release ships stale front-end assets inside a new installer,
+// this line exposes it immediately — no more "fixed in code, invisible in app".
+async function showBuildStamp() {
+  const node = $("#build-version");
+  if (!node) return;
+  try {
+    const res = await fetch("/health");
+    const h = await res.json();
+    node.textContent = `v${h.version} · ui ${h.gui_bundle}`;
+  } catch {
+    node.textContent = "version unknown (node unreachable)";
+  }
+}
+
 // ---------- go ----------
+showBuildStamp();
 boot();
 setInterval(() => { if (!$("#screen-app").hidden) refreshAll(); }, 5000);
