@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import secrets
 import sys
 import threading
 import time
@@ -459,6 +460,7 @@ class PrismService:
                                  "confirm it first")
             digest = it.canonical_digest().hex()
             ch = self.captcha.issue(digest)
+            cid = ch["challenge_id"]
             ch["intent_id"] = it.intent_id
             ch["digest_hex"] = digest
             # the picture check expires after CAPTCHA_TTL_S seconds — give the
@@ -475,7 +477,41 @@ class PrismService:
             # Display-only fields (tiles/palette/svg) leak nothing a human
             # can't see by looking at the picture; the answer key (`target`)
             # deliberately NEVER crosses the wire.
-            assert ch.get("tiles"), "captcha wire contract broken: no tiles"
+            # Self-test the puzzle BEFORE a human ever sees it (v0.1.8 fix for
+            # "captcha bug still present"): every client-visible invariant that
+            # used to break silently is now verified against THIS challenge —
+            # tiles shipped, strict visual majority exists and matches the
+            # prompt, and solve() accepts those exact picks.  If any check
+            # fails we raise here (plain sentence via RPC error) instead of
+            # letting users grind against an unsolvable/mismatched grid.
+            tiles = ch["tiles"]
+            counts = {s: tiles.count(s) for s in set(tiles)}
+            maj = max(counts.values())
+            if list(counts.values()).count(maj) != 1 or maj < 3:
+                self.captcha._pending.pop(cid, None)
+                raise RuntimeError("captcha generator produced an ambiguous "
+                                   "grid — refusing to show it")
+            target_shape = max(counts, key=counts.get)
+            if target_shape not in ch["prompt"]:
+                self.captcha._pending.pop(cid, None)
+                raise RuntimeError("captcha prompt does not name the visible "
+                                   "majority shape — refusing to show it")
+            # Dry-run the honest answer on a throwaway copy bound to a RANDOM
+            # digest: proves the solve path accepts exactly what the picture
+            # shows, without consuming the user's real challenge or ever being
+            # able to unlock a payment.
+            probe_digest = secrets.token_bytes(32).hex()
+            self.captcha._pending[cid + "-selftest"] = {
+                "grid": self.captcha._pending[cid]["grid"],
+                "intent_digest_hex": probe_digest, "attempts": 0}
+            try:
+                self.captcha.solve(cid + "-selftest",
+                                   [i for i, s in enumerate(tiles)
+                                    if s == target_shape], probe_digest)
+            except CaptchaError as e:
+                raise RuntimeError(f"captcha self-solve failed: {e}") from e
+            finally:
+                self.captcha._pending.pop(cid + "-selftest", None)
             return ch
 
     def auth_solve(self, challenge_id: str, picks: list[int],
