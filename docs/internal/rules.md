@@ -1,10 +1,10 @@
 # Tool Calling and Execution Rules
 
-> **Binding companion files (re-read before every substantive task):** `qwen.md`
+> **Binding companion files (re-read before every substantive task):** `docs/internal/qwen.md`
 > (anti-burst pacing — one tool call per turn, sequential only, ≥20 s inter-request;
-> Oct 11 addendum: if this file and `qwen.md` ever disagree on pacing numbers,
-> `qwen.md` wins),
-> `ethics.md` (financial-ethics coding & reporting standard — fail-closed money handling,
+> Oct 11 addendum: if this file and `docs/internal/qwen.md` ever disagree on pacing numbers,
+> `docs/internal/qwen.md` wins),
+> `docs/internal/ethics.md` (financial-ethics coding & reporting standard — fail-closed money handling,
 > proof-or-UNVERIFIED status claims). rules.md §4 and ethics.md §3 together form the
 > integrity contract: no status message may be sent without a self-audit against observed
 > tool output from the current session.

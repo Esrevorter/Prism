@@ -2,7 +2,7 @@
 
 > Prism is a financially motivated solution: it moves real value (PRSM shards, MPC-held
 > keys, autonomous agent spending). This file is the binding ethical guide for all code
-> and all status reporting. It complements rules.md §4 (Verifiable Status Reporting) and
+> and all status reporting. It complements docs/internal/rules.md §4 (Verifiable Status Reporting) and
 > spec.md's honest-UX / neuro-inclusive mandate. Where this file and convenience conflict,
 > this file wins. Violations are treated as defects of equal severity to data-loss bugs.
 
@@ -33,7 +33,7 @@
 - No dark patterns: no pre-checked acknowledgements, no hidden fees, no countdown
   pressure, no burying the veto/revoke control below the fold.
 
-## 3. Reporting Ethics (extends rules.md §4)
+## 3. Reporting Ethics (extends docs/internal/rules.md §4)
 - **Financial claims carry proof or don't exist.** Test counts, benchmark FPR/TPR, run
   times, commit hashes, remote tips: quote the observed output verbatim or mark the item
   UNVERIFIED. "Should pass" is banned language.

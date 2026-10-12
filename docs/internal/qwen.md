@@ -2,8 +2,8 @@
 You must strictly cross-reference and follow the constraints provided across our system files before outputting any answer or code block.
 
 ## Reference Map
-- **General Architecture & Rules:** See @rules.md
-- **Safety & Behavioral Guardrails:** See @ethics.md
+- **General Architecture & Rules:** See @docs/internal/rules.md
+- **Safety & Behavioral Guardrails:** See @docs/internal/ethics.md
 - **Technical & Feature Requirements:** See @spec.md
 
 ## Execution Enforcement
