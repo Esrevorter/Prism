@@ -167,6 +167,52 @@ Prefer building from source? See [Wiki → Getting Started as a Developer](https
 
 ---
 
+## Development environment setup
+
+The runtime core is **stdlib-only** — no third-party dependencies are needed to run Prism. Only development/testing requires `pytest` (plus optional extras). From a fresh clone:
+
+```bash
+# 1. Create and activate a virtual environment (Python ≥ 3.10 required)
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+# 2. Install the package in editable mode with test extras
+pip install -e ".[test]"         # adds pytest + pycryptodome (gates 7 differential Keccak tests)
+
+# 3. Verify: run the test suite (~531 tests, ~2 min) and the CLI
+python -m pytest prism/tests -q
+prism params                     # the money rules, straight from code
+prism mine --blocks 3 --network refraction
+prism gui                        # opens the wallet in your browser
+```
+
+Notes:
+- The `.venv/` directory is already covered by [`.gitignore`](.gitignore); nothing else needs configuring.
+- Tests import subpackages (`chain`, `crypto`, `auth`, …) top-level; the editable install puts them on the path via `[tool.setuptools.packages.find] where=["prism"]`.
+- Optional: `pip install pyinstaller` then `./packaging/build_release.sh` builds a local frozen binary (see [Wiki → Release Process](https://github.com/Esrevorter/Prism/wiki/Release-Process)).
+- Full contributor details (conventions, testing expectations, workflow): [Wiki → Getting Started as a Developer](https://github.com/Esrevorter/Prism/wiki/Getting-Started-as-a-Developer).
+
+### Toolchains for the other components
+
+The steps above cover the core wallet/CLI and test suite. The remaining components each have their own toolchain — only needed if you work on that part:
+
+| Component | Toolchain | Setup (Debian/Ubuntu build host) | Verify |
+|---|---|---|---|
+| Frozen CLI/GUI binaries ([`packaging/build_release.sh`](packaging/build_release.sh)) | PyInstaller (Python) | `pip install pyinstaller` (inside `.venv`) | `pyinstaller --version` |
+| Desktop installer shell ([`packaging/tauri/prism-gui`](packaging/tauri/prism-gui)) — webview + sidecar plumbing | Node.js ≥ 18 + npm | `npm ci` in `packaging/tauri/prism-gui` | `npx tauri --version` (expect tauri-cli 1.6.x) |
+| Desktop installer shell (Rust side, `src-tauri/`) | Rust ≥ 1.70 (rustup recommended; Debian bookworm's `apt` rustc 1.63 is too old) | `curl https://sh.rustup.rs -sSf \| sh -s -- -y` | `cargo check` in `src-tauri` |
+| Tauri Linux system deps (webkit2gtk etc.) | apt packages | `apt-get install libwebkit2gtk-4.0-dev librsvg2-dev patchelf libssl-dev pkg-config build-essential` | — |
+
+Full installer build end-to-end: `./packaging/build_tauri.sh` (runs sync_gui → PyInstaller sidecar freeze → staged binaries → `tauri build`; CI runners do this per tag — see [desktop.yml](.github/workflows/desktop.yml)).
+
+Keeping the machine current before a first setup avoids stale compilers/libs:
+
+```bash
+sudo apt-get update && sudo apt-get upgrade   # refresh base image packages
+```
+
+---
+
 ## Privacy: what we can honestly promise
 
 We'd rather tell you the truth than oversell. Full list in [Wiki → FAQ](https://github.com/Esrevorter/Prism/wiki/FAQ); headline version:
