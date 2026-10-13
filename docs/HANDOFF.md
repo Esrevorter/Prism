@@ -9,7 +9,7 @@
 > update this file *in the same commit* as the work — status, open threads, and
 > evidence pointers. Stale handoffs are bugs. See `wiki/Contributing.md`.
 
-Last updated: 2026-10-13 (bug report triage: client env-var failure breaking remote reads at session start — documented root cause + workarounds in §3/§7/§9) · by: agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
+Last updated: 2026-10-13 (correction to prior triage: the env-var error comes from the coder.qwen.ai platform's own "set env var" hook at session start — NOT from repo docs and NOT from shell-tool usage; §3/§7/§9 rewritten so no doc instructs agents to set/persist tokens via env vars. Auth path for publish/PR = the OAuth connection only) · by: agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
 
 > **Status-facts rule (added Oct 13):** this file is the ONLY place project status may be
 > restated — and even here, versions/test-counts/token-capabilities are snapshots that go
@@ -69,28 +69,28 @@ bash packaging/build_release.sh    # Linux binary -> dist/prism (PyInstaller can
 python scripts/publish_wiki.py     # push wiki/ -> hosted GitHub wiki (needs write token)
 ```
 
-Credentials: read from environment only (`GITHUB_TOKEN` etc.). **Never paste
-tokens into chat or files.** The workspace `.git/config` must never embed a
-token in a remote URL; use one-shot `https://x-access-token:$TOKEN@...` pushes
-or `GIT_ASKPASS`.
+Credentials: agents working in this repo must NOT set, export, or persist any
+credential themselves — no `export GITHUB_TOKEN=…`, no token files such as
+`~/.prism-env`, no tokens embedded in remote URLs or `.git/config`. GitHub
+publish/PR operations authenticate through the platform's configured **OAuth
+connection** only; if that connection is unavailable in a session, run the
+unauthenticated reads (`git ls-remote` works on this public repo) and report
+write-side status as UNVERIFIED — never fabricate the push (rules.md §4).
 
-**Session env vars — known client bug + mandatory workaround (added Oct 13):**
-Do NOT set credentials via a backgrounded shell command (`export X=… && sleep …&`)
-and do NOT rely on the client's "set env var" feature. On Qwen Code / Qwen3-Coder
-this pattern deterministically fails at session start with
-`Failed to set env var: ERROR: No previous running command to retrieve logs from.`
-— the tool's log-retrieval path runs before any prior process exists in the fresh
-persistent shell, the export never lands, and the first remote read of the resume
-protocol (`git ls-remote` / `git fetch`, HANDOFF §9.1) then fails auth. Correct
-pattern instead:
-  * persist once per machine: write `GITHUB_TOKEN=…` to `~/.prism-env`
-    (`chmod 600`) and prefix each git/API command with
-    `. ~/.prism-env && <command>`; or
-  * pass it inline per command: `GITHUB_TOKEN="$PRISM_PAT" python3 scripts/publish_wiki.py`; or
-  * for git auth without env juggling, use a `GIT_ASKPASS` script that echoes the token.
-If a credential cannot be loaded in-session, run the unauthenticated reads
-(`git ls-remote` works on public repos without a token) and report write-side
-status as UNVERIFIED — never fabricate the push (rules.md §4).
+**Session-start env-var error — platform bug, not a repo bug (added Oct 13,
+corrected same day):** sessions on coder.qwen.ai may open with
+`Oops! There was an issue connecting to Qwen3-Coder. Failed to set env var:
+ERROR: No previous running command to retrieve logs from.` This is emitted by
+the platform's own per-session "set env var" hook when it tries to apply a
+variable configured in the coder.qwen.ai UI settings into the freshly created
+sandbox shell (its log-retrieval call runs before any prior process exists).
+It is NOT caused by anything in this repository: exhaustive grep confirms no
+`.md` file (root, `docs/`, `docs/internal/`, `wiki/`) contains any instruction,
+script, or snippet that sets environment variables, so no doc change can fix
+or prevent it. It is also transient — the first tool call after the error
+succeeds. Agents should ignore the message, proceed with unauthenticated reads,
+and rely on the OAuth connection for writes. Report it upstream to Qwen Code
+instead of working around it in-repo.
 
 ## 4. Conventions (hard rules distilled from spec + sessions)
 
@@ -211,18 +211,21 @@ steps go green BEFORE publishing, and eyeball the Release page version.
 - Never trust prior-session claims of completion — re-verify against the repo
   and GitHub API at session start (this exact failure mode produced false
   "published" reports twice; fixed by making verification part of the protocol).
-- **Client-side env-var setup breaks every fresh session (reported Oct 13):** after
-  configuring an environment variable, each new session fails its first remote repo
-  read with `Oops! There was an issue connecting to Qwen3-Coder. Failed to set env
-  var: ERROR: No previous running command to retrieve logs from.` Root cause is in
-  the agent client's shell tool, NOT in this repo: the "set env var" action is
-  implemented as a STDIN/log-retrieval send to a *previously running* command, but a
-  new session's persistent shell has no such process yet — the call errors, the
-  export never executes, and downstream git/API calls fail auth or the provider
-  connection resets mid-tool. Workarounds: see §3 "Session env vars" (inline env per
-  command, sourced `~/.prism-env`, or `GIT_ASKPASS`); never background the export.
-  Upstream fix belongs in the client: implement env setting as a normal foreground
-  `export` in the session shell, not a log-fetch on a nonexistent process.
+- **Session-start env-var error on coder.qwen.ai (reported + corrected Oct 13):**
+  every new session whose UI settings contain a configured environment variable
+  opens with `Oops! There was an issue connecting to Qwen3-Coder. Failed to set
+  env var: ERROR: No previous running command to retrieve logs from.` Confirmed
+  NOT a repo bug and NOT agent shell-tool usage: no `.md` file in this repository
+  sets or instructs setting env vars (see §3). The platform hook that injects the
+  UI-configured variable into the fresh sandbox shell calls log-retrieval before
+  any prior process exists, so it errors — then the connection reset kills the
+  first remote read. Workaround for agents: ignore the message, re-run the read
+  (`git ls-remote` works unauthenticated on this public repo), and authenticate
+  publish/PR steps through the OAuth connection — never try to set/persist the
+  variable yourself (§3). Upstream fix belongs to coder.qwen.ai: apply session
+  env vars as a foreground export at shell creation, not a log-fetch on a
+  nonexistent process. Removing the variable from the UI settings also stops the
+  error until then.
 
 ## 8. Documentation flow
 
@@ -237,12 +240,14 @@ and republish; if developer-facing, `docs/` or README is fine.
 0. Bootstrap: read `AGENTS.md` (repo root) and follow its sequence — it loads this
    file and the governance chain in the correct precedence order.
 1. `git fetch origin && git log --oneline origin/main -5` — reconcile local vs
-   remote HEAD; fast-forward if behind. If this fails with an auth/env error (see §3
-   "Session env vars"), do NOT set the variable via the client's backgrounded
-   "set env var" action — it errors in fresh sessions ("No previous running command
-   to retrieve logs from"). Use the inline-env / sourced-file pattern from §3, or
-   fall back to unauthenticated reads (`git ls-remote` works on this public repo)
-   and mark any write-side status UNVERIFIED until credentials load properly.
+   remote HEAD; fast-forward if behind. If the session opened with the platform's
+   "Failed to set env var … No previous running command to retrieve logs from"
+   message (see §3), that is a coder.qwen.ai startup-hook error, not an auth
+   failure and not caused by this repo — do NOT attempt to set or persist any
+   environment variable yourself. Retry the read; use unauthenticated
+   `git ls-remote` (works on this public repo) if needed, and perform all
+   write-side steps (push/publish/PR) through the configured OAuth connection.
+   Mark write-side status UNVERIFIED until an authenticated operation succeeds.
 2. Read §5/§6 here: pick the top open thread the user confirms.
 3. Run `python -m pytest prism/tests -q` **before** changing anything; a red suite
    means resume debugging, not feature work.
