@@ -9,7 +9,7 @@
 > update this file *in the same commit* as the work — status, open threads, and
 > evidence pointers. Stale handoffs are bugs. See `wiki/Contributing.md`.
 
-Last updated: 2026-10-13 (session-bootstrap pass: added AGENTS.md load-order entry point) · by: agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
+Last updated: 2026-10-13 (bug report triage: client env-var failure breaking remote reads at session start — documented root cause + workarounds in §3/§7/§9) · by: agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
 
 > **Status-facts rule (added Oct 13):** this file is the ONLY place project status may be
 > restated — and even here, versions/test-counts/token-capabilities are snapshots that go
@@ -73,6 +73,24 @@ Credentials: read from environment only (`GITHUB_TOKEN` etc.). **Never paste
 tokens into chat or files.** The workspace `.git/config` must never embed a
 token in a remote URL; use one-shot `https://x-access-token:$TOKEN@...` pushes
 or `GIT_ASKPASS`.
+
+**Session env vars — known client bug + mandatory workaround (added Oct 13):**
+Do NOT set credentials via a backgrounded shell command (`export X=… && sleep …&`)
+and do NOT rely on the client's "set env var" feature. On Qwen Code / Qwen3-Coder
+this pattern deterministically fails at session start with
+`Failed to set env var: ERROR: No previous running command to retrieve logs from.`
+— the tool's log-retrieval path runs before any prior process exists in the fresh
+persistent shell, the export never lands, and the first remote read of the resume
+protocol (`git ls-remote` / `git fetch`, HANDOFF §9.1) then fails auth. Correct
+pattern instead:
+  * persist once per machine: write `GITHUB_TOKEN=…` to `~/.prism-env`
+    (`chmod 600`) and prefix each git/API command with
+    `. ~/.prism-env && <command>`; or
+  * pass it inline per command: `GITHUB_TOKEN="$PRISM_PAT" python3 scripts/publish_wiki.py`; or
+  * for git auth without env juggling, use a `GIT_ASKPASS` script that echoes the token.
+If a credential cannot be loaded in-session, run the unauthenticated reads
+(`git ls-remote` works on public repos without a token) and report write-side
+status as UNVERIFIED — never fabricate the push (rules.md §4).
 
 ## 4. Conventions (hard rules distilled from spec + sessions)
 
@@ -193,6 +211,18 @@ steps go green BEFORE publishing, and eyeball the Release page version.
 - Never trust prior-session claims of completion — re-verify against the repo
   and GitHub API at session start (this exact failure mode produced false
   "published" reports twice; fixed by making verification part of the protocol).
+- **Client-side env-var setup breaks every fresh session (reported Oct 13):** after
+  configuring an environment variable, each new session fails its first remote repo
+  read with `Oops! There was an issue connecting to Qwen3-Coder. Failed to set env
+  var: ERROR: No previous running command to retrieve logs from.` Root cause is in
+  the agent client's shell tool, NOT in this repo: the "set env var" action is
+  implemented as a STDIN/log-retrieval send to a *previously running* command, but a
+  new session's persistent shell has no such process yet — the call errors, the
+  export never executes, and downstream git/API calls fail auth or the provider
+  connection resets mid-tool. Workarounds: see §3 "Session env vars" (inline env per
+  command, sourced `~/.prism-env`, or `GIT_ASKPASS`); never background the export.
+  Upstream fix belongs in the client: implement env setting as a normal foreground
+  `export` in the session shell, not a log-fetch on a nonexistent process.
 
 ## 8. Documentation flow
 
@@ -207,7 +237,12 @@ and republish; if developer-facing, `docs/` or README is fine.
 0. Bootstrap: read `AGENTS.md` (repo root) and follow its sequence — it loads this
    file and the governance chain in the correct precedence order.
 1. `git fetch origin && git log --oneline origin/main -5` — reconcile local vs
-   remote HEAD; fast-forward if behind.
+   remote HEAD; fast-forward if behind. If this fails with an auth/env error (see §3
+   "Session env vars"), do NOT set the variable via the client's backgrounded
+   "set env var" action — it errors in fresh sessions ("No previous running command
+   to retrieve logs from"). Use the inline-env / sourced-file pattern from §3, or
+   fall back to unauthenticated reads (`git ls-remote` works on this public repo)
+   and mark any write-side status UNVERIFIED until credentials load properly.
 2. Read §5/§6 here: pick the top open thread the user confirms.
 3. Run `python -m pytest prism/tests -q` **before** changing anything; a red suite
    means resume debugging, not feature work.
