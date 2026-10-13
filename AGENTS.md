@@ -7,7 +7,20 @@
 > see step 3 below.
 
 ## Bootstrap sequence (execute in exactly this order, every session)
+## 🔐 Secure Authentication Protocol
+**CRITICAL:** I have a secure GitHub token injected into my environment variables as `$GH_TOKEN` by the platform.
+- **NEVER** print, echo, or log the actual value of `$GH_TOKEN` to the terminal.
+- **NEVER** ask me to paste a token in the chat.
 
+## 🚀 Session Initialization (Run at the start of every new chat)
+Before writing any code, silently run the following checks in the terminal:
+1. Verify the token exists in the current shell: `[ -n "$GH_TOKEN" ] && echo "Token is present" || echo "Token MISSING - Please restart workspace"`
+2. If the token is present, configure Git to use it dynamically for this session:
+   `git config --global url."https://Esrevorter:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"`
+3. Ensure we are inside the `Prism` directory.
+4. Confirm readiness with: "Git authenticated securely via environment injection."
+
+## Continuation 
 1. **Read this file.** Everything else follows from here. Do not skip steps.
 2. **Read `docs/HANDOFF.md`** — durable project state: current release, open
    threads, evidence pointers, and §9 "Resume protocol". Chat memory is disposable;
