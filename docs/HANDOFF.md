@@ -9,7 +9,7 @@
 > update this file *in the same commit* as the work — status, open threads, and
 > evidence pointers. Stale handoffs are bugs. See `wiki/Contributing.md`.
 
-Last updated: 2026-10-13 (governance-docs alignment pass) · by: agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
+Last updated: 2026-10-13 (session-bootstrap pass: added AGENTS.md load-order entry point) · by: agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
 
 > **Status-facts rule (added Oct 13):** this file is the ONLY place project status may be
 > restated — and even here, versions/test-counts/token-capabilities are snapshots that go
@@ -204,6 +204,8 @@ and republish; if developer-facing, `docs/` or README is fine.
 
 ## 9. Resume protocol (for the next agent session — follow exactly)
 
+0. Bootstrap: read `AGENTS.md` (repo root) and follow its sequence — it loads this
+   file and the governance chain in the correct precedence order.
 1. `git fetch origin && git log --oneline origin/main -5` — reconcile local vs
    remote HEAD; fast-forward if behind.
 2. Read §5/§6 here: pick the top open thread the user confirms.

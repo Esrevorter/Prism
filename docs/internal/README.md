@@ -19,7 +19,9 @@ point here):
 3. `rules.md` §§1–3,5–7 — execution/tool-calling limits.
 4. `qwen.md` — pacing NUMBERS win over rules.md numbers (Oct 11 stress tests), but only
    for pacing; qwen.md never outranks the integrity contract.
-- New AI sessions should load these files (plus `docs/HANDOFF.md`) before substantive work.
+- New AI sessions bootstrap via **`AGENTS.md`** (repo root, single entry point) which
+  defines the load order for everything above plus `docs/HANDOFF.md`. The precedence
+  chain below is authoritative; AGENTS.md restates it and must stay in sync.
 - House rule against drift: governance files must not restate project status (versions,
   test counts, token capabilities, path names) as facts — those live in HANDOFF.md only,
   and any session quoting them must re-verify first (rules.md §4 "No Carrying Over").

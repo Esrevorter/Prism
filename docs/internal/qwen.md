@@ -5,6 +5,8 @@ You must strictly cross-reference and follow the constraints provided across our
 - **General Architecture & Rules:** See @docs/internal/rules.md
 - **Safety & Behavioral Guardrails:** See @docs/internal/ethics.md
 - **Technical & Feature Requirements:** See @spec.md
+- **Project State (versions, open threads):** See @docs/HANDOFF.md — re-verify before quoting.
+- **Session Load Order:** See @AGENTS.md (bootstrap entry point).
 
 ## Execution Enforcement
 1. Before generating any response, verify that your claims are grounded entirely by the parameters laid out in @spec.md.
