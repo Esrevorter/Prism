@@ -57,7 +57,7 @@ the real data dir `~/.wallet` (`C:\Users\<name>\.wallet` on Windows 11 — NOT
 | Docs source of truth | `README.md`, `wiki/*.md`, `docs/` | hosted wiki is a *rendered copy* — see §8 |
 | Internal governance (moved 2026-10-12) | `docs/internal/{rules,ethics,qwen}.md` + `README.md` index | agent-session binding files; out of repo root per founder request — update any references you add to point at `docs/internal/` |
 | Attestation plan | `docs/ATTESTATION.md` | cosign live; Apple/Microsoft cert steps pending secrets |
-| Tests | `prism/tests/` | last full run, Oct 13 this session: **524 passed, 7 skipped in 80.28s** — re-run to refresh; incl. `test_testnet_parity.py` |
+| Tests | `prism/tests/` | last full run, Oct 13 this session: **524 passed, 7 skipped in 80.33s** — re-run to refresh; incl. `test_testnet_parity.py` |
 
 ## 3. Environment & setup (reproduce in any fresh sandbox)
 
