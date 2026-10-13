@@ -7,12 +7,6 @@
 > see step 3 below.
 
 ## Bootstrap sequence (execute in exactly this order, every session)
-## 🔐 Secure Authentication Protocol
-**CRITICAL:** I have a secure GitHub token injected into my environment variables as `$GH_TOKEN` by the platform.
-- **NEVER** print, echo, or log the actual value of `$GH_TOKEN` to the terminal.
-- **NEVER** ask me to paste a token in the chat.
-
-## Continuation 
 1. **Read this file.** Everything else follows from here. Do not skip steps.
 2. **Read `docs/HANDOFF.md`** — durable project state: current release, open
    threads, evidence pointers, and §9 "Resume protocol". Chat memory is disposable;
