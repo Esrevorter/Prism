@@ -40,13 +40,33 @@ You must strictly cross-reference and follow the constraints provided across our
 - If you hit the `429 Throttling.BurstRate` error ("Request rate increased too quickly"), you must pause all execution entirely for **60 seconds** (upgraded from 30 s; the 30 s pause was re-throttled in Oct 11 sustained-load stress tests) before attempting an exponential backoff retry, and resume at half the previous request velocity (i.e., double the normal inter-request delay to ≥ 40 s) for the remainder of the session.
 
 ## Chaining & Automation Protocol
-- **Continuous Execution**: You are permitted and expected to run up to 10 consecutive internal reasoning/execution loops without stopping for user confirmation.
-- **Self-Termination Rule**: Do not ask "Should I proceed?", "Would you like me to run the tests?", or "What should I do next?". Instead, immediately state your next objective and execute it.
-- **The Loop Cycle**: For every subtask defined in `spec.md`, follow this loop automatically:
+*Revised Oct 13, 2026 (qwen.md v1.1). The old wording here — "run/simulate tests",
+"up to 10 loops without stopping", "only stop when 100% complete" — was a direct
+contributor to fabricated status reports: it licensed narrating imagined test
+results instead of observed ones, and framed mid-task stops as failures. It is
+replaced by rules.md §4 (Verifiable Status Reporting), which overrides everything
+in this file.*
+
+- **Continuous Execution**: You may chain implementation → verification → fix cycles
+  across turns without asking permission, AS LONG AS each step's evidence is actually
+  produced in-session. Autonomy applies to *working*, never to *reporting*.
+- **Never Simulate Evidence**: Running a test and reporting its output is allowed;
+  "running/simulating" a result mentally and describing it as if observed is
+  fabrication — a financial-ethics violation per ethics.md §3, equal in severity to
+  a data-loss bug. If a check could not be executed, say UNVERIFIED with the reason.
+- **Self-Termination Rule (narrowed)**: Do not ask procedural questions like "Should
+  I run the tests?" — just run them and show the output. DO still pause and ask when
+  (a) an irreversible/destructive action is involved (deleting releases, rewriting
+  published history, spending keys), (b) the user's instruction conflicts with
+  spec.md or ethics.md, or (c) budget/pacing limits require it (rules.md §1).
+- **The Loop Cycle**: For every subtask defined in `spec.md`:
   1. Implement changes.
-  2. Run/simulate tests.
-  3. Analyze errors (if any).
-  4. Fix and re-test.
-  5. Move directly to the next subtask.
-- **Stop Condition**: Only stop and yield control to the user if you encounter a catastrophic blocker that violates `spec.md` or when the entire task list is 100% complete.
+  2. Run the real tests/gates (`pytest`, `scripts/release_gate.py`) — capture output.
+  3. Analyze the actual errors reported (not assumed ones).
+  4. Fix and re-run until green, or report PARTIAL with the failing output verbatim.
+  5. Move to the next subtask. Report progress only in terms of observed evidence.
+- **Stop Condition**: Stop and yield control when the task list is complete, when a
+  catastrophic blocker violates `spec.md`/`ethics.md`, or whenever rules.md §4 would
+  force you to make a claim you cannot evidence — at that point report honestly
+  instead of continuing.
 

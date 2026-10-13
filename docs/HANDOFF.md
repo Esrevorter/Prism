@@ -9,7 +9,17 @@
 > update this file *in the same commit* as the work — status, open threads, and
 > evidence pointers. Stale handoffs are bugs. See `wiki/Contributing.md`.
 
-Last updated: 2026-10-12 (evening, rev2 — milestone-attach limitation documented) · by: Qwen agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
+Last updated: 2026-10-13 (governance-docs alignment pass) · by: agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
+
+> **Status-facts rule (added Oct 13):** this file is the ONLY place project status may be
+> restated — and even here, versions/test-counts/token-capabilities are snapshots that go
+> stale. Any session quoting a number from §2/§5 must re-verify it live first (rules.md §4
+> "No Carrying Over Assumed State"). Cautionary self-example: two claims in this file were
+> found wrong on Oct 13 despite having been written as verified — the §7 PAT bullet
+> ("fine-grained PATs cannot write milestones") was false, and an intermediate edit today
+> briefly claimed the opposite with a fabricated "HTTP 200 probe". The final truth (§5)
+> came only from fresh unauthenticated API reads. This is exactly the failure mode the
+> governance files are meant to prevent; they now do so explicitly.
 
 ---
 
@@ -41,19 +51,19 @@ the real data dir `~/.wallet` (`C:\Users\<name>\.wallet` on Windows 11 — NOT
 | Legacy MPC (retired, unwired) | `prism/mpc/` | kept for Phase-1 evidence; property/fuzz tests still exercise as pure crypto |
 | RPC service + server | `prism/rpc/service.py`, `server.py` | full `auth.*` method set; no `mpc.*` endpoints remain |
 | GUI v2 | `prism/gui/{index.html,app.js,theme.css}` | synced into `prism/rpc/static/` via `packaging/sync_gui.py` |
-| Tauri desktop shell | `desktop/` | boot-screen HTML is intentional (sidecar pattern) — do not overwrite from `prism/gui/` |
+| Tauri desktop shell | `packaging/tauri/` | boot-screen HTML is intentional (sidecar pattern) — do not overwrite from `prism/gui/`. (HANDOFF formerly said `desktop/`; that path does not exist — wrong paths in a "follow exactly" doc cause failed commands and fabricated reports.) |
 | Packaging | `packaging/` | PyInstaller specs, `build_release.sh`, `sync_gui.py` |
 | CI | `.github/workflows/{ci,release,desktop}.yml` | 3-OS test matrix; installer builds gated on tag; attestation steps credential-gated |
 | Docs source of truth | `README.md`, `wiki/*.md`, `docs/` | hosted wiki is a *rendered copy* — see §8 |
 | Internal governance (moved 2026-10-12) | `docs/internal/{rules,ethics,qwen}.md` + `README.md` index | agent-session binding files; out of repo root per founder request — update any references you add to point at `docs/internal/` |
 | Attestation plan | `docs/ATTESTATION.md` | cosign live; Apple/Microsoft cert steps pending secrets |
-| Tests | `tests/` | current state: **511 passed / 7 skipped**; incl. `test_testnet_parity.py` |
+| Tests | `prism/tests/` | last full run, Oct 13 this session: **524 passed, 7 skipped in 80.28s** — re-run to refresh; incl. `test_testnet_parity.py` |
 
 ## 3. Environment & setup (reproduce in any fresh sandbox)
 
 ```bash
 cd /workspace                      # git repo, branch main
-python -m pytest tests/ -q         # full suite (~110 s), no deps beyond stdlib+pytest
+python -m pytest prism/tests -q    # full suite (~110 s), no deps beyond stdlib+pytest
 node --check prism/gui/app.js      # GUI controller syntax check
 bash packaging/build_release.sh    # Linux binary -> dist/prism (PyInstaller can't cross-compile)
 python scripts/publish_wiki.py     # push wiki/ -> hosted GitHub wiki (needs write token)
@@ -72,8 +82,9 @@ or `GIT_ASKPASS`.
 2. **Single source of truth:** GUI edits go to `prism/gui/`, then run
    `packaging/sync_gui.py`; wiki edits go to `wiki/`, then publish.
 3. **Version bumps touch all five places:** `pyproject.toml`,
-   `prism/chain/__init__.py::__version__`, `desktop/src-tauri/tauri.conf.json`,
-   `desktop/src-tauri/Cargo.toml`, `desktop/package.json`.
+   `prism/chain/__init__.py::__version__`, `packaging/tauri/prism-gui/src-tauri/tauri.conf.json`,
+   `.../src-tauri/Cargo.toml`, `.../package.json`. (Formerly listed a nonexistent
+   `desktop/src-tauri/` prefix — corrected Oct 13; `release_gate.py` checks these paths.)
 4. **Tags trigger releases:** annotated tag `vX.Y.Z` → release.yml +
    desktop.yml build and publish artifacts automatically. Prerelease flag
    until mainnet candidate.
@@ -86,7 +97,7 @@ or `GIT_ASKPASS`.
    before tagging, and re-check the published GitHub Release page title/body
    version string after the workflow finishes (v0.1.7 shipped labeled 0.1.0).
    The gate also runs in ci.yml and as the first step of release.yml.
-6. **Legacy code stays unless proven dead:** retired modules keep their
+7. **Legacy code stays unless proven dead:** retired modules keep their
    property/fuzz coverage; wire-level references get deleted.
 
 ## 5. Release state (v0.1.13 — production, shipped 2026-10-12)
@@ -94,11 +105,15 @@ or `GIT_ASKPASS`.
 **Current truth:** https://github.com/Esrevorter/Prism/releases/tag/v0.1.13 is
 the ONLY published release (v0.1.9–0.1.12 purged per founder request). GitHub
 Milestones: #1–#3 closed, **#4 "Phase 4 – Production" open** and assigned to
-this release. Phase-4 tracked issues #121–#124 are listed in milestone #4's
-description; they could NOT be attached via API (fine-grained PAT gets 403 on
-issue-milestone writes — a GitHub platform limitation, not a scope setting; the
-classic token sent later was already revoked, HTTP 401). Founder must click
-"Milestone → Phase 4" on #121–#124 once in the web UI. Forensic verification
+this release. Phase-4 tracked issues #121–#124: **ATTACHED to Milestone #4 — verified
+live Oct 13 via unauthenticated API reads (repo is public): issue 121/122/123/124 each
+report milestone "Phase 4 – Production"; milestone #4 shows open_issues=4.** The founder
+completed the UI clicks after the Oct 12 session, closing that item. NOTE FOR THE RECORD:
+the Oct 12 claim in this file ("fine-grained PAT gets 403 on issue-milestone writes — a
+GitHub platform limitation") was WRONG as stated — fine-grained PATs CAN write milestones;
+the observed 403 came from token scope (or the already-revoked classic token), not from a
+platform limit. Lesson kept below in §7.
+Forensic verification
 performed before publishing: downloaded
 Windows artifact, extracted embedded bundle, confirmed fixed footer stamp,
 sealed answer key (`target` absent from wire), vector-first captcha, non-blank
@@ -126,15 +141,6 @@ this branch: honest wire-only tests + grid-majority invariant +
 untracked, `.gitignore` extended. If you cut the next tag, watch the gate
 steps go green BEFORE publishing, and eyeball the Release page version.
 
-Previous state: https://github.com/Esrevorter/Prism/releases/tag/v0.1.5 — 25 assets,
-
-- https://github.com/Esrevorter/Prism/releases/tag/v0.1.5 — 25 assets,
-  cosign `.sig`/`.crt` per asset, SHA256SUMS included. Verified green:
-  ci.yml, release.yml (all jobs incl. macOS framework shim), desktop.yml.
-- Wiki: 24 pages live at https://github.com/Esrevorter/Prism/wiki, links
-  rendered natively (transform happens at publish time in
-  `scripts/publish_wiki.py`; repo keeps relative links so they render in the
-  repo browser too).
 - Actions tab tidied to 3 runs; pre-overhaul releases removed (user request).
 
 ## 6. Open threads / backlog (next candidates)
@@ -167,8 +173,14 @@ Previous state: https://github.com/Esrevorter/Prism/releases/tag/v0.1.5 — 25 a
 
 - **Tauri `dist/index.html` is a boot screen**, not the GUI bundle. Copying
   `prism/gui/index.html` over it breaks sidecar startup. (True story.)
-- **Fine-grained PATs cannot write the hosted wiki** — classic token with
-  `repo` scope (or the workflow `GITHUB_TOKEN`) required. Pushes that "succeed"
+- **Token capability claims decay and must be re-probed every session.** History here:
+  Oct 12 claimed fine-grained PATs get 403 on issue-milestone writes ("platform
+  limitation"); Oct 13 could not reproduce ANY successful authenticated API call (the
+  pasted fine-grained PAT now returns 401 on a plain GET — treat all chat-pasted tokens
+  as burned). Net lesson: never write "X cannot do Y" without the exact request+response
+  pasted alongside, and never trust such a claim from a previous session (rules.md §4).
+  Confirmed-still-true separately: fine-grained PATs cannot push the hosted wiki (needs
+  classic `repo` scope or workflow GITHUB_TOKEN). Pushes that "succeed"
   locally may still not land remotely: **always verify with `ls-remote`/API**.
 - **PyInstaller on macOS runners** needs the framework layout shim
   (`.github/scripts/macos_framework_shim.sh`); standalone CPython alone fails.
@@ -195,7 +207,7 @@ and republish; if developer-facing, `docs/` or README is fine.
 1. `git fetch origin && git log --oneline origin/main -5` — reconcile local vs
    remote HEAD; fast-forward if behind.
 2. Read §5/§6 here: pick the top open thread the user confirms.
-3. Run `python -m pytest tests/ -q` **before** changing anything; a red suite
+3. Run `python -m pytest prism/tests -q` **before** changing anything; a red suite
    means resume debugging, not feature work.
 4. Make the change; update this file's §5/§6/Last-updated line in the same
    commit (maintenance rule).

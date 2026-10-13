@@ -4,7 +4,8 @@ A tag is only cut AFTER the tree passes every gate below. v0.1.7/v0.1.8 shipped
 broken because tags were cut before version bumps landed and artifacts were
 force-added past .gitignore. Never repeat that.
 
-1. `python -m pytest prism/tests -q` -> must be fully green (523+ passed).
+1. `python -m pytest prism/tests -q` -> must be fully green (quote the observed count;
+   historical snapshots disagreed: 511 vs 524 — only a fresh run is evidence).
 2. `python scripts/release_gate.py` -> must exit 0. It checks:
    - no tracked build artifacts (`build/`, `dist/`, `__pycache__`, `prism-*-*/`)
    - ALL version sources agree (pyproject.toml, prism/chain/__init__.py,
@@ -15,7 +16,7 @@ force-added past .gitignore. Never repeat that.
    pyproject.toml, prism/chain/__init__.py, packaging/tauri/prism-gui/
    src-tauri/tauri.conf.json, .../src-tauri/Cargo.toml, .../package.json
    (and package-lock.json top-level "version" entries).
-4. `python scripts/sync_gui.py` after touching prism/gui/* so prism/rpc/static
+4. `python packaging/sync_gui.py` after touching prism/gui/* so prism/rpc/static
    matches (GUI class contract test compares both).
 5. Commit the bump; push to main; open/merge PR; CI must pass on the merge commit.
 6. ONLY THEN: `git tag vX.Y.Z <merge-commit>` and push the tag. The Release

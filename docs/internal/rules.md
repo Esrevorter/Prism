@@ -1,9 +1,27 @@
 # Tool Calling and Execution Rules
 
-> **Rules file version: v1.5 (2026-10-12).** This version stamp exists because releases
+> **Rules file version: v1.6 (2026-10-13).** This version stamp exists because releases
 > v0.1.6–v0.1.10 kept shipping "fixed" claims while the user saw an unchanged app — a rules
 > file with no version cannot be proven to have been loaded by any given session. If a fix
 > session's plan does not cite this number, its rules were probably not read at all.
+>
+> **v1.6 changelog (docs alignment pass, Oct 13):** deep-dive audit of the governance
+> files found concrete drift and one fabrication-inducing conflict. Fixed: (a) qwen.md
+> "Chaining & Automation Protocol" previously said "Run/simulate tests" and "do not
+> stop until 100% complete" — wording that licensed narrating imagined results; it now
+> defers to §4/ethics.md §3 (qwen.md v1.1). (b) Stale claims corrected across docs:
+> HANDOFF §7 still claimed fine-grained PATs cannot write issue milestones; direct
+> API read on Oct 13 confirmed #121–#124 ARE attached to Milestone #4 (so the old claim
+> was doubly wrong: attaching works, AND it had already been done); (c) Wrong paths in HANDOFF
+> §2/§3 (`tests/` → actual `prism/tests/`; `desktop/` → actual `packaging/tauri/`)
+> and RELEASE_CHECKLIST step 4 (`scripts/sync_gui.py` → actual `packaging/sync_gui.py`)
+> would make any agent following them fail a command and be tempted to "report it as
+> if run". (d) Contradictory test counts (511 vs 523+ vs 524) replaced with a rule:
+> quote only the count from the run you just observed. (e) Precedence chain made
+> explicit everywhere it is stated (see internal/README.md): spec.md > ethics.md §3 ≈
+> rules.md §4 (integrity contract, overrides all) > rules.md execution limits >
+> qwen.md pacing numbers. The old blanket "qwen.md wins" clause is narrowed to pacing
+> NUMBERS only — it must never override integrity rules.
 >
 > **v1.5 changelog:** v0.1.13 brand pass — the shipped icon files were a uniform near-black
 > tile (verified: single colour #0D1117 across all 262k pixels, zero glyph), which is why the
@@ -31,8 +49,9 @@
 
 > **Binding companion files (re-read before every substantive task):** `docs/internal/qwen.md`
 > (anti-burst pacing — one tool call per turn, sequential only, ≥20 s inter-request;
-> Oct 11 addendum: if this file and `docs/internal/qwen.md` ever disagree on pacing numbers,
-> `docs/internal/qwen.md` wins),
+> Oct 11 addendum, narrowed Oct 13: if this file and `docs/internal/qwen.md` ever disagree
+> on *pacing numbers*, qwen.md wins — but qwen.md can NEVER override §4 or ethics.md §3
+> integrity rules; precedence chain lives in `docs/internal/README.md`),
 > `docs/internal/ethics.md` (financial-ethics coding & reporting standard — fail-closed money handling,
 > proof-or-UNVERIFIED status claims). rules.md §4 and ethics.md §3 together form the
 > integrity contract: no status message may be sent without a self-audit against observed
