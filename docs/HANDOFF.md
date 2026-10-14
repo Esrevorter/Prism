@@ -9,7 +9,7 @@
 > update this file *in the same commit* as the work — status, open threads, and
 > evidence pointers. Stale handoffs are bugs. See `wiki/Contributing.md`.
 
-Last updated: 2026-10-13 (correction to prior triage: the env-var error comes from the coder.qwen.ai platform's own "set env var" hook at session start — NOT from repo docs and NOT from shell-tool usage; §3/§7/§9 rewritten so no doc instructs agents to set/persist tokens via env vars. Auth path for publish/PR = the OAuth connection only) · by: agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
+Last updated: 2026-10-14 (§3 credentials policy amended per owner decision: write auth = user-managed fine-grained PAT configured in coder.qwen.ai Settings → Environments → "Prism" (env var `GH_TOKEN` + setup script registering it with git; see §3), OAuth connection as alternative — agents still never handle token values directly. Prior Oct-13 correction retained: the session-start env-var error comes from the coder.qwen.ai platform's own "set env var" hook, not repo docs) · by: agent session · release: **v0.1.13** (production, GitHub Milestone #4 "Phase 4 – Production")
 
 > **Status-facts rule (added Oct 13):** this file is the ONLY place project status may be
 > restated — and even here, versions/test-counts/token-capabilities are snapshots that go
@@ -69,13 +69,29 @@ bash packaging/build_release.sh    # Linux binary -> dist/prism (PyInstaller can
 python scripts/publish_wiki.py     # push wiki/ -> hosted GitHub wiki (needs write token)
 ```
 
-Credentials: agents working in this repo must NOT set, export, or persist any
-credential themselves — no `export GITHUB_TOKEN=…`, no token files such as
-`~/.prism-env`, no tokens embedded in remote URLs or `.git/config`. GitHub
-publish/PR operations authenticate through the platform's configured **OAuth
-connection** only; if that connection is unavailable in a session, run the
-unauthenticated reads (`git ls-remote` works on this public repo) and report
-write-side status as UNVERIFIED — never fabricate the push (rules.md §4).
+Credentials (policy amended Oct 14): the sanctioned write-auth path for
+coder.qwen.ai sessions is a **user-managed fine-grained PAT injected via the
+platform UI**, not typed into any agent command. Configure under
+**Settings → Environments → Edit "Prism"**:
+- *Environment variables:* one entry — `GH_TOKEN=<fine-grained PAT>` (repo-scoped,
+  Contents: Read+Write, Pull requests: Read+Write; no more permissions than needed).
+- *Setup script:* register the token with git so pushes/PRs work all session:
+
+  ```bash
+  git config --global credential.helper store
+  printf 'https://x-access-token:%s@github.com\n' "$GH_TOKEN" > ~/.git-credentials
+  chmod 600 ~/.git-credentials
+  unset GH_TOKEN   # keep it out of the shell environment once registered
+  ```
+
+Rules that still apply: agents must NEVER hardcode, echo, commit, or log the
+token value; no tokens embedded in remote URLs or `.git/config`; the token lives
+only in the platform UI settings and `$HOME/.git-credentials` (sandbox-local,
+never committed). Keep secrets out of the repo itself — do not add a `.env` file
+with credentials to version control. If neither the PAT nor an OAuth connection
+is available in a session, run unauthenticated reads (`git ls-remote` works on
+this public repo) and report write-side status as UNVERIFIED — never fabricate
+the push (rules.md §4).
 
 **Session-start env-var error — platform bug, not a repo bug (added Oct 13,
 corrected same day):** sessions on coder.qwen.ai may open with
@@ -221,11 +237,12 @@ steps go green BEFORE publishing, and eyeball the Release page version.
   any prior process exists, so it errors — then the connection reset kills the
   first remote read. Workaround for agents: ignore the message, re-run the read
   (`git ls-remote` works unauthenticated on this public repo), and authenticate
-  publish/PR steps through the OAuth connection — never try to set/persist the
-  variable yourself (§3). Upstream fix belongs to coder.qwen.ai: apply session
-  env vars as a foreground export at shell creation, not a log-fetch on a
-  nonexistent process. Removing the variable from the UI settings also stops the
-  error until then.
+  publish/PR steps via the UI-configured `GH_TOKEN` + setup script (§3) or the
+  OAuth connection — never type token values into commands yourself. Upstream
+  fix belongs to coder.qwen.ai: apply session env vars as a foreground export
+  at shell creation, not a log-fetch on a nonexistent process. Removing the
+  variable from the UI settings also stops the error until then (at the cost of
+  losing write auth).
 
 ## 8. Documentation flow
 
@@ -243,10 +260,11 @@ and republish; if developer-facing, `docs/` or README is fine.
    remote HEAD; fast-forward if behind. If the session opened with the platform's
    "Failed to set env var … No previous running command to retrieve logs from"
    message (see §3), that is a coder.qwen.ai startup-hook error, not an auth
-   failure and not caused by this repo — do NOT attempt to set or persist any
-   environment variable yourself. Retry the read; use unauthenticated
+   failure and not caused by this repo — do NOT type token values into commands
+   yourself. Retry the read; use unauthenticated
    `git ls-remote` (works on this public repo) if needed, and perform all
-   write-side steps (push/publish/PR) through the configured OAuth connection.
+   write-side steps (push/publish/PR) via the UI-configured `GH_TOKEN` + setup
+   script (§3) or the configured OAuth connection.
    Mark write-side status UNVERIFIED until an authenticated operation succeeds.
 2. Read §5/§6 here: pick the top open thread the user confirms.
 3. Run `python -m pytest prism/tests -q` **before** changing anything; a red suite
