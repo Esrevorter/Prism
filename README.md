@@ -1,6 +1,6 @@
 <div align="center">
 
-<img width="100%" alt="Prism — clarity on your terms" src="https://placehold.co/1200x280/1a1033/e9e4ff/png?text=%F0%9F%94%B9+Prism++—++Private+by+default+%C2%B7+Forgiving+by+design+%C2%B7+Intelligent%2C+never+intrusive&font=Inter">
+<a href="https://github.com/Esrevorter/Prism/releases/latest"><img width="100%" alt="Prism — clarity on your terms" src="docs/assets/prism-banner.png"></a>
 
 # 🔹 Prism
 
